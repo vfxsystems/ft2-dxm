@@ -1,0 +1,359 @@
+// Auto-generated FT2 GUI layout (schema-based)
+#include <stdio.h>
+#include "exported_gui.h"
+#include "shared/ft2_ui_schema.h"
+
+static const ft2_ui_pushbutton_desc_t exported_gui_pushbuttons[EXPORTED_GUI_PB_COUNT] = {
+    { EXPORTED_GUI_PB_BASE + 0, "mixer_exit", 572, 10, 50, 16, 0, 0, "Exit", NULL, EXPORTED_GUI_ACTION_MIXER_EXIT_4_DOWN, EXPORTED_GUI_ACTION_MIXER_EXIT_4_UP },
+    { EXPORTED_GUI_PB_BASE + 1, "mix_master_up", 488, 40, 40, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_MASTER_UP_6_DOWN, EXPORTED_GUI_ACTION_MIX_MASTER_UP_6_UP },
+    { EXPORTED_GUI_PB_BASE + 2, "mix_master_dn", 488, 132, 40, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_MASTER_DN_7_DOWN, EXPORTED_GUI_ACTION_MIX_MASTER_DN_7_UP },
+    { EXPORTED_GUI_PB_BASE + 3, "mix_master_fx", 488, 144, 40, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_MASTER_FX_8_DOWN, EXPORTED_GUI_ACTION_MIX_MASTER_FX_8_UP },
+    { EXPORTED_GUI_PB_BASE + 4, "mix_gain_up_0", 13, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_0_14_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_0_14_UP },
+    { EXPORTED_GUI_PB_BASE + 5, "mix_gain_dn_0", 13, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_0_15_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_0_15_UP },
+    { EXPORTED_GUI_PB_BASE + 6, "mix_fx_0", 13, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_0_16_DOWN, EXPORTED_GUI_ACTION_MIX_FX_0_16_UP },
+    { EXPORTED_GUI_PB_BASE + 7, "mix_gain_up_1", 42, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_1_22_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_1_22_UP },
+    { EXPORTED_GUI_PB_BASE + 8, "mix_gain_dn_1", 42, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_1_23_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_1_23_UP },
+    { EXPORTED_GUI_PB_BASE + 9, "mix_fx_1", 42, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_1_24_DOWN, EXPORTED_GUI_ACTION_MIX_FX_1_24_UP },
+    { EXPORTED_GUI_PB_BASE + 10, "mix_gain_up_2", 71, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_2_30_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_2_30_UP },
+    { EXPORTED_GUI_PB_BASE + 11, "mix_gain_dn_2", 71, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_2_31_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_2_31_UP },
+    { EXPORTED_GUI_PB_BASE + 12, "mix_fx_2", 71, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_2_32_DOWN, EXPORTED_GUI_ACTION_MIX_FX_2_32_UP },
+    { EXPORTED_GUI_PB_BASE + 13, "mix_gain_up_3", 100, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_3_38_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_3_38_UP },
+    { EXPORTED_GUI_PB_BASE + 14, "mix_gain_dn_3", 100, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_3_39_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_3_39_UP },
+    { EXPORTED_GUI_PB_BASE + 15, "mix_fx_3", 100, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_3_40_DOWN, EXPORTED_GUI_ACTION_MIX_FX_3_40_UP },
+    { EXPORTED_GUI_PB_BASE + 16, "mix_gain_up_4", 129, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_4_46_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_4_46_UP },
+    { EXPORTED_GUI_PB_BASE + 17, "mix_gain_dn_4", 129, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_4_47_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_4_47_UP },
+    { EXPORTED_GUI_PB_BASE + 18, "mix_fx_4", 129, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_4_48_DOWN, EXPORTED_GUI_ACTION_MIX_FX_4_48_UP },
+    { EXPORTED_GUI_PB_BASE + 19, "mix_gain_up_5", 158, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_5_54_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_5_54_UP },
+    { EXPORTED_GUI_PB_BASE + 20, "mix_gain_dn_5", 158, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_5_55_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_5_55_UP },
+    { EXPORTED_GUI_PB_BASE + 21, "mix_fx_5", 158, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_5_56_DOWN, EXPORTED_GUI_ACTION_MIX_FX_5_56_UP },
+    { EXPORTED_GUI_PB_BASE + 22, "mix_gain_up_6", 187, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_6_62_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_6_62_UP },
+    { EXPORTED_GUI_PB_BASE + 23, "mix_gain_dn_6", 187, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_6_63_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_6_63_UP },
+    { EXPORTED_GUI_PB_BASE + 24, "mix_fx_6", 187, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_6_64_DOWN, EXPORTED_GUI_ACTION_MIX_FX_6_64_UP },
+    { EXPORTED_GUI_PB_BASE + 25, "mix_gain_up_7", 216, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_7_70_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_7_70_UP },
+    { EXPORTED_GUI_PB_BASE + 26, "mix_gain_dn_7", 216, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_7_71_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_7_71_UP },
+    { EXPORTED_GUI_PB_BASE + 27, "mix_fx_7", 216, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_7_72_DOWN, EXPORTED_GUI_ACTION_MIX_FX_7_72_UP },
+    { EXPORTED_GUI_PB_BASE + 28, "mix_gain_up_8", 245, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_8_78_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_8_78_UP },
+    { EXPORTED_GUI_PB_BASE + 29, "mix_gain_dn_8", 245, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_8_79_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_8_79_UP },
+    { EXPORTED_GUI_PB_BASE + 30, "mix_fx_8", 245, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_8_80_DOWN, EXPORTED_GUI_ACTION_MIX_FX_8_80_UP },
+    { EXPORTED_GUI_PB_BASE + 31, "mix_gain_up_9", 274, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_9_86_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_9_86_UP },
+    { EXPORTED_GUI_PB_BASE + 32, "mix_gain_dn_9", 274, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_9_87_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_9_87_UP },
+    { EXPORTED_GUI_PB_BASE + 33, "mix_fx_9", 274, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_9_88_DOWN, EXPORTED_GUI_ACTION_MIX_FX_9_88_UP },
+    { EXPORTED_GUI_PB_BASE + 34, "mix_gain_up_10", 303, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_10_94_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_10_94_UP },
+    { EXPORTED_GUI_PB_BASE + 35, "mix_gain_dn_10", 303, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_10_95_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_10_95_UP },
+    { EXPORTED_GUI_PB_BASE + 36, "mix_fx_10", 303, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_10_96_DOWN, EXPORTED_GUI_ACTION_MIX_FX_10_96_UP },
+    { EXPORTED_GUI_PB_BASE + 37, "mix_gain_up_11", 332, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_11_102_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_11_102_UP },
+    { EXPORTED_GUI_PB_BASE + 38, "mix_gain_dn_11", 332, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_11_103_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_11_103_UP },
+    { EXPORTED_GUI_PB_BASE + 39, "mix_fx_11", 332, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_11_104_DOWN, EXPORTED_GUI_ACTION_MIX_FX_11_104_UP },
+    { EXPORTED_GUI_PB_BASE + 40, "mix_gain_up_12", 361, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_12_110_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_12_110_UP },
+    { EXPORTED_GUI_PB_BASE + 41, "mix_gain_dn_12", 361, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_12_111_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_12_111_UP },
+    { EXPORTED_GUI_PB_BASE + 42, "mix_fx_12", 361, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_12_112_DOWN, EXPORTED_GUI_ACTION_MIX_FX_12_112_UP },
+    { EXPORTED_GUI_PB_BASE + 43, "mix_gain_up_13", 390, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_13_118_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_13_118_UP },
+    { EXPORTED_GUI_PB_BASE + 44, "mix_gain_dn_13", 390, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_13_119_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_13_119_UP },
+    { EXPORTED_GUI_PB_BASE + 45, "mix_fx_13", 390, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_13_120_DOWN, EXPORTED_GUI_ACTION_MIX_FX_13_120_UP },
+    { EXPORTED_GUI_PB_BASE + 46, "mix_gain_up_14", 419, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_14_126_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_14_126_UP },
+    { EXPORTED_GUI_PB_BASE + 47, "mix_gain_dn_14", 419, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_14_127_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_14_127_UP },
+    { EXPORTED_GUI_PB_BASE + 48, "mix_fx_14", 419, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_14_128_DOWN, EXPORTED_GUI_ACTION_MIX_FX_14_128_UP },
+    { EXPORTED_GUI_PB_BASE + 49, "mix_gain_up_15", 448, 40, 23, 12, 0, 0, "U", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_UP_15_134_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_UP_15_134_UP },
+    { EXPORTED_GUI_PB_BASE + 50, "mix_gain_dn_15", 448, 132, 23, 12, 0, 0, "D", NULL, EXPORTED_GUI_ACTION_MIX_GAIN_DN_15_135_DOWN, EXPORTED_GUI_ACTION_MIX_GAIN_DN_15_135_UP },
+    { EXPORTED_GUI_PB_BASE + 51, "mix_fx_15", 448, 144, 23, 12, 0, 0, "FX", NULL, EXPORTED_GUI_ACTION_MIX_FX_15_136_DOWN, EXPORTED_GUI_ACTION_MIX_FX_15_136_UP },
+};
+
+static const ft2_ui_framebox_desc_t exported_gui_frameboxes[EXPORTED_GUI_FB_COUNT] = {
+    { EXPORTED_GUI_FB_BASE + 0, 4, 4, 474, 200, 0, false, "mixer_box" },
+    { EXPORTED_GUI_FB_BASE + 1, 4, 190, 624, 206, 0, false, "dsp_box" },
+    { EXPORTED_GUI_FB_BASE + 2, 86, 210, 390, 186, 0, false, "params" },
+};
+
+static const ft2_ui_mixer_strip_desc_t exported_gui_mixer_strips[EXPORTED_GUI_MIXER_STRIP_COUNT] = {
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 0, "mix_strip_0", 12, 9, 25, 172, 0 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 1, "mix_strip_1", 41, 9, 25, 172, 1 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 2, "mix_strip_2", 70, 9, 25, 172, 2 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 3, "mix_strip_3", 99, 9, 25, 172, 3 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 4, "mix_strip_4", 128, 9, 25, 172, 4 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 5, "mix_strip_5", 157, 9, 25, 172, 5 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 6, "mix_strip_6", 186, 9, 25, 172, 6 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 7, "mix_strip_7", 215, 9, 25, 172, 7 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 8, "mix_strip_8", 244, 9, 25, 172, 8 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 9, "mix_strip_9", 273, 9, 25, 172, 9 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 10, "mix_strip_10", 302, 9, 25, 172, 10 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 11, "mix_strip_11", 331, 9, 25, 172, 11 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 12, "mix_strip_12", 360, 9, 25, 172, 12 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 13, "mix_strip_13", 389, 9, 25, 172, 13 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 14, "mix_strip_14", 418, 9, 25, 172, 14 },
+    { EXPORTED_GUI_MIXER_STRIP_BASE + 15, "mix_strip_15", 447, 9, 25, 172, 15 },
+};
+
+static const ft2_ui_mixer_gain_desc_t exported_gui_mixer_gains[EXPORTED_GUI_MIXER_GAIN_COUNT] = {
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 0, "mix_gain_0", 14, 52, 20, 80, 0 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 1, "mix_gain_1", 43, 52, 20, 80, 1 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 2, "mix_gain_2", 72, 52, 20, 80, 2 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 3, "mix_gain_3", 101, 52, 20, 80, 3 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 4, "mix_gain_4", 130, 52, 20, 80, 4 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 5, "mix_gain_5", 159, 52, 20, 80, 5 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 6, "mix_gain_6", 188, 52, 20, 80, 6 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 7, "mix_gain_7", 217, 52, 20, 80, 7 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 8, "mix_gain_8", 246, 52, 20, 80, 8 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 9, "mix_gain_9", 275, 52, 20, 80, 9 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 10, "mix_gain_10", 304, 52, 20, 80, 10 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 11, "mix_gain_11", 333, 52, 20, 80, 11 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 12, "mix_gain_12", 362, 52, 20, 80, 12 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 13, "mix_gain_13", 391, 52, 20, 80, 13 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 14, "mix_gain_14", 420, 52, 20, 80, 14 },
+    { EXPORTED_GUI_MIXER_GAIN_BASE + 15, "mix_gain_15", 449, 52, 20, 80, 15 },
+};
+
+static const ft2_ui_mixer_pan_desc_t exported_gui_mixer_pans[EXPORTED_GUI_MIXER_PAN_COUNT] = {
+    { EXPORTED_GUI_MIXER_PAN_BASE + 0, "mix_pan_0", 14, 33, 20, 7, 0 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 1, "mix_pan_1", 43, 33, 20, 7, 1 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 2, "mix_pan_2", 72, 33, 20, 7, 2 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 3, "mix_pan_3", 101, 33, 20, 7, 3 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 4, "mix_pan_4", 130, 33, 20, 7, 4 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 5, "mix_pan_5", 159, 33, 20, 7, 5 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 6, "mix_pan_6", 188, 33, 20, 7, 6 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 7, "mix_pan_7", 217, 33, 20, 7, 7 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 8, "mix_pan_8", 246, 33, 20, 7, 8 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 9, "mix_pan_9", 275, 33, 20, 7, 9 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 10, "mix_pan_10", 304, 33, 20, 7, 10 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 11, "mix_pan_11", 333, 33, 20, 7, 11 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 12, "mix_pan_12", 362, 33, 20, 7, 12 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 13, "mix_pan_13", 391, 33, 20, 7, 13 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 14, "mix_pan_14", 420, 33, 20, 7, 14 },
+    { EXPORTED_GUI_MIXER_PAN_BASE + 15, "mix_pan_15", 449, 33, 20, 7, 15 },
+};
+
+static const ft2_ui_mixer_mute_desc_t exported_gui_mixer_mutes[EXPORTED_GUI_MIXER_MUTE_COUNT] = {
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 0, "mix_mute_0", 13, 156, 23, 12, 0 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 1, "mix_mute_1", 42, 156, 23, 12, 1 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 2, "mix_mute_2", 71, 156, 23, 12, 2 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 3, "mix_mute_3", 100, 156, 23, 12, 3 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 4, "mix_mute_4", 129, 156, 23, 12, 4 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 5, "mix_mute_5", 158, 156, 23, 12, 5 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 6, "mix_mute_6", 187, 156, 23, 12, 6 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 7, "mix_mute_7", 216, 156, 23, 12, 7 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 8, "mix_mute_8", 245, 156, 23, 12, 8 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 9, "mix_mute_9", 274, 156, 23, 12, 9 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 10, "mix_mute_10", 303, 156, 23, 12, 10 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 11, "mix_mute_11", 332, 156, 23, 12, 11 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 12, "mix_mute_12", 361, 156, 23, 12, 12 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 13, "mix_mute_13", 390, 156, 23, 12, 13 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 14, "mix_mute_14", 419, 156, 23, 12, 14 },
+    { EXPORTED_GUI_MIXER_MUTE_BASE + 15, "mix_mute_15", 448, 156, 23, 12, 15 },
+};
+
+static const ft2_ui_mixer_scope_desc_t exported_gui_mixer_scopes[EXPORTED_GUI_MIXER_SCOPE_COUNT] = {
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 0, "mix_scope_0", 14, 11, 20, 20, 0 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 1, "mix_scope_1", 43, 11, 20, 20, 1 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 2, "mix_scope_2", 72, 11, 20, 20, 2 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 3, "mix_scope_3", 101, 11, 20, 20, 3 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 4, "mix_scope_4", 130, 11, 20, 20, 4 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 5, "mix_scope_5", 159, 11, 20, 20, 5 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 6, "mix_scope_6", 188, 11, 20, 20, 6 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 7, "mix_scope_7", 217, 11, 20, 20, 7 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 8, "mix_scope_8", 246, 11, 20, 20, 8 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 9, "mix_scope_9", 275, 11, 20, 20, 9 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 10, "mix_scope_10", 304, 11, 20, 20, 10 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 11, "mix_scope_11", 333, 11, 20, 20, 11 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 12, "mix_scope_12", 362, 11, 20, 20, 12 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 13, "mix_scope_13", 391, 11, 20, 20, 13 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 14, "mix_scope_14", 420, 11, 20, 20, 14 },
+    { EXPORTED_GUI_MIXER_SCOPE_BASE + 15, "mix_scope_15", 449, 11, 20, 20, 15 },
+};
+
+static const ft2_ui_mixer_master_desc_t exported_gui_mixer_masters[EXPORTED_GUI_MIXER_MASTER_COUNT] = {
+    { EXPORTED_GUI_MIXER_MASTER_BASE + 0, "mix_master", 488, 52, 40, 80 },
+};
+
+static const ft2_ui_dsp_slot_desc_t exported_gui_dsp_slots[EXPORTED_GUI_DSP_SLOT_COUNT] = {
+    { EXPORTED_GUI_DSP_SLOT_BASE + 0, "dsp_slot_0", 10, 196, 72, 14, 0 },
+    { EXPORTED_GUI_DSP_SLOT_BASE + 1, "dsp_slot_1", 10, 210, 72, 14, 1 },
+    { EXPORTED_GUI_DSP_SLOT_BASE + 2, "dsp_slot_2", 10, 224, 72, 14, 2 },
+    { EXPORTED_GUI_DSP_SLOT_BASE + 3, "dsp_slot_3", 10, 238, 72, 14, 3 },
+};
+
+static const ft2_ui_dsp_menu_desc_t exported_gui_dsp_menus[EXPORTED_GUI_DSP_MENU_COUNT] = {
+    { EXPORTED_GUI_DSP_MENU_BASE + 0, "dsp_menu", 10, 210, 72, 136 },
+};
+
+static const ft2_ui_dsp_param_desc_t exported_gui_dsp_params[EXPORTED_GUI_DSP_PARAM_COUNT] = {
+    { EXPORTED_GUI_DSP_PARAM_BASE + 0, "dsp_param_0", 96, 222, 360, 11, 0 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 1, "dsp_param_1", 96, 244, 360, 11, 1 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 2, "dsp_param_2", 96, 266, 360, 11, 2 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 3, "dsp_param_3", 96, 288, 360, 11, 3 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 4, "dsp_param_4", 96, 310, 360, 11, 4 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 5, "dsp_param_5", 96, 332, 360, 11, 5 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 6, "dsp_param_6", 96, 354, 360, 11, 6 },
+    { EXPORTED_GUI_DSP_PARAM_BASE + 7, "dsp_param_7", 96, 376, 360, 11, 7 },
+};
+
+const ft2_ui_layout_desc_t exported_gui_layout = {
+    "exported_gui",
+    FT2_UI_SCHEMA_VERSION,
+    { EXPORTED_GUI_PB_BASE, EXPORTED_GUI_PB_COUNT },
+#if EXPORTED_GUI_PB_COUNT > 0
+    exported_gui_pushbuttons,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_CB_BASE, EXPORTED_GUI_CB_COUNT },
+#if EXPORTED_GUI_CB_COUNT > 0
+    exported_gui_checkboxes,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_RB_BASE, EXPORTED_GUI_RB_COUNT },
+#if EXPORTED_GUI_RB_COUNT > 0
+    exported_gui_radiobuttons,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_SB_BASE, EXPORTED_GUI_SB_COUNT },
+#if EXPORTED_GUI_SB_COUNT > 0
+    exported_gui_scrollbars,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TB_BASE, EXPORTED_GUI_TB_COUNT },
+#if EXPORTED_GUI_TB_COUNT > 0
+    exported_gui_textboxes,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_FB_BASE, EXPORTED_GUI_FB_COUNT },
+#if EXPORTED_GUI_FB_COUNT > 0
+    exported_gui_frameboxes,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_BMP_BASE, EXPORTED_GUI_BMP_COUNT },
+#if EXPORTED_GUI_BMP_COUNT > 0
+    exported_gui_bitmaps,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_WAVE_BASE, EXPORTED_GUI_WAVE_COUNT },
+#if EXPORTED_GUI_WAVE_COUNT > 0
+    exported_gui_waveform_views,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_BUTTON_BASE, EXPORTED_GUI_TF_BUTTON_COUNT },
+#if EXPORTED_GUI_TF_BUTTON_COUNT > 0
+    exported_gui_tf_buttons,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_TOGGLE_BASE, EXPORTED_GUI_TF_TOGGLE_COUNT },
+#if EXPORTED_GUI_TF_TOGGLE_COUNT > 0
+    exported_gui_tf_toggles,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_LABEL_BASE, EXPORTED_GUI_TF_LABEL_COUNT },
+#if EXPORTED_GUI_TF_LABEL_COUNT > 0
+    exported_gui_tf_labels,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_ROTARY_BASE, EXPORTED_GUI_TF_ROTARY_COUNT },
+#if EXPORTED_GUI_TF_ROTARY_COUNT > 0
+    exported_gui_tf_rotaries,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_LINEAR_BASE, EXPORTED_GUI_TF_LINEAR_COUNT },
+#if EXPORTED_GUI_TF_LINEAR_COUNT > 0
+    exported_gui_tf_linears,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_COMBO_BASE, EXPORTED_GUI_TF_COMBO_COUNT },
+#if EXPORTED_GUI_TF_COMBO_COUNT > 0
+    exported_gui_tf_combos,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_METER_BASE, EXPORTED_GUI_TF_METER_COUNT },
+#if EXPORTED_GUI_TF_METER_COUNT > 0
+    exported_gui_tf_meters,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_PARAM_BASE, EXPORTED_GUI_TF_PARAM_COUNT },
+#if EXPORTED_GUI_TF_PARAM_COUNT > 0
+    exported_gui_tf_params,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_ENV_BASE, EXPORTED_GUI_TF_ENV_COUNT },
+#if EXPORTED_GUI_TF_ENV_COUNT > 0
+    exported_gui_tf_envs,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_TF_GROUP_BASE, EXPORTED_GUI_TF_GROUP_COUNT },
+#if EXPORTED_GUI_TF_GROUP_COUNT > 0
+    exported_gui_tf_groups,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_MIXER_STRIP_BASE, EXPORTED_GUI_MIXER_STRIP_COUNT },
+#if EXPORTED_GUI_MIXER_STRIP_COUNT > 0
+    exported_gui_mixer_strips,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_MIXER_GAIN_BASE, EXPORTED_GUI_MIXER_GAIN_COUNT },
+#if EXPORTED_GUI_MIXER_GAIN_COUNT > 0
+    exported_gui_mixer_gains,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_MIXER_PAN_BASE, EXPORTED_GUI_MIXER_PAN_COUNT },
+#if EXPORTED_GUI_MIXER_PAN_COUNT > 0
+    exported_gui_mixer_pans,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_MIXER_MUTE_BASE, EXPORTED_GUI_MIXER_MUTE_COUNT },
+#if EXPORTED_GUI_MIXER_MUTE_COUNT > 0
+    exported_gui_mixer_mutes,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_MIXER_SCOPE_BASE, EXPORTED_GUI_MIXER_SCOPE_COUNT },
+#if EXPORTED_GUI_MIXER_SCOPE_COUNT > 0
+    exported_gui_mixer_scopes,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_MIXER_MASTER_BASE, EXPORTED_GUI_MIXER_MASTER_COUNT },
+#if EXPORTED_GUI_MIXER_MASTER_COUNT > 0
+    exported_gui_mixer_masters,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_DSP_WINDOW_BASE, EXPORTED_GUI_DSP_WINDOW_COUNT },
+#if EXPORTED_GUI_DSP_WINDOW_COUNT > 0
+    exported_gui_dsp_windows,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_DSP_SLOT_BASE, EXPORTED_GUI_DSP_SLOT_COUNT },
+#if EXPORTED_GUI_DSP_SLOT_COUNT > 0
+    exported_gui_dsp_slots,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_DSP_MENU_BASE, EXPORTED_GUI_DSP_MENU_COUNT },
+#if EXPORTED_GUI_DSP_MENU_COUNT > 0
+    exported_gui_dsp_menus,
+#else
+    NULL,
+#endif
+    { EXPORTED_GUI_DSP_PARAM_BASE, EXPORTED_GUI_DSP_PARAM_COUNT },
+#if EXPORTED_GUI_DSP_PARAM_COUNT > 0
+    exported_gui_dsp_params,
+#else
+    NULL
+#endif
+};

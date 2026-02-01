@@ -1,0 +1,25 @@
+[TF4_SYNTH] ft2_synth_init() called with samplerate=96000
+[TF4_SYNTH] Persistent parameter storage initialized for 128 instruments
+[TF4_SYNTH] Creating Tunefish synth engine...
+[TF4_SYNTH] Tunefish synth created successfully
+[TF4_SYNTH] Initializing Tunefish synth with samplerate 96000...
+[TF4_SYNTH] Tunefish synth initialized
+[TF4_SYNTH] Cleared 128 instrument slots
+[TF4_SYNTH] Allocated audio buffers: 30001 samples (max)
+[TF4_SYNTH] Tunefish4 synth initialization complete!
+🌊 [WIDGET] Creating waveform view widget 'waveform_view' at (210,100) 400x120
+🌊 [LAYOUT] Created waveform view widget: 0x5cfbc96d75a0
+✅ [CALLBACKS] All widget value change callbacks connected to parameter system
+Tunefish Complete Layout created with 175 total widgets
+Tunefish GUI system initialized successfully (FT2 SDL drawing)
+- Modern Layout: Created with 274 widgets
+- Drawing System: Using FT2 native SDL routines
+Dexed UI layout integration ready (will use main instance)
+[TF4_SYNTH] ft2_synth_shutdown() called
+[TF4_SYNTH] Freed left audio buffer
+[TF4_SYNTH] Freed right audio buffer
+[TF4_SYNTH] Freed 0 active instrument instances
+[TF4_SYNTH] Destroyed Tunefish synth engine
+[TF4_SYNTH] Tunefish4 synth shutdown complete
+Tunefish Complete Layout destroyed
+Tunefish GUI integration cleaned up
