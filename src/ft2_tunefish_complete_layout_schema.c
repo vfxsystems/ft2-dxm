@@ -1,0 +1,359 @@
+// Auto-generated FT2 GUI layout (schema-based)
+#include <stdio.h>
+#include "ft2_tunefish_complete_layout_schema.h"
+#include "shared/ft2_ui_schema.h"
+
+static const ft2_ui_bitmap_desc_t ft2_tunefish_complete_layout_bitmaps[FT2_TUNEFISH_COMPLETE_LAYOUT_BMP_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_BMP_BASE + 0, 46, 120, 171, 100, 1, 19 },
+};
+
+static const ft2_ui_waveform_view_desc_t ft2_tunefish_complete_layout_waveform_views[FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_BASE + 0, "waveform_view", 216, 104, 400, 120, 1 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_BASE + 1, "adsr1_env", 321, 322, 118, 46, 1 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_BASE + 2, "adsr2_env", 476, 322, 118, 46, 1 },
+};
+
+static const ft2_ui_tf_button_desc_t ft2_tunefish_complete_layout_tf_buttons[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 0, "page_toggle_btn", 520, 8, 48, 22, 0, "Page" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 1, "exit_btn", 576, 8, 48, 22, 0, "Exit" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 2, "lfo1_shape_1", 18, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 3, "lfo1_shape_2", 36, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 4, "lfo1_shape_3", 54, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 5, "lfo1_shape_4", 72, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 6, "lfo1_shape_5", 90, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 7, "lfo2_shape_1", 173, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 8, "lfo2_shape_2", 191, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 9, "lfo2_shape_3", 209, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 10, "lfo2_shape_4", 227, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 11, "lfo2_shape_5", 245, 369, 18, 14, 1, NULL },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 12, "unisono_1", 18, 100, 18, 14, 1, "1" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 13, "unisono_2", 36, 100, 18, 14, 1, "2" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 14, "unisono_3", 54, 100, 18, 14, 1, "3" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 15, "unisono_4", 72, 100, 18, 14, 1, "4" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 16, "unisono_5", 90, 100, 18, 14, 1, "5" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 17, "unisono_6", 108, 100, 18, 14, 1, "6" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 18, "unisono_7", 126, 100, 18, 14, 1, "7" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 19, "unisono_8", 144, 100, 18, 14, 1, "8" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 20, "unisono_9", 162, 100, 18, 14, 1, "9" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 21, "unisono_10", 180, 100, 18, 14, 1, "10" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 22, "octave__4", 18, 116, 18, 14, 1, "-4" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 23, "octave__3", 36, 116, 18, 14, 1, "-3" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 24, "octave__2", 54, 116, 18, 14, 1, "-2" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 25, "octave__1", 72, 116, 18, 14, 1, "-1" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 26, "octave_0", 90, 116, 18, 14, 1, "0" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 27, "octave_1", 108, 116, 18, 14, 1, "1" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 28, "octave_2", 126, 116, 18, 14, 1, "2" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 29, "octave_3", 144, 116, 18, 14, 1, "3" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 30, "octave_4", 162, 116, 18, 14, 1, "4" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 31, "formant_0", 207, 130, 18, 12, 2, "A" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 32, "formant_1", 227, 130, 18, 12, 2, "E" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 33, "formant_2", 247, 130, 18, 12, 2, "I" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 34, "formant_3", 267, 130, 18, 12, 2, "O" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE + 35, "formant_4", 287, 130, 18, 12, 2, "U" },
+};
+
+static const ft2_ui_tf_toggle_desc_t ft2_tunefish_complete_layout_tf_toggles[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE + 0, "filter1_on", 108, 267, 36, 14, 1, "On", false },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE + 1, "filter2_on", 263, 267, 36, 14, 1, "On", false },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE + 2, "filter3_on", 418, 267, 36, 14, 1, "On", false },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE + 3, "filter4_on", 573, 267, 36, 14, 1, "On", false },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE + 4, "lfo1_sync", 98, 335, 40, 14, 1, "Sync", false },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE + 5, "lfo2_sync", 253, 335, 40, 14, 1, "Sync", false },
+};
+
+static const ft2_ui_tf_label_desc_t ft2_tunefish_complete_layout_tf_labels[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LABEL_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LABEL_BASE + 0, "title_label", 12, 8, 220, 22, 0, "TF4_DXM_Edition" },
+};
+
+static const ft2_ui_tf_rotary_slider_desc_t ft2_tunefish_complete_layout_tf_rotaries[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 0, "gen_volume", 12, 46, 18, 1, 0.000f, 2.350f, "Vol" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 1, "gen_panning", 64, 46, 18, 1, 0.000f, 2.350f, "Pan" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 2, "gen_detune", 116, 46, 18, 1, 0.000f, 2.350f, "Det" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 3, "gen_bandwidth", 168, 46, 18, 1, 0.000f, 2.350f, "BW" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 4, "gen_damp", 220, 46, 18, 1, 0.000f, 2.350f, "Dmp" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 5, "gen_harmonics", 272, 46, 18, 1, 0.000f, 2.350f, "Hrm" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 6, "gen_drive", 324, 46, 18, 1, 0.000f, 2.350f, "Drv" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 7, "gen_scale", 376, 46, 18, 1, 0.000f, 2.350f, "Scl" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 8, "gen_modulation", 428, 46, 18, 1, 0.000f, 2.350f, "Mod" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 9, "gen_noise", 480, 46, 18, 1, 0.000f, 2.350f, "Nse" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 10, "gen_noise_freq", 532, 46, 18, 1, 0.000f, 2.350f, "NFq" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 11, "gen_noise_bw", 584, 46, 18, 1, 0.000f, 2.350f, "NBw" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 12, "filter1_cutoff", 12, 249, 18, 1, 0.000f, 2.350f, "Cutoff" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 13, "filter1_res", 54, 249, 18, 1, 0.000f, 2.350f, "Resonance" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 14, "filter2_cutoff", 167, 249, 18, 1, 0.000f, 2.350f, "Cutoff" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 15, "filter2_res", 209, 249, 18, 1, 0.000f, 2.350f, "Resonance" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 16, "filter3_cutoff", 322, 249, 18, 1, 0.000f, 2.350f, "Cutoff" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 17, "filter3_res", 364, 249, 18, 1, 0.000f, 2.350f, "Resonance" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 18, "filter4_cutoff", 477, 249, 18, 1, 0.000f, 2.350f, "Cutoff" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 19, "filter4_res", 519, 249, 18, 1, 0.000f, 2.350f, "Resonance" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 20, "lfo1_freq", 12, 317, 18, 1, 0.000f, 2.350f, "Rate" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 21, "lfo1_amp", 54, 317, 18, 1, 0.000f, 2.350f, "Depth" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 22, "lfo2_freq", 167, 317, 18, 1, 0.000f, 2.350f, "Rate" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 23, "lfo2_amp", 209, 317, 18, 1, 0.000f, 2.350f, "Depth" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 24, "flanger_wet", 10, 46, 18, 2, 0.000f, 2.350f, "Wet" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 25, "flanger_lfo", 47, 46, 18, 2, 0.000f, 2.350f, "LFO" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 26, "flanger_freq", 84, 46, 18, 2, 0.000f, 2.350f, "Freq" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 27, "flanger_amp", 121, 46, 18, 2, 0.000f, 2.350f, "Amp" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 28, "reverb_room_sz", 165, 46, 18, 2, 0.000f, 2.350f, "Size" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 29, "reverb_damp", 202, 46, 18, 2, 0.000f, 2.350f, "Damp" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 30, "reverb_width", 239, 46, 18, 2, 0.000f, 2.350f, "Width" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 31, "reverb_wet", 276, 46, 18, 2, 0.000f, 2.350f, "Wet" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 32, "delay_left", 320, 46, 18, 2, 0.000f, 2.350f, "Left" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 33, "delay_right", 357, 46, 18, 2, 0.000f, 2.350f, "Right" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 34, "delay_decay", 394, 46, 18, 2, 0.000f, 2.350f, "Decay" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 35, "eq_bass", 475, 46, 18, 2, 0.000f, 2.350f, "Bass" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 36, "eq_mid", 512, 46, 18, 2, 0.000f, 2.350f, "Mid" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 37, "eq_treble", 549, 46, 18, 2, 0.000f, 2.350f, "Hi" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 38, "chorus_gain", 10, 116, 18, 2, 0.000f, 2.350f, "Wet" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 39, "chorus_freq", 47, 116, 18, 2, 0.000f, 2.350f, "Freq" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 40, "chorus_depth", 84, 116, 18, 2, 0.000f, 2.350f, "Depth" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 41, "formant_wet", 165, 116, 18, 2, 0.000f, 2.350f, "Wet" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 42, "distortion_amount", 320, 116, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 43, "mod_amt_0", 133, 187, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 44, "mod_amt_1", 283, 187, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 45, "mod_amt_2", 433, 187, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 46, "mod_amt_3", 583, 187, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 47, "mod_amt_4", 133, 237, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 48, "mod_amt_5", 283, 237, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 49, "mod_amt_6", 433, 237, 18, 2, 0.000f, 2.350f, "Amount" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE + 50, "mod_amt_7", 583, 237, 18, 2, 0.000f, 2.350f, "Amount" },
+};
+
+static const ft2_ui_tf_linear_slider_desc_t ft2_tunefish_complete_layout_tf_linears[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LINEAR_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LINEAR_BASE + 0, "adsr1_slope", 442, 325, 20, 52, 1, true },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LINEAR_BASE + 1, "adsr2_slope", 597, 325, 20, 52, 1, true },
+};
+
+static const ft2_ui_tf_combo_box_desc_t ft2_tunefish_complete_layout_tf_combos[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 0, "preset_dropdown", 280, 8, 130, 22, 0, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 1, "mod_src_0", 22, 194, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 2, "mod_dst_0", 22, 218, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 3, "mod_src_1", 172, 194, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 4, "mod_dst_1", 172, 218, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 5, "mod_src_2", 322, 194, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 6, "mod_dst_2", 322, 218, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 7, "mod_src_3", 472, 194, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 8, "mod_dst_3", 472, 218, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 9, "mod_src_4", 22, 244, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 10, "mod_dst_4", 22, 268, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 11, "mod_src_5", 172, 244, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 12, "mod_dst_5", 172, 268, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 13, "mod_src_6", 322, 244, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 14, "mod_dst_6", 322, 268, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 15, "mod_src_7", 472, 244, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 16, "mod_dst_7", 472, 268, 110, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 17, "fxstk_sel_0", 22, 318, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 18, "fxstk_sel_1", 142, 318, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 19, "fxstk_sel_2", 262, 318, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 20, "fxstk_sel_3", 382, 318, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 21, "fxstk_sel_4", 502, 318, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 22, "fxstk_sel_5", 22, 358, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 23, "fxstk_sel_6", 142, 358, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 24, "fxstk_sel_7", 262, 358, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 25, "fxstk_sel_8", 382, 358, 107, 20, 2, NULL, 0, 0 },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE + 26, "fxstk_sel_9", 502, 358, 107, 20, 2, NULL, 0, 0 },
+};
+
+static const ft2_ui_tf_level_meter_desc_t ft2_tunefish_complete_layout_tf_meters[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_METER_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_METER_BASE + 0, "out_meter_L", 420, 10, 40, 18, 0, 12, true },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_METER_BASE + 1, "out_meter_R", 468, 10, 40, 18, 0, 12, true },
+};
+
+static const ft2_ui_tf_parameter_control_desc_t ft2_tunefish_complete_layout_tf_params[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_PARAM_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_PARAM_BASE + 0, "poly", 16, 184, 40, 11, 1, "Poly" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_PARAM_BASE + 1, "gen_glide", 16, 212, 40, 11, 1, "Glide" },
+};
+
+static const ft2_ui_tf_group_box_desc_t ft2_tunefish_complete_layout_tf_groups[FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_COUNT] = {
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 0, "gen_group", 8, 36, 618, 196, 1, "Generator" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 1, "tf_group_136", 8, 239, 151, 62, 1, "Low-Pass" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 2, "tf_group_137", 163, 239, 151, 62, 1, "Hi-Pass" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 3, "tf_group_138", 318, 239, 151, 62, 1, "Band-Pass" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 4, "tf_group_139", 473, 239, 153, 62, 1, "Notch" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 5, "lfo1_group", 8, 307, 151, 84, 1, "LFO-1" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 6, "lfo2_group", 163, 307, 151, 84, 1, "LFO-2" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 7, "adsr1_group", 318, 307, 151, 84, 1, "ADSR-1" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 8, "adsr2_group", 473, 307, 153, 84, 1, "ADSR-2" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 9, "fxgrp_0", 8, 36, 151, 60, 2, "Flanger" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 10, "fxgrp_1", 163, 36, 151, 60, 2, "Reverb" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 11, "fxgrp_2", 318, 36, 151, 60, 2, "Delay" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 12, "fxgrp_3", 473, 36, 151, 60, 2, "EQ" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 13, "fxgrp_4", 8, 106, 151, 60, 2, "Chorus" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 14, "fxgrp_6", 318, 106, 151, 60, 2, "Distortion" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 15, "tf_group_150", 8, 172, 616, 127, 2, "Modulation-Matrix" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 16, "tf_group_152", 8, 307, 616, 80, 2, "FX-Stack" },
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE + 17, "tf_group_155", 162, 106, 152, 60, 2, "Formant" },
+};
+
+const ft2_ui_layout_desc_t ft2_tunefish_complete_layout_layout = {
+    "ft2_tunefish_complete_layout",
+    FT2_UI_SCHEMA_VERSION,
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_PB_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_PB_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_PB_COUNT > 0
+    ft2_tunefish_complete_layout_pushbuttons,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_CB_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_CB_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_CB_COUNT > 0
+    ft2_tunefish_complete_layout_checkboxes,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_RB_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_RB_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_RB_COUNT > 0
+    ft2_tunefish_complete_layout_radiobuttons,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_SB_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_SB_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_SB_COUNT > 0
+    ft2_tunefish_complete_layout_scrollbars,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TB_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TB_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TB_COUNT > 0
+    ft2_tunefish_complete_layout_textboxes,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_FB_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_FB_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_FB_COUNT > 0
+    ft2_tunefish_complete_layout_frameboxes,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_BMP_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_BMP_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_BMP_COUNT > 0
+    ft2_tunefish_complete_layout_bitmaps,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_WAVE_COUNT > 0
+    ft2_tunefish_complete_layout_waveform_views,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_BUTTON_COUNT > 0
+    ft2_tunefish_complete_layout_tf_buttons,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_TOGGLE_COUNT > 0
+    ft2_tunefish_complete_layout_tf_toggles,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LABEL_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LABEL_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LABEL_COUNT > 0
+    ft2_tunefish_complete_layout_tf_labels,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ROTARY_COUNT > 0
+    ft2_tunefish_complete_layout_tf_rotaries,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LINEAR_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LINEAR_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_LINEAR_COUNT > 0
+    ft2_tunefish_complete_layout_tf_linears,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_COMBO_COUNT > 0
+    ft2_tunefish_complete_layout_tf_combos,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_METER_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_METER_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_METER_COUNT > 0
+    ft2_tunefish_complete_layout_tf_meters,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_PARAM_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_PARAM_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_PARAM_COUNT > 0
+    ft2_tunefish_complete_layout_tf_params,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ENV_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ENV_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_ENV_COUNT > 0
+    ft2_tunefish_complete_layout_tf_envs,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_TF_GROUP_COUNT > 0
+    ft2_tunefish_complete_layout_tf_groups,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_STRIP_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_STRIP_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_STRIP_COUNT > 0
+    ft2_tunefish_complete_layout_mixer_strips,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_GAIN_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_GAIN_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_GAIN_COUNT > 0
+    ft2_tunefish_complete_layout_mixer_gains,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_PAN_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_PAN_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_PAN_COUNT > 0
+    ft2_tunefish_complete_layout_mixer_pans,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_MUTE_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_MUTE_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_MUTE_COUNT > 0
+    ft2_tunefish_complete_layout_mixer_mutes,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_SCOPE_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_SCOPE_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_SCOPE_COUNT > 0
+    ft2_tunefish_complete_layout_mixer_scopes,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_MASTER_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_MASTER_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_MIXER_MASTER_COUNT > 0
+    ft2_tunefish_complete_layout_mixer_masters,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_WINDOW_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_WINDOW_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_WINDOW_COUNT > 0
+    ft2_tunefish_complete_layout_dsp_windows,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_SLOT_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_SLOT_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_SLOT_COUNT > 0
+    ft2_tunefish_complete_layout_dsp_slots,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_MENU_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_MENU_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_MENU_COUNT > 0
+    ft2_tunefish_complete_layout_dsp_menus,
+#else
+    NULL,
+#endif
+    { FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_PARAM_BASE, FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_PARAM_COUNT },
+#if FT2_TUNEFISH_COMPLETE_LAYOUT_DSP_PARAM_COUNT > 0
+    ft2_tunefish_complete_layout_dsp_params,
+#else
+    NULL
+#endif
+};

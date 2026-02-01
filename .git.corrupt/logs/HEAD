@@ -1,0 +1,7 @@
+0000000000000000000000000000000000000000 084da4c51f7128554081d36a98084be7b9419b1d user <user@pc.(none)> 1749536149 +0930	clone: from https://github.com/8bitbubsy/ft2-clone.git
+084da4c51f7128554081d36a98084be7b9419b1d b2d93b7448d8109241c9588f3342ee1d1eb707fc user <user@example.com> 1767235243 +1030	commit: Refactor: Clean up and improve robustness of Dexed integration
+b2d93b7448d8109241c9588f3342ee1d1eb707fc 084da4c51f7128554081d36a98084be7b9419b1d user <user@example.com> 1767235304 +1030	reset: moving to HEAD~
+084da4c51f7128554081d36a98084be7b9419b1d 221f2ffdb8143f16c5c040093a855f1162278305 user <user@example.com> 1767235491 +1030	commit: Refactor: Clean up and improve robustness of Dexed integration
+221f2ffdb8143f16c5c040093a855f1162278305 6c99995caa47e136f1ef74725a9b9212b3df305b user <user@example.com> 1767239418 +1030	commit: Fix: Correct Dexed preset paths and resolve module saving crash
+6c99995caa47e136f1ef74725a9b9212b3df305b 270dce7efd8d2b01ecdf956b9a48b40e80c02140 user <user@example.com> 1767241750 +1030	commit: Chore: Simplify Dexed patch loading for debugging
+270dce7efd8d2b01ecdf956b9a48b40e80c02140 270dce7efd8d2b01ecdf956b9a48b40e80c02140 user <user@example.com> 1767721050 +1030	reset: moving to HEAD

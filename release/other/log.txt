@@ -1,0 +1,59 @@
+[TF4_SYNTH] ft2_synth_shutdown() called
+[TF4_SYNTH] Synth was not initialized, nothing to shutdown
+[TF4_SYNTH] ft2_synth_init() called with samplerate=44100
+[TF4_SYNTH] Persistent parameter storage initialized for 128 instruments
+[TF4_SYNTH] Creating Tunefish synth engine...
+[TF_WRAPPER] tf_synth_create() called
+[TF_WRAPPER] Created Tunefish synth at 0x63c0f88f9610
+[TF4_SYNTH] Tunefish synth created successfully
+[TF4_SYNTH] Initializing Tunefish synth with samplerate 44100...
+[TF_WRAPPER] tf_synth_init() called with synth=0x63c0f88f9610, sampleRate=44100
+[TF_WRAPPER] Initialized Tunefish synth with sample rate 44100
+[TF4_SYNTH] Tunefish synth initialized
+[TF4_SYNTH] Cleared 128 instrument slots
+[TF4_SYNTH] Allocated audio buffers: 30001 samples (max)
+[TF4_SYNTH] Tunefish4 synth initialization complete!
+[DX_WRAPPER] ft2_dx_init(44100)
+[DX_WRAPPER] Dexed initialized (samplerate=44100)
+🌊 [WIDGET] Creating waveform view widget 'waveform_view' at (210,100) 400x120
+🌊 [LAYOUT] Created waveform view widget: 0x63c0f8a0f320
+✅ [CALLBACKS] All widget value change callbacks connected to parameter system
+Tunefish Complete Layout created with 175 total widgets
+Tunefish GUI system initialized successfully (FT2 SDL drawing)
+- Modern Layout: Created with 274 widgets
+- Drawing System: Using FT2 native SDL routines
+Dexed UI layout created (FT2 C renderer)
+[INST_ED] cbInstUseDexed() called for instrument 1
+[INST_ED] Instrument 1 not allocated, creating it...
+[INST_ED] Successfully allocated instrument 1
+[INST_ED] Instrument 1 useDexed flag set to: TRUE
+[DX_WRAPPER] ensure_dx_inst called instr=1 g_dxSynthInitialized=1 g_dxSynth=0x63c0f76c7df0
+[DX_WRAPPER] dx_instrument_create(): created 0x63c0f8aa21a0 with sr=44100
+[DX_WRAPPER] loadPatchBlob: loaded 155 bytes into instance 0x63c0f8aa21a0
+[DX_WRAPPER] dx_instrument_create: loaded simple sine wave patch for instance 0x63c0f8aa21a0
+[DX_WRAPPER] Created Dexed instrument 1 -> 0x63c0f8aa21a0
+[DX_WRAPPER] dx_instrument_load_factory_preset: factory presets disabled in wrapper
+[DX_WRAPPER] Wrapper failed to load factory preset 0 into instrument 1
+[INST_ED] Dexed instance created for instr 1 but factory preset not loaded (fallback will be used)
+[PLAYTONE] DEXED KEYBOARD INPUT: instr=1, note=65, useDexed=TRUE
+[DX_WRAPPER] ft2_dx_send_midi_to_instrument called instr=1 status=0x91 d1=65 d2=127 g_dxSynthInitialized=1
+[DX_WRAPPER] ensure_dx_inst called instr=1 g_dxSynthInitialized=1 g_dxSynth=0x63c0f76c7df0
+[DX_WRAPPER] ensure_dx_inst: existing instance for instr=1 -> 0x63c0f8aa21a0
+[DX_WRAPPER] ft2_dx_send_midi_to_instrument: ensure_dx_inst returned 0x63c0f8aa21a0 for instr=1
+[DX_WRAPPER] recv MIDI status=0x91 d1=65 d2=127 inst=0x63c0f8aa21a0
+[DX_WRAPPER] midiNoteOn received note=65 vel=127 before_active=0 instance=0x63c0f8aa21a0
+[DX_WRAPPER] midiNoteOn queued note=65 vel=127 after_active=1 instance=0x63c0f8aa21a0
+[DX_WRAPPER] midiNoteOn inst=0x63c0f8aa21a0 note=65 vel=127 before_active=0 after_active=1
+[INST_TRACE] ch=0 instr=1 chHasTF4=0 chHasDexed=1 samples=332
+[INST_TRACE] calling Dexed render for instr=1 ch=0 samples=332
+[DX_WRAPPER] ft2_dx_render_for_channel called instr=1 nsamples=332 add=0 g_dxSynthInitialized=1
+[DX_WRAPPER] ensure_dx_inst called instr=1 g_dxSynthInitialized=1 g_dxSynth=0x63c0f76c7df0
+[DX_WRAPPER] ensure_dx_inst: existing instance for instr=1 -> 0x63c0f8aa21a0
+[DX_WRAPPER] ft2_dx_render_for_channel: ensure_dx_inst returned 0x63c0f8aa21a0 for instr=1
+[DX_WRAPPER] process start inst=0x63c0f8aa21a0 frames=332
+[DX_WRAPPER] render called: frames=332 active_voices=1
+[DXM-SAVE] Starting DXM save...
+[DXM-SAVE] Refreshing TF4 params...
+[DXM-SAVE] Refreshing Dexed params...
+[DX_WRAPPER] ensure_dx_inst called instr=1 g_dxSynthInitialized=1 g_dxSynth=0x63c0f76c7df0
+[DX_WRAPPER] ensure_dx_inst: existing instance for instr=1 -> 0x63c0f8aa21a0

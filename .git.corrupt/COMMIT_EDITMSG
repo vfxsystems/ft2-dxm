@@ -1,0 +1,3 @@
+Chore: Simplify Dexed patch loading for debugging
+
+Replaced the factory preset loading from files with a hardcoded simple sine wave patch. This is a temporary measure to simplify the system for debugging the audio output, ensuring that a known, simple patch is used.
