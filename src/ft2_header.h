@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <assert.h>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define WIN32_MEAN_AND_LEAN
 #include <windows.h>
 #else
