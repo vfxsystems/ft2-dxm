@@ -107,5 +107,6 @@ void toggleInstEditorExt(void);
 void cbInstUseV2(void); // toggle V2 synth engine for this instrument
 void cbInstUseTF4(void); // toggle Tunefish4 synth engine for this instrument
 void cbInstUseDexed(void); // toggle Dexed synth engine for this instrument
+void cbInstUseOsTirus(void); // toggle OsTIrus synth engine for this instrument
 void initTF4Instrument(int instrIdx);
 void ft2_close_synth_editor(void);
