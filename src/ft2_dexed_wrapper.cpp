@@ -287,6 +287,16 @@ float dx_instrument_get_param(void* inst, int param)
     }
 }
 
+int dx_instrument_get_params(void* inst, float* out, int maxCount)
+{
+    if (!inst || !out || maxCount <= 0) return 0;
+    DexedAudio* aud = static_cast<DexedAudio*>(inst);
+    int count = maxCount;
+    if (count > 156) count = 156;
+    aud->getParams(out, count);
+    return count;
+}
+
 int dx_get_factory_preset_count(void)
 {
     scan_factory_presets_if_needed();

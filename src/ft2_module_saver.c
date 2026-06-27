@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "ft2_header.h"
 #include "ft2_audio.h"
 #include "ft2_gui.h"
@@ -21,6 +22,7 @@
 #include "ft2_diskop.h" // for MOD_SAVE_MODE_XM, MOD_SAVE_MODE_DXM
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
+#include "ft2_v2.h"
 // Tunefish4 synth helper
 extern void* createInstrumentInstance(int instrID);
 
@@ -353,14 +355,14 @@ static size_t writeDXMInstrumentMetadata(FILE *f)
     size_t bytesWritten = 0;
     uint8_t numDXMInstruments = 0;
     
-    // Count DXM instruments (those with stereo samples or TF4/Dexed)
+    // Count DXM instruments (those with stereo samples or TF4/Dexed/V2)
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
         instr_t *ins = instr[instrIdx];
         if (!ins) continue;
         
-        // Check if this is a DXM instrument (has stereo samples or TF4/Dexed)
+        // Check if this is a DXM instrument (has stereo samples or TF4/Dexed/V2)
         bool isDXMInstrument = false;
-        if (ins->useTF4 || ins->useDexed) {
+        if (ins->useTF4 || ins->useDexed || ins->useV2) {
             isDXMInstrument = true;
         } else {
             // Check for stereo samples
@@ -386,7 +388,7 @@ static size_t writeDXMInstrumentMetadata(FILE *f)
         if (!ins) continue;
         
         bool isDXMInstrument = false;
-        if (ins->useTF4 || ins->useDexed) {
+        if (ins->useTF4 || ins->useDexed || ins->useV2) {
             isDXMInstrument = true;
         } else {
             for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
@@ -413,6 +415,7 @@ static size_t writeDXMInstrumentMetadata(FILE *f)
                 }
             }
             if (ins->useDexed) flags |= 4; // Dexed instrument
+            if (ins->useV2) flags |= 8;    // V2 instrument
             fwrite(&flags, sizeof(uint8_t), 1, f); bytesWritten += 1;
         }
     }
@@ -475,6 +478,55 @@ static void writeAllDexedStatesDXM(FILE *f)
         // Write Dexed params (155-byte blob)
         fwrite(ins->dxParams, sizeof(uint8_t), 155, f);
     }
+}
+
+// Helper: Write all V2 instrument states to FILE*, return bytes written
+static size_t writeAllV2StatesDXM(FILE *f)
+{
+    size_t bytesWritten = 0;
+    uint8_t numV2 = 0;
+
+    for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
+        instr_t *ins = instr[instrIdx];
+        if (ins && ins->useV2) {
+            numV2++;
+        }
+    }
+
+    fwrite(&numV2, sizeof(uint8_t), 1, f); bytesWritten += sizeof(uint8_t);
+
+    for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
+        instr_t *ins = instr[instrIdx];
+        if (!ins || !ins->useV2)
+            continue;
+
+        size_t blobSize = ft2_v2_serialize_state(instrIdx, NULL, 0);
+        uint8_t idx = (uint8_t)instrIdx;
+        uint32_t len = 0;
+        uint8_t *blob = (uint8_t *)malloc(blobSize);
+        if (blobSize > 0 && blob != NULL) {
+            if (ft2_v2_serialize_state(instrIdx, blob, blobSize) == blobSize) {
+                len = (uint32_t)blobSize;
+            } else {
+                printf("[DXM-SAVE] WARNING: Failed to write V2 state blob for instr %d\n", instrIdx);
+            }
+        } else if (blobSize > 0) {
+            printf("[DXM-SAVE] WARNING: Out of memory serializing V2 state for instr %d\n", instrIdx);
+        }
+
+        fwrite(&idx, sizeof(uint8_t), 1, f); bytesWritten += sizeof(uint8_t);
+        fwrite(&len, sizeof(uint32_t), 1, f); bytesWritten += sizeof(uint32_t);
+        if (len > 0 && blob != NULL) {
+            fwrite(blob, 1, len, f); bytesWritten += len;
+        }
+        if (blob != NULL)
+            free(blob);
+
+        if (len == 0 && blobSize == 0)
+            printf("[DXM-SAVE] WARNING: Failed to serialize V2 state for instr %d\n", instrIdx);
+    }
+
+    return bytesWritten;
 }
 
 // --- DXM (Extended XM) Saver ---
@@ -820,8 +872,25 @@ bool saveDXM(UNICHAR *filenameU)
     fwrite(&dexChunkLen, 1, 4, f);
     fseek(f, dexDataEnd, SEEK_SET);
     printf("[DXM-SAVE] Dexed chunk: %u bytes written\n", dexChunkLen);
-    // 8. Write DXM instrument metadata chunk (distinguishes XM vs DXM instruments)
-        // 8. Write Macro Map chunk
+
+    // 8. Write V2 state chunk
+    printf("[DXM-SAVE] Writing V2 state chunk...\n");
+    const char v2ChunkId[8] = {'D','X','M','V','2','S',0,0};
+    fwrite(v2ChunkId, 1, 8, f);
+    uint32_t v2ChunkLen = 0;
+    long v2LenPos = ftell(f);
+    fwrite(&v2ChunkLen, 1, 4, f);
+    long v2DataStart = ftell(f);
+    size_t v2Bytes = writeAllV2StatesDXM(f);
+    long v2DataEnd = ftell(f);
+    v2ChunkLen = (uint32_t)(v2DataEnd - v2DataStart);
+    fseek(f, v2LenPos, SEEK_SET);
+    fwrite(&v2ChunkLen, 1, 4, f);
+    fseek(f, v2DataEnd, SEEK_SET);
+    printf("[DXM-SAVE] V2 chunk: %zu bytes written\n", v2Bytes);
+
+    // 9. Write DXM instrument metadata chunk (distinguishes XM vs DXM instruments)
+        // 9. Write Macro Map chunk
     printf("[DXM-SAVE] Writing Macro Map chunk...\n");
     const char mapChunkId[8] = {'D','X','M','M','A','P',0,0};
     fwrite(mapChunkId, 1, 8, f);

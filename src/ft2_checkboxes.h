@@ -104,6 +104,9 @@ enum // CHECKBOXES
 
 };
 
+// Reserved instrument-editor slots reused for synth-specific toggles.
+#define CB_INST_V2 CB_RES_1
+
 // Append-only ID ranges for designer-driven layouts (do not reorder existing IDs).
 #define CB_TF_BASE NUM_CHECKBOXES
 #define CB_TF_COUNT 0

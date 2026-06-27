@@ -23,6 +23,7 @@
 #include "ft2_dsp.h"
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
+#include "ft2_v2.h"
 #include "ft2_unified_synth.h"
 
 static void sendSamples16BitStereo(void *stream, uint32_t sampleBlockLength);
@@ -58,6 +59,12 @@ static float *chMixBufR[MAX_CHANNELS] = { NULL };
 // per-stereo-pair mix buffers (new)
 static float *pairMixBufL[MAX_STEREO_PAIRS] = { NULL };
 static float *pairMixBufR[MAX_STEREO_PAIRS] = { NULL };
+
+/* Scratch buffers for per-instrument synth rendering */
+static float *synthMixBufL = NULL;
+static float *synthMixBufR = NULL;
+static uint32_t synthMixBufSize = 0;
+static bool synthRoutingDebug = false;
 
 /* Buffer sent to GUI scopes for synth-inclusive waveform (per stereo pair) */
 #define SYNTH_SCOPE_LEN 512
@@ -180,6 +187,9 @@ void setNewAudioFreq(uint32_t freq) // for song-to-WAV rendering
 	const bool mustRecalcTables = audio.freq != oldAudioFreq;
 	if (mustRecalcTables)
 		calcReplayerVars(audio.freq);
+
+	ft2_unified_synth_set_samplerate(audio.freq);
+	mixerInitDSPEffects(audio.freq);
 }
 
 void setBackOldAudioFreq(void) // for song-to-WAV rendering
@@ -190,8 +200,15 @@ void setBackOldAudioFreq(void) // for song-to-WAV rendering
 
 	if (mustRecalcTables)
 		calcReplayerVars(audio.freq);
+
+	ft2_unified_synth_set_samplerate(audio.freq);
+	mixerInitDSPEffects(audio.freq);
 }
 
+void audioSetSynthRoutingDebug(bool enabled)
+{
+	synthRoutingDebug = enabled;
+}
 void setMixerBPM(int32_t bpm)
 {
 	if (bpm < MIN_BPM || bpm > MAX_BPM)
@@ -571,19 +588,25 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
     }
 
     /* Step 1: Mix individual tracker channels into stereo pairs */
-    static float synthRenderBufL[MAX_INST][4096];
-    static float synthRenderBufR[MAX_INST][4096];
+    const bool canRenderSynth = (synthMixBufL != NULL && synthMixBufR != NULL && samplesToMix <= synthMixBufSize);
     bool synthNeedsMix[MAX_INST] = { false };
-    static int lastPairForInstr[MAX_INST];
+    uint8_t pairCounts[MAX_INST][MAX_STEREO_PAIRS] = { { 0 } };
+    uint8_t totalCounts[MAX_INST] = { 0 };
+    int firstChForInstr[MAX_INST];
+    static uint8_t lastPairCounts[MAX_INST][MAX_STEREO_PAIRS];
+    static uint8_t lastTotalCounts[MAX_INST];
     static int lastChForInstr[MAX_INST];
     static bool lastPairInit = false;
+    static uint64_t lastLogTickTime = UINT64_MAX;
     if (!lastPairInit) {
-        for (int i = 0; i < MAX_INST; i++) {
-            lastPairForInstr[i] = -1;
+        memset(lastPairCounts, 0, sizeof(lastPairCounts));
+        memset(lastTotalCounts, 0, sizeof(lastTotalCounts));
+        for (int i = 0; i < MAX_INST; i++)
             lastChForInstr[i] = -1;
-        }
         lastPairInit = true;
     }
+    for (int i = 0; i < MAX_INST; i++)
+        firstChForInstr[i] = -1;
 
     for (int32_t ch = 0; ch < song.numChannels; ch++)
     {
@@ -598,22 +621,24 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
             mixStereoVoiceToBuffer(vc, bufferPosition, samplesToMix, pairL, pairR);
         }
 
-        // 1.2. Mix synth (TF4 or Dexed instrument)
-        bool chHasTF4 = false;
-        bool chHasDexed = false;
+        // 1.2. Mix synth (TF4, Dexed or V2 instrument)
+        bool chHasSynth = false;
         int instrID = -1;
         if (channel[ch].instrPtr && !channel[ch].keyOff && channel[ch].noteNum > 0) {
             instrID = channel[ch].instrNum;
-            chHasTF4   = channel[ch].instrPtr->useTF4;
-            chHasDexed = channel[ch].instrPtr->useDexed;
+            chHasSynth = (ft2_unified_synth_get_active_engine(instrID) != SYNTH_TYPE_COUNT);
         }
 
-        if ((chHasTF4 || chHasDexed) && instrID >= 1 && instrID <= MAX_INST && samplesToMix <= 4096)
+        if (canRenderSynth && chHasSynth && instrID >= 1 && instrID <= MAX_INST)
         {
             int instrSlot = instrID - 1;
-            lastPairForInstr[instrSlot] = pairIdx;
-            lastChForInstr[instrSlot] = ch;
             synthNeedsMix[instrSlot] = true;
+            if (pairCounts[instrSlot][pairIdx] < 255)
+                pairCounts[instrSlot][pairIdx]++;
+            if (totalCounts[instrSlot] < 255)
+                totalCounts[instrSlot]++;
+            if (firstChForInstr[instrSlot] < 0)
+                firstChForInstr[instrSlot] = ch;
         }
 
         // 1.3. Fill scope buffer (prefer synth if present, else sample)
@@ -624,7 +649,11 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
         }
     }
 
-    if (samplesToMix <= 4096) {
+    const bool logRouting = synthRoutingDebug && (audio.tickTime64 != lastLogTickTime);
+    if (logRouting)
+        lastLogTickTime = audio.tickTime64;
+
+    if (canRenderSynth) {
         for (int instrSlot = 0; instrSlot < MAX_INST; instrSlot++) {
             int instrID = instrSlot + 1;
             bool mixNow = synthNeedsMix[instrSlot];
@@ -632,29 +661,66 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
             if (!mixNow) {
                 instr_t *ins = instr[instrID];
                 if (ins) {
-                    if (ins->useDexed && ft2_dx_get_active_voice_count(instrID) > 0)
-                        mixNow = true;
-                    else if (ins->useTF4 && ft2_synth_get_active_voice_count(instrID) > 0)
-                        mixNow = true;
+                    switch (ft2_unified_synth_get_active_engine(instrID)) {
+                        case SYNTH_TYPE_V2:
+                            mixNow = (ft2_v2_get_active_voice_count(instrID) > 0);
+                            break;
+                        case SYNTH_TYPE_DEXED:
+                            mixNow = (ft2_dx_get_active_voice_count(instrID) > 0);
+                            break;
+                        case SYNTH_TYPE_TUNEFISH4:
+                            mixNow = (ft2_synth_get_active_voice_count(instrID) > 0);
+                            break;
+                        default:
+                            break;
+                    }
                 }
             }
 
             if (!mixNow) continue;
 
-            int pairIdx = lastPairForInstr[instrSlot];
-            if (pairIdx < 0 || pairIdx >= MAX_STEREO_PAIRS) continue;
+            uint8_t totalCount = totalCounts[instrSlot];
+            uint8_t *pairs = pairCounts[instrSlot];
+            if (totalCount > 0) {
+                memcpy(lastPairCounts[instrSlot], pairs, sizeof(lastPairCounts[instrSlot]));
+                lastTotalCounts[instrSlot] = totalCount;
+                if (firstChForInstr[instrSlot] >= 0)
+                    lastChForInstr[instrSlot] = firstChForInstr[instrSlot];
+            } else {
+                totalCount = lastTotalCounts[instrSlot];
+                pairs = lastPairCounts[instrSlot];
+            }
 
-            float *pairL = &pairMixBufL[pairIdx][bufferPosition];
-            float *pairR = &pairMixBufR[pairIdx][bufferPosition];
-            float *synthL = synthRenderBufL[instrSlot];
-            float *synthR = synthRenderBufR[instrSlot];
+            if (totalCount == 0)
+                continue;
+
+            if (logRouting) {
+                printf("[SYNTH-ROUTE] instr=%d total=%u pairs:", instrID, totalCount);
+                for (int pairIdx = 0; pairIdx < MAX_STEREO_PAIRS; pairIdx++) {
+                    if (pairs[pairIdx] == 0)
+                        continue;
+                    printf(" %d:%u", pairIdx, pairs[pairIdx]);
+                }
+                printf("\n");
+            }
+
+            float *synthL = synthMixBufL;
+            float *synthR = synthMixBufR;
             memset(synthL, 0, sizeof(float) * samplesToMix);
             memset(synthR, 0, sizeof(float) * samplesToMix);
             ft2_unified_synth_render_channel(instrID, synthL, synthR, samplesToMix, 0);
 
-            for (int32_t s = 0; s < samplesToMix; s++) {
-                pairL[s] += synthL[s];
-                pairR[s] += synthR[s];
+            for (int pairIdx = 0; pairIdx < MAX_STEREO_PAIRS; pairIdx++)
+            {
+                if (pairs[pairIdx] == 0)
+                    continue;
+                float *pairL = &pairMixBufL[pairIdx][bufferPosition];
+                float *pairR = &pairMixBufR[pairIdx][bufferPosition];
+                const float scale = (float)pairs[pairIdx] / (float)totalCount;
+                for (int32_t s = 0; s < samplesToMix; s++) {
+                    pairL[s] += synthL[s] * scale;
+                    pairR[s] += synthR[s] * scale;
+                }
             }
 
             int ch = lastChForInstr[instrSlot];
@@ -1234,6 +1300,12 @@ static bool setupAudioBuffers(void)
             return false;
     }
 
+    synthMixBufSize = (uint32_t)maxSamplesPerTick;
+    synthMixBufL = (float *)calloc(maxSamplesPerTick, sizeof(float));
+    synthMixBufR = (float *)calloc(maxSamplesPerTick, sizeof(float));
+    if (synthMixBufL == NULL || synthMixBufR == NULL)
+        return false;
+
  	return true;
 }
 
@@ -1266,6 +1338,20 @@ static void freeAudioBuffers(void)
         free(pairMixBufR[i]);
         pairMixBufL[i] = pairMixBufR[i] = NULL;
     }
+
+    if (synthMixBufL != NULL)
+    {
+        free(synthMixBufL);
+        synthMixBufL = NULL;
+    }
+
+    if (synthMixBufR != NULL)
+    {
+        free(synthMixBufR);
+        synthMixBufR = NULL;
+    }
+
+    synthMixBufSize = 0;
 }
 
 static void calcAudioLatencyVars(int32_t audioBufferSize, int32_t audioFreq)

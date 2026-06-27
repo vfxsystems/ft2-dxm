@@ -22,13 +22,18 @@
 #include "ft2_bmp.h"
 #include "ft2_structs.h"
 #include "ft2_textboxes.h"
+#include "ft2_v2_complete_layout.h"
 #include "dexed/dx_complete_layout.h"
 #include "ft2_tunefish_complete_layout.h"
 #include "ft2_dexed.h"
+#include "ft2_synth.h"
+#include "ft2_v2.h"
+#include "ft2_inst_ed.h"
 
 static void drawInstrumentVolPan(void);
 static void drawInstrumentVibAndMore(void);
 void pbShowDexedEditor(void);
+void pbShowV2Editor(void);
 void pbShowTunefishEditor(void);
 
 static uint32_t lastInstrSwitchClickTicks = 0;
@@ -36,11 +41,23 @@ static uint8_t lastInstrSwitchClickInstr = 0;
 static bool lastInstrSwitchClickValid = false;
 static const uint32_t INSTR_SWITCH_DOUBLE_CLICK_MS = 220;
 
+static void silenceDisabledSynthEngines(bool hadTF4, bool hadDexed, bool hadV2)
+{
+	if (hadTF4)
+		ft2_synth_panic();
+	if (hadDexed)
+		ft2_dx_panic();
+	if (hadV2)
+		ft2_v2_panic();
+}
+
 static void handleInstrSwitcherDoubleClick(uint8_t instrNum)
 {
 	instr_t *ins = instr[instrNum];
 	if (!ins) return;
-	if (ins->useTF4)
+	if (ins->useV2)
+		pbShowV2Editor();
+	else if (ins->useTF4)
 		pbShowTunefishEditor();
 	else if (ins->useDexed)
 		pbShowDexedEditor();
@@ -80,6 +97,9 @@ void pbShowDexedEditor(void)
 
     if (ins && !ins->useDexed)
     {
+        const bool hadTF4 = ins->useTF4;
+        const bool hadV2 = ins->useV2;
+
         // Clear any existing synth type
 
         if (ins->useTF4)
@@ -98,6 +118,15 @@ void pbShowDexedEditor(void)
             for (int i = 0; i < 16; ++i) freeSample(editor.curInstr, i);
         }
 
+        if (ins->useV2)
+        {
+            ins->useV2 = false;
+            checkBoxes[CB_INST_V2].checked = false;
+            drawCheckBox(CB_INST_V2);
+        }
+
+        silenceDisabledSynthEngines(hadTF4, false, hadV2);
+
         ins->useDexed = true;
         checkBoxes[CB_INST_DEXED].checked = true;
         drawCheckBox(CB_INST_DEXED);
@@ -114,6 +143,9 @@ void pbShowDexedEditor(void)
     // Hide any active Tunefish editor so layouts never stack
     if (g_active_tunefish_layout && g_active_tunefish_layout->visible)
         tf_hide_layout(g_active_tunefish_layout);
+
+    if (g_active_v2_layout && g_active_v2_layout->visible)
+        v2_hide_layout(g_active_v2_layout);
 
     // Ensure the layout is created
     if (!g_dexed_layout_singleton)
@@ -165,6 +197,9 @@ void pbShowTunefishEditor(void)
 
     if (ins && !ins->useTF4)
     {
+        const bool hadDexed = ins->useDexed;
+        const bool hadV2 = ins->useV2;
+
         // Clear any existing synth type
 
         if (ins->useDexed)
@@ -183,6 +218,15 @@ void pbShowTunefishEditor(void)
             for (int i = 0; i < 16; ++i) freeSample(editor.curInstr, i);
         }
 
+        if (ins->useV2)
+        {
+            ins->useV2 = false;
+            checkBoxes[CB_INST_V2].checked = false;
+            drawCheckBox(CB_INST_V2);
+        }
+
+        silenceDisabledSynthEngines(false, hadDexed, hadV2);
+
         ins->useTF4 = true;
         checkBoxes[CB_INST_TF4].checked = true;
         drawCheckBox(CB_INST_TF4);
@@ -195,6 +239,9 @@ void pbShowTunefishEditor(void)
     // Hide any active Dexed editor so layouts never stack
     if (g_active_dexed_layout && g_active_dexed_layout->visible)
         dx_hide_layout(g_active_dexed_layout);
+
+    if (g_active_v2_layout && g_active_v2_layout->visible)
+        v2_hide_layout(g_active_v2_layout);
 
     // Ensure the layout is created
     if (!g_active_tunefish_layout)
@@ -215,6 +262,120 @@ void pbShowTunefishEditor(void)
     ui.synthEditorShown = true;
 
     printf("[TF_UI] Tunefish editor shown with direct rendering\n");
+}
+
+void initV2Instrument(int instrIdx)
+{
+    if (instrIdx == 0)
+        return;
+
+    if (instr[instrIdx] == NULL)
+    {
+        if (!allocateInstr(instrIdx))
+            return;
+
+        updateInstEditor();
+        updateNewInstrument();
+    }
+
+    instr_t *ins = instr[instrIdx];
+    if (ins == NULL || !ins->useV2)
+    {
+        updateInstrumentTextBoxNames();
+        return;
+    }
+
+    if (ft2_v2_has_persistent_state(instrIdx))
+    {
+        ft2_v2_restore_instrument_state(instrIdx);
+    }
+    else if (!ft2_v2_load_factory_preset_for_instrument(instrIdx, 0))
+    {
+        ft2_v2_restore_instrument_state(instrIdx);
+    }
+
+    if (instrIdx >= 1 && instrIdx <= MAX_INST && instr[instrIdx] != NULL)
+    {
+        checkBoxes[CB_INST_V2].checked = true;
+        drawCheckBox(CB_INST_V2);
+    }
+
+    updateInstrumentTextBoxNames();
+}
+
+void pbShowV2Editor(void)
+{
+    if (editor.curInstr == 0)
+        return;
+
+    if (instr[editor.curInstr] == NULL)
+    {
+        if (!allocateInstr(editor.curInstr))
+            return;
+    }
+
+    instr_t *ins = instr[editor.curInstr];
+    if (ins && !ins->useV2)
+    {
+        const bool hadTF4 = ins->useTF4;
+        const bool hadDexed = ins->useDexed;
+
+        if (getRealUsedSamples(editor.curInstr) > 0)
+        {
+            if (okBox(2, "System request", "This will clear all samples in the instrument. Proceed?", NULL) != 1)
+                return;
+
+            for (int i = 0; i < 16; ++i)
+                freeSample(editor.curInstr, i);
+        }
+
+        if (ins->useTF4)
+        {
+            ins->useTF4 = false;
+            checkBoxes[CB_INST_TF4].checked = false;
+            drawCheckBox(CB_INST_TF4);
+        }
+
+        if (ins->useDexed)
+        {
+            ins->useDexed = false;
+            checkBoxes[CB_INST_DEXED].checked = false;
+            drawCheckBox(CB_INST_DEXED);
+        }
+
+        silenceDisabledSynthEngines(hadTF4, hadDexed, false);
+
+        ins->useV2 = true;
+        checkBoxes[CB_INST_V2].checked = true;
+        drawCheckBox(CB_INST_V2);
+
+        setSongModifiedFlag();
+        updateInstrumentTextBoxNames();
+        if (ui.instrSwitcherShown)
+            updateInstrumentSwitcher();
+    }
+
+    if (g_active_dexed_layout && g_active_dexed_layout->visible)
+        dx_hide_layout(g_active_dexed_layout);
+
+    if (g_active_tunefish_layout && g_active_tunefish_layout->visible)
+        tf_hide_layout(g_active_tunefish_layout);
+
+    if (!g_active_v2_layout)
+    {
+        g_active_v2_layout = v2_create_complete_layout();
+        if (!g_active_v2_layout)
+        {
+            printf("[V2_UI] Failed to create V2 layout\n");
+            return;
+        }
+    }
+
+    v2_show_layout(g_active_v2_layout);
+    initV2Instrument(editor.curInstr);
+
+    ui.synthEditorShown = true;
+    printf("[V2_UI] V2 editor shown with direct rendering\n");
 }
 
 #ifdef _MSC_VER
@@ -2352,6 +2513,7 @@ void hideInstEditor(void)
 	hidePushButton(PB_INST_VIBDEPTH_UP);
 	hidePushButton(PB_INST_VIBSWEEP_DOWN);
 	hidePushButton(PB_INST_VIBSWEEP_UP);
+	hidePushButton(PB_INST_V2);
 	hidePushButton(PB_INST_TF4);
 	// Dexed pushbutton (adjacent to TF4)
 	hidePushButton(PB_INST_DEXED);
@@ -2366,6 +2528,7 @@ void hideInstEditor(void)
 	hideCheckBox(CB_INST_PENV);
 	hideCheckBox(CB_INST_PENV_SUS);
 	hideCheckBox(CB_INST_PENV_LOOP);
+	hideCheckBox(CB_INST_V2);
 	hideCheckBox(CB_INST_TF4);
 	// Dexed checkbox (main instrument editor)
 	hideCheckBox(CB_INST_DEXED);
@@ -2459,6 +2622,7 @@ void updateInstEditor(void)
 	checkBoxes[CB_INST_PENV].checked      = (ins->panEnvFlags & ENV_ENABLED) ? true : false;
 	checkBoxes[CB_INST_PENV_SUS].checked  = (ins->panEnvFlags & ENV_SUSTAIN) ? true : false;
 	checkBoxes[CB_INST_PENV_LOOP].checked = (ins->panEnvFlags & ENV_LOOP)    ? true : false;
+	checkBoxes[CB_INST_V2].checked = ins->useV2 ? true : false;
 	checkBoxes[CB_INST_TF4].checked = ins->useTF4 ? true : false;
 	// Sync Dexed checkbox state with instrument
 	checkBoxes[CB_INST_DEXED].checked = ins->useDexed ? true : false;
@@ -2474,6 +2638,7 @@ void updateInstEditor(void)
 	drawCheckBox(CB_INST_PENV);
 	drawCheckBox(CB_INST_PENV_SUS);
 	drawCheckBox(CB_INST_PENV_LOOP);
+	drawCheckBox(CB_INST_V2);
 	drawCheckBox(CB_INST_TF4);
 	drawCheckBox(CB_INST_DEXED);
 
@@ -2577,6 +2742,7 @@ void showInstEditor(void)
 	showPushButton(PB_INST_VIBDEPTH_UP);
 	showPushButton(PB_INST_VIBSWEEP_DOWN);
 	showPushButton(PB_INST_VIBSWEEP_UP);
+	showPushButton(PB_INST_V2);
 	showPushButton(PB_INST_TF4);
 	// Dexed pushbutton (adjacent to TF4)
 	showPushButton(PB_INST_DEXED);
@@ -2591,6 +2757,7 @@ void showInstEditor(void)
 	showCheckBox(CB_INST_PENV);
 	showCheckBox(CB_INST_PENV_SUS);
 	showCheckBox(CB_INST_PENV_LOOP);
+	showCheckBox(CB_INST_V2);
 	showCheckBox(CB_INST_TF4);
 	// Dexed checkbox (main instrument editor)
 	showCheckBox(CB_INST_DEXED);
@@ -3906,9 +4073,32 @@ void cbInstUseTF4(void)
         updateInstEditor();
         updateNewInstrument();
     }
-    instr[editor.curInstr]->useTF4 ^= 1;
-    printf("[INST_ED] Instrument %d useTF4 flag set to: %s\n", editor.curInstr, instr[editor.curInstr]->useTF4 ? "TRUE" : "FALSE");
-    checkBoxes[CB_INST_TF4].checked = instr[editor.curInstr]->useTF4;
+
+    instr_t *ins = instr[editor.curInstr];
+    const bool enabling = !ins->useTF4;
+    const bool hadDexed = enabling && ins->useDexed;
+    const bool hadV2 = enabling && ins->useV2;
+
+    if (enabling && ins->useDexed)
+    {
+        ins->useDexed = false;
+        checkBoxes[CB_INST_DEXED].checked = false;
+        drawCheckBox(CB_INST_DEXED);
+    }
+
+    if (enabling && ins->useV2)
+    {
+        ins->useV2 = false;
+        checkBoxes[CB_INST_V2].checked = false;
+        drawCheckBox(CB_INST_V2);
+    }
+
+    if (enabling)
+        silenceDisabledSynthEngines(false, hadDexed, hadV2);
+
+    ins->useTF4 ^= 1;
+    printf("[INST_ED] Instrument %d useTF4 flag set to: %s\n", editor.curInstr, ins->useTF4 ? "TRUE" : "FALSE");
+    checkBoxes[CB_INST_TF4].checked = ins->useTF4;
     setSongModifiedFlag();
     drawCheckBox(CB_INST_TF4);
     updateInstrumentTextBoxNames();
@@ -3964,9 +4154,32 @@ void cbInstUseDexed(void)
         updateInstEditor();
         updateNewInstrument();
     }
-    instr[editor.curInstr]->useDexed ^= 1;
-    printf("[INST_ED] Instrument %d useDexed flag set to: %s\n", editor.curInstr, instr[editor.curInstr]->useDexed ? "TRUE" : "FALSE");
-    checkBoxes[CB_INST_DEXED].checked = instr[editor.curInstr]->useDexed;
+
+    instr_t *ins = instr[editor.curInstr];
+    const bool enabling = !ins->useDexed;
+    const bool hadTF4 = enabling && ins->useTF4;
+    const bool hadV2 = enabling && ins->useV2;
+
+    if (enabling && ins->useTF4)
+    {
+        ins->useTF4 = false;
+        checkBoxes[CB_INST_TF4].checked = false;
+        drawCheckBox(CB_INST_TF4);
+    }
+
+    if (enabling && ins->useV2)
+    {
+        ins->useV2 = false;
+        checkBoxes[CB_INST_V2].checked = false;
+        drawCheckBox(CB_INST_V2);
+    }
+
+    if (enabling)
+        silenceDisabledSynthEngines(hadTF4, false, hadV2);
+
+    ins->useDexed ^= 1;
+    printf("[INST_ED] Instrument %d useDexed flag set to: %s\n", editor.curInstr, ins->useDexed ? "TRUE" : "FALSE");
+    checkBoxes[CB_INST_DEXED].checked = ins->useDexed;
     setSongModifiedFlag();
     drawCheckBox(CB_INST_DEXED);
     updateInstrumentTextBoxNames();
@@ -3976,7 +4189,7 @@ void cbInstUseDexed(void)
     // If Dexed was just enabled, eagerly create and initialize the Dexed instance
     // for this instrument and load a default factory patch (if available). This
     // forces the C++ Dexed instance to exist before mapping UI widgets.
-    if (instr[editor.curInstr]->useDexed)
+    if (ins->useDexed)
     {
         // Only attempt to load a factory preset if presets are available.
         // This avoids unnecessary load attempts when the wrapper reports zero presets
@@ -3995,4 +4208,85 @@ void cbInstUseDexed(void)
             printf("[INST_ED] Dexed instance created for instr %d but no factory presets available (fallback will be used)\n", editor.curInstr);
         }
     }
+}
+
+void cbInstUseV2(void)
+{
+    printf("[INST_ED] cbInstUseV2() called for instrument %d\n", editor.curInstr);
+
+    if (editor.curInstr == 0)
+    {
+        printf("[INST_ED] ERROR: Cannot use V2 synth on instrument 0\n");
+        checkBoxes[CB_INST_V2].checked = false;
+        drawCheckBox(CB_INST_V2);
+        return;
+    }
+
+    if (instr[editor.curInstr] == NULL)
+    {
+        printf("[INST_ED] Instrument %d not allocated, creating it...\n", editor.curInstr);
+        if (!allocateInstr(editor.curInstr))
+        {
+            printf("[INST_ED] ERROR: Failed to allocate instrument %d\n", editor.curInstr);
+            checkBoxes[CB_INST_V2].checked = false;
+            drawCheckBox(CB_INST_V2);
+            return;
+        }
+        printf("[INST_ED] Successfully allocated instrument %d\n", editor.curInstr);
+        updateInstEditor();
+        updateNewInstrument();
+    }
+
+    instr_t *ins = instr[editor.curInstr];
+    if (ins == NULL)
+        return;
+
+    const bool enabling = !ins->useV2;
+    if (enabling && getRealUsedSamples(editor.curInstr) > 0)
+    {
+        if (okBox(2, "System request", "This will clear all samples in the instrument. Proceed?", NULL) != 1)
+        {
+            checkBoxes[CB_INST_V2].checked = ins->useV2;
+            drawCheckBox(CB_INST_V2);
+            return;
+        }
+
+        for (int i = 0; i < 16; ++i)
+            freeSample(editor.curInstr, i);
+    }
+
+    if (enabling)
+    {
+        const bool hadTF4 = ins->useTF4;
+        const bool hadDexed = ins->useDexed;
+
+        if (ins->useTF4)
+        {
+            ins->useTF4 = false;
+            checkBoxes[CB_INST_TF4].checked = false;
+            drawCheckBox(CB_INST_TF4);
+        }
+
+        if (ins->useDexed)
+        {
+            ins->useDexed = false;
+            checkBoxes[CB_INST_DEXED].checked = false;
+            drawCheckBox(CB_INST_DEXED);
+        }
+
+        silenceDisabledSynthEngines(hadTF4, hadDexed, false);
+    }
+
+    ins->useV2 ^= 1;
+    printf("[INST_ED] Instrument %d useV2 flag set to: %s\n", editor.curInstr, ins->useV2 ? "TRUE" : "FALSE");
+
+    checkBoxes[CB_INST_V2].checked = ins->useV2;
+    drawCheckBox(CB_INST_V2);
+    setSongModifiedFlag();
+    updateInstrumentTextBoxNames();
+    if (ui.instrSwitcherShown)
+        updateInstrumentSwitcher();
+
+    if (ins->useV2)
+        initV2Instrument(editor.curInstr);
 }

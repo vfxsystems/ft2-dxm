@@ -23,6 +23,7 @@ void  dx_instrument_send_midi(void* inst, uint8_t status, uint8_t data1, uint8_t
 /* Parameter access */
 void  dx_instrument_set_param(void* inst, int param, float value);
 float dx_instrument_get_param(void* inst, int param);
+int   dx_instrument_get_params(void* inst, float* out, int maxCount);
 
 /* Factory preset access (lazy loaded) */
 int         dx_get_factory_preset_count(void);
@@ -58,6 +59,7 @@ void ft2_dx_send_midi_to_instrument(int instrID, uint8_t status, uint8_t data1, 
 int ft2_dx_load_packed_patch_for_instrument(int instrID, const uint8_t* data, size_t size);
 void ft2_dx_set_param_for_instrument(int instrID, int paramId, float value);
 float ft2_dx_get_param_for_instrument(int instrID, int paramId);
+int   ft2_dx_get_params_for_instrument(int instrID, float* out, int maxCount);
 int    ft2_dx_get_factory_preset_count(void);
 const char* ft2_dx_get_factory_preset_name(int index);
 int    ft2_dx_load_factory_preset_for_instrument(int instrID, int index);

@@ -252,6 +252,10 @@ static DexedCompleteLayout* dx_create_complete_layout_from_schema(const ft2_ui_l
     layout->initialized = false;
     layout->visible = false;
     layout->active_op = 1;
+    layout->sync_interval_ms = 250;
+    layout->last_sync_ticks = 0;
+    layout->cached_param_count = 0;
+    layout->cached_params_valid = false;
 
     if (desc->bitmaps.count > 0 && desc->bitmap_desc) {
         for (uint16_t i = 0; i < desc->bitmaps.count; i++) {
@@ -415,7 +419,7 @@ static DexedCompleteLayout* dx_create_complete_layout_from_schema(const ft2_ui_l
 }
 #endif
 
-static void dx_sync_operator_widgets(DexedCompleteLayout* layout); // Forward declaration
+static void dx_sync_operator_widgets(DexedCompleteLayout* layout, const float* params, int paramCount); // Forward declaration
 static void dx_draw_operator_envelope(const DexedCompleteLayout* layout);
 
 static int dx_op_index_from_ui(int op)
@@ -441,7 +445,7 @@ static void dx_op_select_on_click(TunefishWidget* widget) {
             if (g_active_dexed_layout->op_select_buttons[i])
                 g_active_dexed_layout->op_select_buttons[i]->pressed = (i == (op - 1));
         }
-        dx_sync_operator_widgets(g_active_dexed_layout);
+        dx_sync_operator_widgets(g_active_dexed_layout, NULL, 0);
     }
 }
 
@@ -463,9 +467,15 @@ static void dx_env_get_points(const DexedCompleteLayout* layout, int left, int r
     float rates[4];
     float levels[4];
     int base = dx_op_base_from_ui(layout->active_op);
+    const bool haveCache = (layout->cached_params_valid && layout->cached_param_count >= (base + 8));
     for (int i = 0; i < 4; i++) {
-        rates[i] = ft2_dx_get_param_for_instrument(instrID, base + i);
-        levels[i] = ft2_dx_get_param_for_instrument(instrID, base + 4 + i);
+        if (haveCache) {
+            rates[i] = layout->cached_params[base + i];
+            levels[i] = layout->cached_params[base + 4 + i];
+        } else {
+            rates[i] = ft2_dx_get_param_for_instrument(instrID, base + i);
+            levels[i] = ft2_dx_get_param_for_instrument(instrID, base + 4 + i);
+        }
         if (rates[i] < 0.0f) rates[i] = 0.0f;
         if (rates[i] > 1.0f) rates[i] = 1.0f;
         if (levels[i] < 0.0f) levels[i] = 0.0f;
@@ -696,7 +706,7 @@ static void dx_widget_set_value_silent(TunefishWidget* widget, float value)
     widget->value = value;
 }
 
-static void dx_sync_operator_widgets(DexedCompleteLayout* layout) {
+static void dx_sync_operator_widgets(DexedCompleteLayout* layout, const float* params, int paramCount) {
     if (!layout) return;
 
     extern struct editor_t editor;
@@ -715,7 +725,7 @@ static void dx_sync_operator_widgets(DexedCompleteLayout* layout) {
 
     for (int i = 0; i < 21; i++) {
         int paramId = dx_op_base_from_ui(layout->active_op) + i;
-        float val = ft2_dx_get_param_for_instrument(instrID, paramId);
+        float val = (params && paramId < paramCount) ? params[paramId] : ft2_dx_get_param_for_instrument(instrID, paramId);
         if (op_widgets[i]) dx_widget_set_value_silent(op_widgets[i], val);
     }
 }
@@ -946,6 +956,18 @@ void dx_sync_widgets_with_parameters(DexedCompleteLayout* layout)
         return;
     }
 
+    float params[156];
+    int paramCount = ft2_dx_get_params_for_instrument(instrID, params, 156);
+    const bool haveParams = (paramCount > 0);
+    if (haveParams) {
+        layout->cached_param_count = paramCount;
+        memcpy(layout->cached_params, params, (size_t)paramCount * sizeof(float));
+        layout->cached_params_valid = true;
+    } else {
+        layout->cached_params_valid = false;
+        layout->cached_param_count = 0;
+    }
+
     /* Iterate all created widgets and attempt to fetch a parameter for each
      * widget that has a known param mapping. If the underlying Dexed wrapper
      * does not support a queried param, ft2_dx_get_param_for_instrument() is
@@ -971,7 +993,7 @@ void dx_sync_widgets_with_parameters(DexedCompleteLayout* layout)
         if (paramId < 0) continue;
 
         /* Query wrapper for normalized parameter (0.0 .. 1.0) */
-        float val = ft2_dx_get_param_for_instrument(instrID, paramId);
+        float val = (haveParams && paramId < paramCount) ? params[paramId] : ft2_dx_get_param_for_instrument(instrID, paramId);
 
         /* Clamp to safe bounds */
         if (val < 0.0f) val = 0.0f;
@@ -992,10 +1014,6 @@ void dx_sync_widgets_with_parameters(DexedCompleteLayout* layout)
                     if (idx < 0) idx = 0;
                     if (idx >= w->comboItemCount) idx = w->comboItemCount - 1;
                     w->selectedIndex = idx;
-                    /* Avoid re-triggering preset loads while syncing */
-                    if (w->onComboSelect && strcmp(w->name, "dx_preset_combo") != 0) {
-                        w->onComboSelect(w, idx);
-                    }
                 }
                 break;
 
@@ -1022,7 +1040,7 @@ void dx_sync_widgets_with_parameters(DexedCompleteLayout* layout)
     ui.updatePatternEditor = true;
     ui.updatePosSections = true;
 
-    dx_sync_operator_widgets(layout);
+    dx_sync_operator_widgets(layout, params, paramCount);
 }
 
 void dx_update_widget_from_parameter(DexedCompleteLayout* layout, const char* widgetName, int value)
@@ -1058,6 +1076,10 @@ DexedCompleteLayout* dx_create_complete_layout(void)
     l->initialized = false;
     l->visible = false;
     l->active_op = 1;
+    l->sync_interval_ms = 250;
+    l->last_sync_ticks = 0;
+    l->cached_param_count = 0;
+    l->cached_params_valid = false;
 
     /* Create global widgets using same layout as Tunefish editor */
     {
@@ -1440,6 +1462,7 @@ void dx_show_layout(DexedCompleteLayout* layout)
     g_dx_close_pending = false;
     if (layout->close_button) layout->close_button->pressed = false;
     dx_update_all_widgets_from_synth(layout);
+    layout->last_sync_ticks = SDL_GetTicks();
     layout->visible = true;
     dx_switch_to_page(layout, 0);
     dx_update_widget_visibility(layout);
@@ -1459,8 +1482,16 @@ void dx_render_complete_layout(DexedCompleteLayout* layout)
 {
     if (!layout || !layout->visible) return;
 
-    // Keep UI controls in sync with live synth state while visible
-    dx_update_all_widgets_from_synth(layout);
+    // Keep UI controls in sync with live synth state while visible (throttled)
+    if (layout->sync_interval_ms == 0) {
+        layout->sync_interval_ms = 250;
+    }
+
+    uint32_t nowTicks = SDL_GetTicks();
+    if (layout->last_sync_ticks == 0 || (uint32_t)(nowTicks - layout->last_sync_ticks) >= layout->sync_interval_ms) {
+        dx_update_all_widgets_from_synth(layout);
+        layout->last_sync_ticks = nowTicks;
+    }
 
     /* Clear background */
     fillRect(0, 0, SCREEN_W, SCREEN_H, PAL_DESKTOP);

@@ -1,5 +1,6 @@
 #include "ft2_unified_synth.h"
 #include "ft2_dexed.h"
+#include "ft2_v2.h"
 #include "ft2_synth.h"
 #include "ft2_replayer.h"
 #include "ft2_header.h"
@@ -19,6 +20,7 @@
 // Global state
 static UnifiedSynthInterface g_engines[SYNTH_TYPE_COUNT] = {0};
 static bool g_initialized = false;
+static int g_currentSampleRate = 0;
 
 // Helper macros
 #define ENGINE_VALID(engine) ((engine) >= 0 && (engine) < SYNTH_TYPE_COUNT && g_engines[engine].engineName != NULL)
@@ -306,9 +308,16 @@ static const char* dexed_get_param_name(int paramId) {
         "LFO Rate", "LFO Depth", "LFO Delay", "LFO Sync", "LFO Wave", "Mod Sens", "Key Track", "Pitch Bend", "Portamento", "Brightness"
         // ... more parameter names would go here
     };
-    
-    if (paramId >= 0 && paramId < 156) {
+    static char param_buf[32];
+    const int name_count = (int)(sizeof(param_names)/sizeof(param_names[0]));
+
+    if (paramId >= 0 && paramId < name_count) {
         return param_names[paramId];
+    }
+
+    if (paramId >= 0 && paramId < 156) {
+        snprintf(param_buf, sizeof(param_buf), "DX Param %d", paramId);
+        return param_buf;
     }
     return "Unknown";
 }
@@ -366,11 +375,112 @@ static int dexed_get_active_voices(int instrID) {
 }
 
 // =============================================================================
+// V2 ENGINE IMPLEMENTATION
+// =============================================================================
+
+static void v2_init(int samplerate) {
+    US_DEBUG("Initializing V2 engine at %d Hz", samplerate);
+    ft2_v2_init(samplerate);
+}
+
+static void v2_shutdown(void) {
+    US_DEBUG("Shutting down V2 engine");
+    ft2_v2_shutdown();
+}
+
+static void v2_render(float* bufL, float* bufR, int nsamples, int add) {
+    ft2_v2_render(bufL, bufR, nsamples, add);
+}
+
+static void v2_render_for_channel(int instrID, float* bufL, float* bufR, int nsamples, int add) {
+    ft2_v2_render_for_channel(instrID, bufL, bufR, nsamples, add);
+}
+
+static void v2_send_midi(int instrID, const MidiMessage* message) {
+    if (message) {
+        ft2_v2_send_midi_to_instrument(instrID, message->status, message->data1, message->data2);
+    }
+}
+
+static void v2_panic(void) {
+    ft2_v2_panic();
+}
+
+static void v2_set_param(int instrID, int paramId, float value) {
+    ft2_v2_set_param_for_instrument(instrID, paramId, value);
+}
+
+static float v2_get_param(int instrID, int paramId) {
+    return ft2_v2_get_param_for_instrument(instrID, paramId);
+}
+
+static const ParameterRange* v2_get_param_range(int paramId) {
+    return ft2_v2_get_param_range(paramId);
+}
+
+static int v2_get_param_count(void) {
+    return ft2_v2_get_param_count();
+}
+
+static const char* v2_get_param_name(int paramId) {
+    return ft2_v2_get_param_name(paramId);
+}
+
+static int v2_load_patch(int instrID, const uint8_t* data, size_t size) {
+    return ft2_v2_load_patch_for_instrument(instrID, data, size);
+}
+
+static int v2_save_patch(int instrID, uint8_t* buffer, size_t bufferSize) {
+    return ft2_v2_get_patch_data(instrID, buffer, (int32_t)bufferSize);
+}
+
+static int v2_get_patch_size(int instrID) {
+    (void)instrID;
+    return ft2_v2_get_patch_size();
+}
+
+static int v2_get_preset_count(void) {
+    return ft2_v2_get_factory_preset_count();
+}
+
+static const char* v2_get_preset_name(int presetIndex) {
+    return ft2_v2_get_factory_preset_name(presetIndex);
+}
+
+static int v2_load_preset(int instrID, int presetIndex) {
+    return ft2_v2_load_preset_for_instrument(instrID, presetIndex);
+}
+
+static void v2_store_state(int instrID) {
+    ft2_v2_store_instrument_state(instrID);
+}
+
+static void v2_restore_state(int instrID) {
+    ft2_v2_restore_instrument_state(instrID);
+}
+
+static bool v2_has_state(int instrID) {
+    return ft2_v2_has_persistent_state(instrID);
+}
+
+static void v2_clear_state(int instrID) {
+    ft2_v2_clear_persistent_state(instrID);
+}
+
+static int v2_get_active_voices(int instrID) {
+    return ft2_v2_get_active_voice_count(instrID);
+}
+
+// =============================================================================
 // GLOBAL SYNTH MANAGEMENT
 // =============================================================================
 
 void ft2_unified_synth_init(int samplerate) {
-    if (g_initialized) return;
+    if (g_initialized) {
+        if (g_currentSampleRate == samplerate)
+            return;
+        ft2_unified_synth_shutdown();
+    }
     
     US_DEBUG("Initializing unified synth system with sample rate %d", samplerate);
     
@@ -452,7 +562,46 @@ void ft2_unified_synth_init(int samplerate) {
     if (dexed_engine.init) {
         dexed_engine.init(samplerate);
     }
+
+    // Register V2 engine
+    US_DEBUG("Registering V2 engine");
+    UnifiedSynthInterface v2_engine = {
+        .engineType = SYNTH_TYPE_V2,
+        .engineName = "V2",
+        .init = v2_init,
+        .shutdown = v2_shutdown,
+        .render = v2_render,
+        .render_for_channel = v2_render_for_channel,
+        .send_midi = v2_send_midi,
+        .panic = v2_panic,
+        .set_param = v2_set_param,
+        .get_param = v2_get_param,
+        .get_param_range = v2_get_param_range,
+        .get_param_count = v2_get_param_count,
+        .get_param_name = v2_get_param_name,
+        .load_patch = v2_load_patch,
+        .save_patch = v2_save_patch,
+        .get_patch_size = v2_get_patch_size,
+        .get_preset_count = v2_get_preset_count,
+        .get_preset_name = v2_get_preset_name,
+        .load_preset = v2_load_preset,
+        .store_state = v2_store_state,
+        .restore_state = v2_restore_state,
+        .has_state = v2_has_state,
+        .clear_state = v2_clear_state,
+        .get_active_voices = v2_get_active_voices,
+        .engineData = NULL
+    };
+
+    g_engines[SYNTH_TYPE_V2] = v2_engine;
+
+    // Initialize V2 engine
+    US_DEBUG("Initializing V2 engine");
+    if (v2_engine.init) {
+        v2_engine.init(samplerate);
+    }
     
+    g_currentSampleRate = samplerate;
     g_initialized = true;
     US_DEBUG("Unified synth system initialized with %d engines", SYNTH_TYPE_COUNT);
 }
@@ -469,7 +618,12 @@ void ft2_unified_synth_shutdown(void) {
         }
     }
     
+    g_currentSampleRate = 0;
     g_initialized = false;
+}
+
+void ft2_unified_synth_set_samplerate(int samplerate) {
+    ft2_unified_synth_init(samplerate);
 }
 
 void ft2_unified_synth_register_engine(const UnifiedSynthInterface* engine) {
@@ -507,8 +661,11 @@ SynthEngineType ft2_unified_synth_get_active_engine(int instrID) {
         instr_t *ins = instr[instrID];
         
         if (ins) {
-            US_DEBUG("Engine detection for instr %d: useTF4=%d, useDexed=%d", 
-                    instrID, ins->useTF4 ? 1 : 0, ins->useDexed ? 1 : 0);
+            US_DEBUG("Engine detection for instr %d: useTF4=%d, useDexed=%d, useV2=%d", 
+                    instrID, ins->useTF4 ? 1 : 0, ins->useDexed ? 1 : 0, ins->useV2 ? 1 : 0);
+            if (ins->useV2) {
+                return SYNTH_TYPE_V2;
+            }
             if (ins->useDexed) {
                 return SYNTH_TYPE_DEXED;
             }

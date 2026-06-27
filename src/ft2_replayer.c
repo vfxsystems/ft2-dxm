@@ -71,14 +71,13 @@ static inline uint8_t synthMidiChan(int chIdx)
 	return (uint8_t)(chIdx & 0x0F);
 }
 
-void ft2_send_synth_midi_dedup(int chIdx, int instrID, bool useDexed, uint8_t status, uint8_t data1, uint8_t data2)
+void ft2_send_synth_midi_dedup(int chIdx, int instrID, uint8_t status, uint8_t data1, uint8_t data2)
 {
 	if (instrID < 0) return;
+
+	MidiMessage message = { status, data1, data2 };
 	if (chIdx < 0 || chIdx >= MAX_CHANNELS) {
-		if (useDexed)
-			ft2_dx_send_midi_to_instrument(instrID, status, data1, data2);
-		else
-			ft2_synth_send_midi_to_instrument(instrID, status, data1, data2);
+		ft2_unified_synth_send_midi(instrID, &message);
 		return;
 	}
 
@@ -95,10 +94,7 @@ void ft2_send_synth_midi_dedup(int chIdx, int instrID, bool useDexed, uint8_t st
 	synthMidiLastData1[chIdx] = data1;
 	synthMidiLastData2[chIdx] = data2;
 
-	if (useDexed)
-		ft2_dx_send_midi_to_instrument(instrID, status, data1, data2);
-	else
-		ft2_synth_send_midi_to_instrument(instrID, status, data1, data2);
+	ft2_unified_synth_send_midi(instrID, &message);
 }
 
 void fixString(char *str, int32_t lastChrPos) // removes leading spaces and 0x1A chars
@@ -420,14 +416,14 @@ void keyOff(channel_t *ch)
 
 	/* For TF4 synth instruments: send MIDI note-off earlier (done in triggerNote) and keep
 	   channel active so the release tail renders. Skip muting/keyOff flag. */
-	if (ins->useTF4 || ins->useDexed)
+	if (ins->useTF4 || ins->useDexed || ins->useV2)
 	{
 		int chIdx = (int)(ch - channel);
 		printf("[KEYOFF] SYNTH NOTE-OFF (release): instr=%d, note=%d useDexed=%s useTF4=%s\n",
 		       ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
 		/* Ensure we don't call synth twice – but safe either way. */
 		if (ch->noteNum > 0) {
-			ft2_send_synth_midi_dedup(chIdx, ch->instrNum, ins->useDexed, 0x80 | synthMidiChan(chIdx), ch->noteNum, 0);
+			ft2_send_synth_midi_dedup(chIdx, ch->instrNum, 0x80 | synthMidiChan(chIdx), ch->noteNum, 0);
 		}
 
 		/* Keep channel note state so synth release tails render consistently. */
@@ -549,7 +545,7 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
         assert(ch->instrNum <= 130);
         instr_t *ins = instr[ch->instrNum];
         
-        if (ins != NULL && (ins->useTF4 || ins->useDexed))
+        if (ins != NULL && (ins->useTF4 || ins->useDexed || ins->useV2))
         {
             printf("[TRIGGER] SYNTH NOTE OFF DETECTED: instr=%d, noteNum=%d useDexed=%s useTF4=%s\n",
                 ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
@@ -582,7 +578,7 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 	
     		// If instrument uses Tunefish4 or Dexed synth, send MIDI instead of samples.
 		// Prefer Dexed when both flags are set so keyboard/keyjazz and playback route correctly.
-        if (ins->useTF4 || ins->useDexed)
+        if (ins->useTF4 || ins->useDexed || ins->useV2)
 		{
 			printf("[TRIGGER] SYNTH NOTE ON DETECTED: instr=%d, note=%d useDexed=%s useTF4=%s\n",
 				ch->instrNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
@@ -592,7 +588,7 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 			
             // If a previous note is active on this channel, send note-off first
 			if (prevNote > 0 && prevNote != NOTE_OFF && prevNote != note) {
-				ft2_send_synth_midi_dedup(chIdx, ch->instrNum, ins->useDexed, 0x80 | synthMidiChan(chIdx), prevNote, 0);
+				ft2_send_synth_midi_dedup(chIdx, ch->instrNum, 0x80 | synthMidiChan(chIdx), prevNote, 0);
 			}
 
 			// Note on with velocity based on channel volume
@@ -601,7 +597,7 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 				velocity = (ch->realVol > 64) ? 127 : (ch->realVol * 2);
 			}
 			// Prefer Dexed when applicable
-			ft2_send_synth_midi_dedup(chIdx, ch->instrNum, ins->useDexed, 0x90 | synthMidiChan(chIdx), note, velocity);
+			ft2_send_synth_midi_dedup(chIdx, ch->instrNum, 0x90 | synthMidiChan(chIdx), note, velocity);
 
 			ch->noteNum = note;
 			ch->keyOff = false;
@@ -3306,10 +3302,9 @@ void stopPlaying(void)
 	for (uint8_t i = 0; i < MAX_CHANNELS; i++)
 	{
 		channel_t *ch = &channel[i];
-		if (ch->instrPtr && (ch->instrPtr->useTF4 || ch->instrPtr->useDexed) && ch->noteNum > 0)
+		if (ch->instrPtr && (ch->instrPtr->useTF4 || ch->instrPtr->useDexed || ch->instrPtr->useV2) && ch->noteNum > 0)
 		{
-			ft2_send_synth_midi_dedup(i, ch->instrNum, ch->instrPtr->useDexed,
-				0x80 | synthMidiChan(i), ch->noteNum, 0);
+			ft2_send_synth_midi_dedup(i, ch->instrNum, 0x80 | synthMidiChan(i), ch->noteNum, 0);
 		}
 	}
 
@@ -3361,7 +3356,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 	channel_t *ch = &channel[chNum];
 
 	// Check if instrument uses a synth - handle it separately for keyboard/jamming
-	if (ins->useTF4 || ins->useDexed)
+        if (ins->useTF4 || ins->useDexed || ins->useV2)
 	{
 		lockAudio();
 
@@ -3370,7 +3365,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 			// If a previous note is active on this channel, send note-off first
 			if (ch->noteNum > 0 && ch->noteNum != NOTE_OFF)
             {
-				ft2_send_synth_midi_dedup(chNum, insNum, ins->useDexed, 0x80 | synthMidiChan(chNum), ch->noteNum, 0);
+			ft2_send_synth_midi_dedup(chNum, insNum, 0x80 | synthMidiChan(chNum), ch->noteNum, 0);
             }
 
 			ch->copyOfInstrAndNote = (insNum << 8) | (ch->copyOfInstrAndNote & 0xFF);
@@ -3385,7 +3380,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 		if (note == NOTE_OFF)
 		{
 			if (ch->noteNum > 0)
-				ft2_send_synth_midi_dedup(chNum, insNum, ins->useDexed, 0x80 | synthMidiChan(chNum), ch->noteNum, 0);
+				ft2_send_synth_midi_dedup(chNum, insNum, 0x80 | synthMidiChan(chNum), ch->noteNum, 0);
 			// Keep note state so synth release tails render consistently.
 		}
 		else
@@ -3397,7 +3392,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 
             printf("[PLAYTONE] SYNTH KEYBOARD INPUT: instr=%d, note=%d, useDexed=%s useTF4=%s\n",
                 insNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
-			ft2_send_synth_midi_dedup(chNum, insNum, ins->useDexed, 0x90 | synthMidiChan(chNum), note, velocity);
+			ft2_send_synth_midi_dedup(chNum, insNum, 0x90 | synthMidiChan(chNum), note, velocity);
 
 			ch->noteNum = note;
 			ch->keyOff = false;

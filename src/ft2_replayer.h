@@ -11,6 +11,10 @@
 #include "mixer/ft2_cubic_spline.h"
 #include "mixer/ft2_windowed_sinc.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum
 {
 	// voice flags
@@ -252,6 +256,7 @@ typedef struct instr_t
 {
 	bool useTF4;     // new flag: use Tunefish4 synth engine for this instrument
     bool useDexed;   // new flag: use Dexed FM synth engine for this instrument
+    bool useV2;      // new flag: use V2 synth engine for this instrument
     bool isDXMInstrument; // new flag: distinguishes DXM instruments from XM instruments
 	bool midiOn, mute;
 	uint8_t midiChannel, note2SampleLUT[96];
@@ -366,7 +371,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 void playSample(uint8_t chNum, uint8_t insNum, uint8_t smpNum, uint8_t note, uint16_t midiVibDepth, uint16_t midiPitch);
 void playRange(uint8_t chNum, uint8_t insNum, uint8_t smpNum, uint8_t note, uint16_t midiVibDepth, uint16_t midiPitch, int32_t smpOffset, int32_t length);
 void keyOff(channel_t *ch);
-void ft2_send_synth_midi_dedup(int chIdx, int instrID, bool useDexed, uint8_t status, uint8_t data1, uint8_t data2);
+void ft2_send_synth_midi_dedup(int chIdx, int instrID, uint8_t status, uint8_t data1, uint8_t data2);
 void conv8BitSample(int8_t *p, int32_t length, bool stereo); // changes sample sign
 void conv16BitSample(int8_t *p, int32_t length, bool stereo); // changes sample sign
 void delta2Samp(int8_t *p, int32_t length, uint8_t smpFlags);
@@ -405,5 +410,9 @@ extern song_t song;
 extern instr_t *instr[128+4];
 extern note_t *pattern[MAX_PATTERNS];
 extern macroNote_t *macroPattern[MAX_PATTERNS];
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // FT2_REPLAYER_H

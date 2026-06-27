@@ -79,7 +79,15 @@ typedef struct cursor_t
 	int8_t object;
 } cursor_t;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern cpu_t cpu;
 extern editor_t editor;
 extern ui_t ui;
 extern cursor_t cursor;
+
+#ifdef __cplusplus
+}
+#endif

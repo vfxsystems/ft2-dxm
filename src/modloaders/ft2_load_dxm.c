@@ -7,18 +7,18 @@
 **
 ** See ft2_load_xm.c for standard XM loading logic.
 */
-#ifdef _GNU_SOURCE
-#include <stdio.h>
-#else
-#include <unistd.h>
-#endif
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include "../ft2_structs.h"
 #include "../ft2_dsp.h"
 #include "../ft2_sample_ed.h"
 #include "../ft2_synth.h"
+#include "../ft2_unified_synth.h"
+#include "../ft2_v2.h"
 #include "../ft2_audio.h"
 #include "../ft2_checkboxes.h"
 #include "../ft2_header.h"
@@ -49,6 +49,19 @@ extern int dx_unpack_program_from_storage(const uint8_t* packed128, uint8_t* out
 // Forward declaration for XM loader
 bool loadXM(FILE *f, uint32_t filesize);
 
+static void normalizeSynthFlags(instr_t *ins)
+{
+    if (ins == NULL)
+        return;
+
+    if (ins->useV2) {
+        ins->useDexed = false;
+        ins->useTF4 = false;
+    } else if (ins->useDexed) {
+        ins->useTF4 = false;
+    }
+}
+
 static void restoreAllDexedStatesDXM(FILE *f, uint32_t chunkLen)
 {
     uint8_t numDexed = 0;
@@ -78,6 +91,7 @@ static void restoreAllDexedStatesDXM(FILE *f, uint32_t chunkLen)
 
         // Set the Dexed flag
         ins->useDexed = true;
+        normalizeSynthFlags(ins);
         ins->isDXMInstrument = true;
         
         // Copy patch data: sanitize feedback byte to avoid invalid shift counts in Dexed engine.
@@ -362,7 +376,7 @@ static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
 
     if (!ft2_synth_is_initialized()) {
         int sr = (audio.freq > 0) ? audio.freq : 44100;
-        ft2_synth_init(sr);
+        ft2_unified_synth_set_samplerate(sr);
     }
     
     for (uint8_t i = 0; i < numTF4; i++) {
@@ -387,6 +401,7 @@ static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
 
         // Set the TF4 flag before any UI or synth refresh
         ins->useTF4 = true;
+        normalizeSynthFlags(ins);
         printf("[DXM-LOAD] Set useTF4=TRUE for instr %d, addr=%p\n", instrIdx, (void*)ins);
         strncpy(ins->smp[0].name, name, 22);
         int tf4Idx = instrIdx;
@@ -408,6 +423,68 @@ static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
     
     // Re-enable preset loading for future instruments without persistent state
     setSkipPresetOnCreate(false);
+}
+
+// Helper: Restore all V2 instrument states from buffer
+static void restoreAllV2StatesDXM(FILE *f, uint32_t chunkLen)
+{
+    (void)chunkLen;
+    uint8_t numV2 = 0;
+    fread(&numV2, sizeof(uint8_t), 1, f);
+    printf("[DXM-LOAD] V2 chunk contains %d instruments\n", numV2);
+
+    for (uint8_t i = 0; i < numV2; i++) {
+        uint8_t instrIdx = 0;
+        uint32_t blobLen = 0;
+        fread(&instrIdx, sizeof(uint8_t), 1, f);
+        fread(&blobLen, sizeof(uint32_t), 1, f);
+
+        if (instrIdx < 1 || instrIdx > 128 || blobLen == 0) {
+            if (blobLen > 0)
+                skip_bytes(f, blobLen);
+            continue;
+        }
+
+        if (blobLen > chunkLen || blobLen > (16u * 1024u * 1024u)) {
+            printf("[DXM-LOAD] WARNING: Invalid V2 blob length %u for instr %u\n", blobLen, instrIdx);
+            return;
+        }
+
+        uint8_t *blob = (uint8_t *)malloc(blobLen);
+        if (!blob) {
+            skip_bytes(f, blobLen);
+            continue;
+        }
+
+        if (fread(blob, 1, blobLen, f) != blobLen) {
+            free(blob);
+            return;
+        }
+
+        instr_t *ins = instrTmp[instrIdx];
+        if (!ins) {
+            if (!allocateTmpInstr(instrIdx)) {
+                free(blob);
+                continue;
+            }
+            ins = instrTmp[instrIdx];
+        }
+        if (!ins) {
+            free(blob);
+            continue;
+        }
+
+        if (ft2_v2_deserialize_state(instrIdx, blob, blobLen)) {
+            ins->useV2 = true;
+            normalizeSynthFlags(ins);
+            ins->isDXMInstrument = true;
+            printf("[DXM-LOAD] Restored V2 state for instr %d\n", instrIdx);
+        } else {
+            printf("[DXM-LOAD] WARNING: Failed to restore V2 state for instr %d\n", instrIdx);
+        }
+
+        free(blob);
+    }
 }
 
 // Helper: Restore DXM instrument metadata to distinguish from XM instruments
@@ -433,8 +510,8 @@ static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
         }
         if (!ins) continue;
         
-        printf("[DXM-LOAD] DXM instr %d: flags=0x%02X (TF4=%d, stereo=%d, Dexed=%d)\n", 
-               instrIdx, flags, (flags & 1) ? 1 : 0, (flags & 2) ? 1 : 0, (flags & 4) ? 1 : 0);
+        printf("[DXM-LOAD] DXM instr %d: flags=0x%02X (TF4=%d, stereo=%d, Dexed=%d, V2=%d)\n", 
+               instrIdx, flags, (flags & 1) ? 1 : 0, (flags & 2) ? 1 : 0, (flags & 4) ? 1 : 0, (flags & 8) ? 1 : 0);
         
         // Mark this as a DXM instrument (not a regular XM instrument)
         // This will be used to determine how to handle stereo samples
@@ -449,6 +526,11 @@ static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
             ins->useDexed = true;
             printf("[DXM-LOAD] Set Dexed flag for instrument %d from metadata\n", instrIdx);
         }
+        if (flags & 8) {
+            ins->useV2 = true;
+            printf("[DXM-LOAD] Set V2 flag for instrument %d from metadata\n", instrIdx);
+        }
+        normalizeSynthFlags(ins);
         
         // Note: Stereo sample flags are already set by the WAV chunk loader
         // This metadata just confirms which instruments are DXM vs XM
@@ -571,17 +653,18 @@ bool loadDXM(FILE *f, uint32_t filesize)
     char *xmBuf = (char *)malloc(xmSize);
     if (!xmBuf || fread(xmBuf, 1, xmSize, f) != xmSize) { free(xmBuf); return false; }
 
-    FILE *xmFile = NULL;
+FILE *xmFile = NULL;
 #ifdef _GNU_SOURCE
     xmFile = fmemopen(xmBuf, xmSize, "rb");
 #else
-    char tmpName[] = "/tmp/dxm_xm_XXXXXX";
-    int fd = mkstemp(tmpName);
-    if (fd == -1) { free(xmBuf); return false; }
-    if (write(fd, xmBuf, xmSize) != (ssize_t)xmSize) { close(fd); free(xmBuf); unlink(tmpName); return false; }
-    close(fd);
-    xmFile = fopen(tmpName, "rb");
-    unlink(tmpName);
+    xmFile = tmpfile();
+    if (xmFile == NULL) { free(xmBuf); return false; }
+    if (fwrite(xmBuf, 1, xmSize, xmFile) != xmSize) {
+        fclose(xmFile);
+        free(xmBuf);
+        return false;
+    }
+    rewind(xmFile);
 #endif
     if (!xmFile) { free(xmBuf); return false; }
     
@@ -619,6 +702,9 @@ bool loadDXM(FILE *f, uint32_t filesize)
         } else if (memcmp(chunkId, "DXMDEX", 6) == 0) {
             printf("[DXM-LOAD] Found Dexed chunk, length=%d\n", chunkLen);
             restoreAllDexedStatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMV2S", 6) == 0) {
+            printf("[DXM-LOAD] Found V2 chunk, length=%d\n", chunkLen);
+            restoreAllV2StatesDXM(f, chunkLen);
         } else if (memcmp(chunkId, "DXMMAP", 6) == 0) {
             printf("[DXM-LOAD] Found Macro Map chunk, length=%u\n", chunkLen);
             restoreMacroMapDXM(f, chunkLen);
@@ -639,7 +725,7 @@ bool loadDXM(FILE *f, uint32_t filesize)
     // Final post-load synth init pass (cold boot safety)
     if (!ft2_synth_is_initialized()) {
         int sr = (audio.freq > 0) ? audio.freq : 44100;
-        ft2_synth_init(sr);
+        ft2_unified_synth_set_samplerate(sr);
     }
     if (!ft2_dx_is_initialized()) {
         int sr = (audio.freq > 0) ? audio.freq : 44100;

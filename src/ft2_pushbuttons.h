@@ -573,6 +573,9 @@ enum // PUSHBUTTONS
 	NUM_PUSHBUTTONS
 };
 
+// Reserved instrument-editor slot reused for the V2 synth button.
+#define PB_INST_V2 PB_RES_1
+
 // Append-only ID ranges for designer-driven layouts (do not reorder existing IDs).
 #define PB_TF_BASE NUM_PUSHBUTTONS
 #define PB_TF_COUNT 0

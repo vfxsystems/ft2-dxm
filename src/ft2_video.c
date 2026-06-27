@@ -39,6 +39,7 @@
 #include "ft2_structs.h"
 #include "ft2_mixer_gui.h"
 #include "ft2_dsp_editor.h"
+#include "ft2_v2_complete_layout.h"
 
 
 static const uint8_t textCursorData[12] =
@@ -50,10 +51,6 @@ static const uint8_t textCursorData[12] =
 };
 
 video_t video; // globalized
-
-// Forward declarations for synth editor layouts
-extern DexedCompleteLayout* g_dexed_layout_singleton;
-extern TunefishCompleteLayout* g_active_tunefish_layout;
 
 static bool songIsModified;
 static char wndTitle[256];
@@ -1042,7 +1039,12 @@ void handleRedrawing(void)
 		{
 			instr_t *ins = instr[editor.curInstr];
 			
-			if (ins->useDexed && g_dexed_layout_singleton != NULL)
+			if (ins->useV2 && g_active_v2_layout != NULL)
+			{
+				// Render V2 editor
+				v2_render_complete_layout(g_active_v2_layout);
+			}
+			else if (ins->useDexed && g_dexed_layout_singleton != NULL)
 			{
 				// Render Dexed editor
 				dx_render_complete_layout(g_dexed_layout_singleton);

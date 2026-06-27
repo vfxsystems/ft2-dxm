@@ -328,6 +328,18 @@ float ft2_dx_get_param_for_instrument(int instrID, int paramId)
     return v;
 }
 
+int ft2_dx_get_params_for_instrument(int instrID, float* out, int maxCount)
+{
+    if (dx_index_from_ft2(instrID) < 0) return 0;
+    if (!g_dxSynthInitialized) return 0;
+    if (!out || maxCount <= 0) return 0;
+
+    void* inst = ensure_dx_inst(instrID);
+    if (!inst) return 0;
+
+    return dx_instrument_get_params(inst, out, maxCount);
+}
+
 /* =============================================================================
  * Patch Data I/O
  * ============================================================================= */

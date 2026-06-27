@@ -116,6 +116,13 @@ struct DexedCompleteLayout {
     bool initialized;
     bool visible;
 
+    uint32_t sync_interval_ms;
+    uint32_t last_sync_ticks;
+
+    float cached_params[156];
+    int cached_param_count;
+    bool cached_params_valid;
+
     /* Arrays for management (mirrors TunefishCompleteLayout) */
     TunefishWidget* all_widgets[DX_TOTAL_WIDGETS];
     TunefishWidget* global_widgets[DX_GLOBAL_WIDGETS];
