@@ -634,18 +634,16 @@ void ft2_synth_render_for_channel(int instrID, float *bufL, float *bufR, int nsa
         memset(bufR, 0, nsamples * sizeof(float));
         return;
     }
-    // Use local (stack) buffers for this call
-    float instrL[4096], instrR[4096];
-    if (nsamples > 4096) nsamples = 4096;
-    memset(instrL, 0, nsamples * sizeof(float));
-    memset(instrR, 0, nsamples * sizeof(float));
-    float* instrOutputs[2] = {instrL, instrR};
+    if (nsamples > g_maxBufferSize) nsamples = g_maxBufferSize;
+    memset(g_tempBufferL, 0, nsamples * sizeof(float));
+    memset(g_tempBufferR, 0, nsamples * sizeof(float));
+    float* instrOutputs[2] = {g_tempBufferL, g_tempBufferR};
     tf_instrument_process(g_synth, instrument, instrOutputs, nsamples);
     const float preFaderGain = 0.5f;
-    // Apply pre-fader gain and soft limiting (tanh) before mixing
+    // Apply pre-fader gain before mixing
     for (int j = 0; j < nsamples; j++) {
-        float l = tanhf(instrL[j] * preFaderGain);
-        float r = tanhf(instrR[j] * preFaderGain);
+        float l = g_tempBufferL[j] * preFaderGain;
+        float r = g_tempBufferR[j] * preFaderGain;
         if (add) {
             bufL[j] += l;
             bufR[j] += r;

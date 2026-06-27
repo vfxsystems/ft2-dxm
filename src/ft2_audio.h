@@ -134,6 +134,7 @@ void calcPanningTable(void);
 void setAudioAmp(int16_t amp, int16_t masterVol, bool bitDepth32Flag);
 void setNewAudioFreq(uint32_t freq);
 void setBackOldAudioFreq(void);
+void audioSetSynthRoutingDebug(bool enabled);
 void setMixerBPM(int32_t bpm);
 void audioSetVolRamp(bool volRamp);
 void audioSetInterpolationType(uint8_t interpolationType);

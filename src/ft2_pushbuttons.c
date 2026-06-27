@@ -35,13 +35,15 @@
 
 void pbShowDexedEditor(void);
 void pbShowTunefishEditor(void);
+void pbShowV2Editor(void);
 
 #define BUTTON_GFX_BMP_WIDTH 90
 
 pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 {
 	// ------ RESERVED PUSHBUTTONS ------
-	{ 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 },
+	{ 537, 276, 22, 16, 0, 0, "V2",               NULL,    NULL,           pbShowV2Editor },
+	{ 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 },
 
 	/*
 	** -- STRUCT INFO: --

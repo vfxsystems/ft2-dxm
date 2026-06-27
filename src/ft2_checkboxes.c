@@ -21,7 +21,7 @@
 checkBox_t checkBoxes[NUM_CHECKBOXES] =
 {
 	// ------ RESERVED CHECKBOX ------
-	{ 0 },
+	{ 524, 278, 12, 12, cbInstUseV2 },
 
 	/*
 	** -- STRUCT INFO: --

@@ -16,6 +16,7 @@
 #include "ft2_structs.h"
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
+#include "ft2_v2.h"
 
 static void getDexedPatchNameFromParams(const uint8_t *params, char *out, size_t outSize)
 {
@@ -1239,8 +1240,28 @@ void updateInstrumentTextBoxNames(void)
 
 		if (instrNum >= 1 && instrNum <= MAX_INST && instr[instrNum] != NULL)
 		{
+			// Prefer showing V2 status when enabled
+			if (instr[instrNum]->useV2)
+			{
+				const char* presetName = ft2_v2_get_current_preset_name_for_instrument(instrNum);
+				char v2Name[23];
+
+				if (presetName != NULL && *presetName)
+				{
+					snprintf(v2Name, sizeof(v2Name), "V2#%d:%s", instrNum, presetName);
+					if (strlen(v2Name) > 22)
+						snprintf(v2Name, sizeof(v2Name), "V2#%d:%.6s", instrNum, presetName);
+				}
+				else
+				{
+					snprintf(v2Name, sizeof(v2Name), "V2#%d", instrNum);
+				}
+
+				strncpy(song.instrName[instrNum], v2Name, 22);
+				song.instrName[instrNum][22] = '\0';
+			}
 			// Prefer showing Tunefish4 status when enabled
-			if (instr[instrNum]->useTF4)
+			else if (instr[instrNum]->useTF4)
 			{
 				// Get current preset information
 				int presetIndex = ft2_synth_get_current_preset_for_instrument(instrNum);

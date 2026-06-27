@@ -13,6 +13,7 @@ extern "C" {
 typedef enum {
     SYNTH_TYPE_TUNEFISH4,
     SYNTH_TYPE_DEXED,
+    SYNTH_TYPE_V2,
     SYNTH_TYPE_SAMPLES,
     SYNTH_TYPE_COUNT
 } SynthEngineType;
@@ -82,6 +83,7 @@ typedef struct {
 // Global synth management
 void ft2_unified_synth_init(int samplerate);
 void ft2_unified_synth_shutdown(void);
+void ft2_unified_synth_set_samplerate(int samplerate);
 
 // Engine registration
 void ft2_unified_synth_register_engine(const UnifiedSynthInterface* engine);

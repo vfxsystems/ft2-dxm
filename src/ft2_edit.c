@@ -33,6 +33,9 @@ static uint16_t ptnBufLen, trkBufLen;
 static macroNote_t macroTrackCopyBuff[MAX_PATT_LEN];
 static macroNote_t macroPtnCopyBuff[MAX_PATT_LEN * MAX_STEREO_PAIRS];
 static macroNote_t macroBlkCopyBuff[MAX_PATT_LEN * MAX_STEREO_PAIRS];
+static bool macroTrackCopyValid;
+static uint16_t macroPtnCopyMask;
+static uint8_t macroBlkCopyMask[MAX_STEREO_PAIRS];
 static int32_t markXSize, markYSize;
 static note_t blkCopyBuff[MAX_PATT_LEN * MAX_CHANNELS];
 static note_t ptnCopyBuff[MAX_PATT_LEN * MAX_CHANNELS];
@@ -1455,6 +1458,7 @@ void cutTrack(void)
 	{
 		memset(trackCopyBuff, 0, sizeof (trackCopyBuff));
 		memset(macroTrackCopyBuff, 0xFF, sizeof (macroTrackCopyBuff));
+		macroTrackCopyValid = false;
 
 		for (int16_t i = 0; i < numRows; i++)
 			copyNote(&p[(i * MAX_CHANNELS) + cursor.ch], &trackCopyBuff[i]);
@@ -1463,6 +1467,7 @@ void cutTrack(void)
 		{
 			for (int16_t i = 0; i < numRows; i++)
 				copyMacroNote(&macroPattern[curPattern][(i * MAX_STEREO_PAIRS) + cursor.ch], &macroTrackCopyBuff[i]);
+			macroTrackCopyValid = true;
 		}
 
 		trkBufLen = numRows;
@@ -1499,6 +1504,7 @@ void copyTrack(void)
 	{
 		memset(trackCopyBuff, 0, sizeof (trackCopyBuff));
 		memset(macroTrackCopyBuff, 0xFF, sizeof (macroTrackCopyBuff));
+		macroTrackCopyValid = false;
 
 		const int16_t numRows = patternNumRows[curPattern];
 		for (int16_t i = 0; i < numRows; i++)
@@ -1508,6 +1514,7 @@ void copyTrack(void)
 		{
 			for (int16_t i = 0; i < numRows; i++)
 				copyMacroNote(&macroPattern[curPattern][(i * MAX_STEREO_PAIRS) + cursor.ch], &macroTrackCopyBuff[i]);
+			macroTrackCopyValid = true;
 		}
 
 		trkBufLen = numRows;
@@ -1528,7 +1535,7 @@ void pasteTrack(void)
 	for (int16_t i = 0; i < numRows; i++)
 		pasteNote(&trackCopyBuff[i], &p[(i * MAX_CHANNELS) + cursor.ch]);
 
-	if (cursor.ch < MAX_STEREO_PAIRS && editor.macroMode[cursor.ch] && macroPattern[curPattern] != NULL)
+	if (cursor.ch < MAX_STEREO_PAIRS && editor.macroMode[cursor.ch] && macroTrackCopyValid && macroPattern[curPattern] != NULL)
 	{
 		for (int16_t i = 0; i < numRows; i++)
 			pasteMacroNote(&macroTrackCopyBuff[i], &macroPattern[curPattern][(i * MAX_STEREO_PAIRS) + cursor.ch]);
@@ -1555,6 +1562,7 @@ void cutPattern(void)
 	{
 		memset(ptnCopyBuff, 0, (MAX_PATT_LEN * MAX_CHANNELS) * sizeof (note_t));
 		memset(macroPtnCopyBuff, 0xFF, (MAX_PATT_LEN * MAX_STEREO_PAIRS) * sizeof (macroNote_t));
+		macroPtnCopyMask = 0;
 
 		for (int16_t x = 0; x < song.numChannels; x++)
 		{
@@ -1566,6 +1574,7 @@ void cutPattern(void)
 				for (int16_t i = 0; i < numRows; i++)
 					copyMacroNote(&macroPattern[curPattern][(i * MAX_STEREO_PAIRS) + x],
 					              &macroPtnCopyBuff[(i * MAX_STEREO_PAIRS) + x]);
+				macroPtnCopyMask |= (1u << x);
 			}
 		}
 
@@ -1611,6 +1620,7 @@ void copyPattern(void)
 	{
 		memset(ptnCopyBuff, 0, (MAX_PATT_LEN * MAX_CHANNELS) * sizeof (note_t));
 		memset(macroPtnCopyBuff, 0xFF, (MAX_PATT_LEN * MAX_STEREO_PAIRS) * sizeof (macroNote_t));
+		macroPtnCopyMask = 0;
 
 		const int16_t numRows = patternNumRows[curPattern];
 		for (int16_t x = 0; x < song.numChannels; x++)
@@ -1623,6 +1633,7 @@ void copyPattern(void)
 				for (int16_t i = 0; i < numRows; i++)
 					copyMacroNote(&macroPattern[curPattern][(i * MAX_STEREO_PAIRS) + x],
 					              &macroPtnCopyBuff[(i * MAX_STEREO_PAIRS) + x]);
+				macroPtnCopyMask |= (1u << x);
 			}
 		}
 
@@ -1661,6 +1672,8 @@ void pastePattern(void)
 		for (int16_t x = 0; x < MAX_STEREO_PAIRS; x++)
 		{
 			if (!editor.macroMode[x])
+				continue;
+			if ((macroPtnCopyMask & (1u << x)) == 0)
 				continue;
 			for (int16_t i = 0; i < numRows; i++)
 				pasteMacroNote(&macroPtnCopyBuff[(i * MAX_STEREO_PAIRS) + x],
@@ -1709,7 +1722,10 @@ void cutBlock(void)
 	if (p != NULL && markY1 >= 0 && markX1 >= 0 && markX2 >= 0 && markY2 >= 0)
 	{
 		if (config.ptnCutToBuffer)
+		{
 			memset(macroBlkCopyBuff, 0xFF, (MAX_PATT_LEN * MAX_STEREO_PAIRS) * sizeof (macroNote_t));
+			memset(macroBlkCopyMask, 0, sizeof (macroBlkCopyMask));
+		}
 		pauseMusic();
 		for (int32_t x = markX1; x <= markX2; x++)
 		{
@@ -1723,8 +1739,11 @@ void cutBlock(void)
 				memset(n, 0, sizeof (note_t));
 
 				if (config.ptnCutToBuffer && x < MAX_STEREO_PAIRS && editor.macroMode[x] && macroPattern[curPattern] != NULL)
+				{
 					copyMacroNote(&macroPattern[curPattern][(y * MAX_STEREO_PAIRS) + x],
 					              &macroBlkCopyBuff[((y - markY1) * MAX_STEREO_PAIRS) + (x - markX1)]);
+					macroBlkCopyMask[x - markX1] = 1;
+				}
 
 				if (x < MAX_STEREO_PAIRS && editor.macroMode[x] && macroPattern[curPattern] != NULL)
 				{
@@ -1785,14 +1804,18 @@ void copyBlock(void)
 	if (p != NULL && markY1 >= 0 && markX1 >= 0 && markX2 >= 0 && markY2 >= 0)
 	{
 		memset(macroBlkCopyBuff, 0xFF, (MAX_PATT_LEN * MAX_STEREO_PAIRS) * sizeof (macroNote_t));
+		memset(macroBlkCopyMask, 0, sizeof (macroBlkCopyMask));
 		for (int32_t x = markX1; x <= markX2; x++)
 		{
 			for (int32_t y = markY1; y < markY2; y++)
 			{
 				copyNote(&p[(y * MAX_CHANNELS) + x], &blkCopyBuff[((y - markY1) * MAX_CHANNELS) + (x - markX1)]);
 				if (x < MAX_STEREO_PAIRS && editor.macroMode[x] && macroPattern[curPattern] != NULL)
+				{
 					copyMacroNote(&macroPattern[curPattern][(y * MAX_STEREO_PAIRS) + x],
 					              &macroBlkCopyBuff[((y - markY1) * MAX_STEREO_PAIRS) + (x - markX1)]);
+					macroBlkCopyMask[x - markX1] = 1;
+				}
 			}
 		}
 
@@ -1841,8 +1864,12 @@ void pasteBlock(void)
 			{
 				pasteNote(&blkCopyBuff[((y - rowStart) * MAX_CHANNELS) + (x - chStart)], &p[(y * MAX_CHANNELS) + x]);
 				if (x < MAX_STEREO_PAIRS && editor.macroMode[x] && macroPattern[curPattern] != NULL)
-					pasteMacroNote(&macroBlkCopyBuff[((y - rowStart) * MAX_STEREO_PAIRS) + (x - chStart)],
-					               &macroPattern[curPattern][(y * MAX_STEREO_PAIRS) + x]);
+				{
+					const int32_t rel = x - chStart;
+					if (rel >= 0 && rel < MAX_STEREO_PAIRS && macroBlkCopyMask[rel])
+						pasteMacroNote(&macroBlkCopyBuff[((y - rowStart) * MAX_STEREO_PAIRS) + rel],
+						               &macroPattern[curPattern][(y * MAX_STEREO_PAIRS) + x]);
+				}
 			}
 		}
 		resumeMusic();

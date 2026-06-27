@@ -23,14 +23,11 @@
 #include "ft2_keyboard.h"
 #include "dexed/dx_complete_layout.h"
 #include "ft2_tunefish_complete_layout.h"
+#include "ft2_v2_complete_layout.h"
 
 #define NUM_CURSORS 6
 
 mouse_t mouse; // globalized
-
-// Forward declarations for synth editor layouts
-extern DexedCompleteLayout* g_dexed_layout_singleton;
-extern TunefishCompleteLayout* g_active_tunefish_layout;
 
 static bool mouseBusyGfxBackwards;
 static int16_t mouseShape;
@@ -614,6 +611,14 @@ void mouseButtonUpHandler(uint8_t mouseButton)
 		{
 			instr_t *ins = instr[editor.curInstr];
 			
+			if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
+			{
+				if (v2_handle_layout_mouse_event(g_active_v2_layout, mouse.x, mouse.y, false))
+				{
+					// Event was handled by V2 editor
+					return;
+				}
+			}
 			if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
 			{
 				// Handle Dexed editor mouse events
@@ -729,6 +734,12 @@ void mouseButtonDownHandler(uint8_t mouseButton)
 				mouse.rightButtonReleased = false;
 			}
 			
+			if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
+			{
+				// Handle V2 editor mouse events
+				v2_handle_layout_mouse_event(g_active_v2_layout, mouse.x, mouse.y, true);
+				return;
+			}
 			if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
 			{
 				// Handle Dexed editor mouse events
@@ -881,7 +892,10 @@ void handleLastGUIObjectDown(void)
 			// test non-standard GUI elements
 			switch (mouse.lastUsedObjectType)
 			{
-				case OBJECT_INSTRSWITCH: testInstrSwitcherMouseDown(); break;
+				case OBJECT_INSTRSWITCH:
+					/* Only handle instrument switcher on initial mouse down.
+					** Prevent hover/drag from triggering instrument changes. */
+					break;
 				case OBJECT_PATTERNMARK: handlePatternDataMouseDown(true); break;
 				case OBJECT_DISKOPLIST: testDiskOpMouseDown(true); break;
 				case OBJECT_SMPDATA: handleSampleDataMouseDown(true); break;

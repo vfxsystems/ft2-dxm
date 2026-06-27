@@ -42,6 +42,7 @@ public:
     // Parameter access
     void setParam(int param, float value);
     float getParam(int param);
+    void getParams(float* out, int maxCount);
 
     // Voice management
     int getActiveVoiceCount();

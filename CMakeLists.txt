@@ -7,6 +7,10 @@ set(CMAKE_C_FLAGS_DEBUG "-g")
 
 project(ft2-dxm LANGUAGES C CXX)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 option(EXTERNAL_LIBFLAC "use external(system) flac library" OFF)
 
 # ----- Dexed FM synth integration (optional) -----
@@ -45,12 +49,22 @@ endif()
 
 find_package(Threads REQUIRED)
 
+if(NOT WIN32)
+    target_link_libraries(ft2-dxm PRIVATE m)
+else()
+    target_link_libraries(ft2-dxm PRIVATE shlwapi winmm)
+endif()
+
 target_link_libraries(ft2-dxm
-    PRIVATE m Threads::Threads ${SDL2_LIBRARIES})
+    PRIVATE Threads::Threads ${SDL2_LIBRARIES})
 
 target_compile_definitions(ft2-dxm
     PRIVATE HAS_MIDI
     PRIVATE HAS_LIBFLAC)
+
+if(MSVC)
+    target_compile_definitions(ft2-dxm PRIVATE _USE_MATH_DEFINES)
+endif()
 
 if(UNIX)
     if(APPLE)
@@ -132,6 +146,13 @@ target_sources(ft2-dxm PRIVATE ${TUNEFISH_SRCS})
 
 # Add C++ wrapper for synth integration
 target_sources(ft2-dxm PRIVATE src/ft2_synth_wrapper.cpp)
+
+# Add V2 synth integration
+target_sources(ft2-dxm PRIVATE
+    src/ft2_v2_wrapper.cpp
+    src/v2/v2defs.cpp
+    src/v2/synth_core.cpp
+)
 
 # Add FT2 SDL drawing integration files
 # Note: ft2_guisan_integration.c was removed in favor of direct SDL integration

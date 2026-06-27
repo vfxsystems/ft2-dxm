@@ -57,6 +57,7 @@ int main(int argc, char *argv[])
 	SDL_version sdlVer;
 #endif
 	bool debugConsole = false;
+	bool debugSynthRouting = false;
 
 	// for finding memory leaks in debug mode with Visual Studio
 #if defined _DEBUG && defined _MSC_VER
@@ -69,6 +70,11 @@ int main(int argc, char *argv[])
 		{
 			debugConsole = true;
 			break;
+		}
+		else if (strcmp(argv[i], "--debug-synth-routing") == 0)
+		{
+			debugSynthRouting = true;
+			debugConsole = true;
 		}
 	}
 
@@ -92,6 +98,8 @@ int main(int argc, char *argv[])
 	SDL_EnableScreenSaver(); // allow screensaver to activate
 
 	initializeVars();
+	if (debugSynthRouting)
+		audioSetSynthRoutingDebug(true);
 	setupCrashHandler();
 	
 	// TODO: Initialize v2 preparations

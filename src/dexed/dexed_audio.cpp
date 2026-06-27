@@ -597,6 +597,53 @@ public:
         }
     }
 
+    void getParams(float* out, int maxCount) {
+        if (!out || maxCount <= 0) return;
+        std::lock_guard<std::mutex> lock(patchMutex);
+
+        int count = maxCount;
+        if (count > 156) count = 156;
+
+        for (int param = 0; param < count; param++) {
+            int maxVal = 127;
+            if (param >= 0 && param < 126) {
+                int opParam = param % 21;
+                switch (opParam) {
+                    case 13: maxVal = 7;  break;
+                    case 14: maxVal = 3;  break;
+                    case 15: maxVal = 7;  break;
+                    case 17: maxVal = 1;  break;
+                    case 18: maxVal = 31; break;
+                    case 19: maxVal = 99; break;
+                    case 20: maxVal = 14; break;
+                    default: maxVal = 99; break;
+                }
+            } else if (param >= 126 && param <= 133) {
+                maxVal = 99;
+            } else if (param == 134) {
+                maxVal = 31;
+            } else if (param == 135) {
+                maxVal = 7;
+            } else if (param == 136) {
+                maxVal = 1;
+            } else if (param >= 137 && param <= 140) {
+                maxVal = 99;
+            } else if (param == 141) {
+                maxVal = 1;
+            } else if (param == 142) {
+                maxVal = 5;
+            } else if (param == 143) {
+                maxVal = 7;
+            }
+
+            if (maxVal <= 0) {
+                out[param] = 0.0f;
+            } else {
+                out[param] = static_cast<float>(data[param]) / (float)maxVal;
+            }
+        }
+    }
+
     float getParam(int param) {
         std::lock_guard<std::mutex> lock(patchMutex);
 
@@ -758,6 +805,10 @@ void DexedAudio::resetToSafePatch() {
 
 void DexedAudio::setParam(int param, float value) {
     pImpl->setParam(param, value);
+}
+
+void DexedAudio::getParams(float* out, int maxCount) {
+    pImpl->getParams(out, maxCount);
 }
 
 float DexedAudio::getParam(int param) {

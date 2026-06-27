@@ -800,7 +800,8 @@ static void drawMiniScope(uint8_t ch, uint16_t x, uint16_t y, uint16_t w, uint16
     const uint64_t drawDelta = (uint64_t)(s_vol.delta * ((double)SCOPE_HZ / ((double)C4_FREQ / 2.0)));
 
     // use a non-volatile copy for the drawing loop
-    scope_t s = (scope_t)s_vol;
+    scope_t s;
+    memcpy(&s, (const void *)&s_vol, sizeof(s));
 
     int32_t position = s.position;
     uint64_t positionFrac = 0;
