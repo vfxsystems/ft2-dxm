@@ -10,6 +10,7 @@
 #include <unistd.h>
 #endif
 #include "ft2_header.h"
+#include "ft2_module_loader.h"
 #include "scopes/ft2_scopes.h"
 #include "ft2_trim.h"
 #include "ft2_inst_ed.h"
@@ -26,6 +27,7 @@
 #include "ft2_video.h"
 #include "ft2_structs.h"
 #include "ft2_sysreqs.h"
+#include "ft2_unified_synth.h"
 
 bool detectBEM(FILE *f);
 bool loadBEM(FILE *f, uint32_t filesize);
@@ -216,12 +218,14 @@ static bool doLoadMusic(bool externalThreadFlag)
 
 loadError:
 	freeTmpModule();
+	clearPendingDXMSynthLoadState();
 	moduleFailedToLoad = true;
 	return false;
 }
 
 static void clearTmpModule(void)
 {
+	clearPendingDXMSynthLoadState();
 	memset(patternTmp, 0, sizeof (patternTmp));
 	memset(instrTmp, 0, sizeof (instrTmp));
 	memset(&songTmp, 0, sizeof (songTmp));
@@ -304,6 +308,8 @@ bool allocateTmpInstr(int16_t insNum)
 	if (ins == NULL)
 		return false;
 
+	ins->osTirusPreset = 0xFFFF;
+	ins->osTirusSlot = 0xFF;
 	sample_t *s = ins->smp;
 	for (int32_t i = 0; i < MAX_SMP_PER_INST; i++, s++)
 	{
@@ -378,6 +384,7 @@ static void setupLoadedModule(void)
 
 	freeAllInstr();
 	freeAllPatterns();
+	ft2_unified_synth_clear_all_states();
 
 	oldPlayMode = playMode;
 	playMode = PLAYMODE_IDLE;
@@ -484,6 +491,7 @@ static void setupLoadedModule(void)
 	editor.globalVolume = song.globalVolume;
 
 	setLinearPeriods(tmpLinearPeriodsFlag);
+	finalizeDXMSynthLoadState();
 
 	unlockMixerCallback();
 

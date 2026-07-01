@@ -19,6 +19,7 @@
 #include "../ft2_synth.h"
 #include "../ft2_unified_synth.h"
 #include "../ft2_v2.h"
+#include "../ft2_ostirus.h"
 #include "../ft2_audio.h"
 #include "../ft2_checkboxes.h"
 #include "../ft2_header.h"
@@ -49,12 +50,51 @@ extern int dx_unpack_program_from_storage(const uint8_t* packed128, uint8_t* out
 // Forward declaration for XM loader
 bool loadXM(FILE *f, uint32_t filesize);
 
+typedef struct pendingSynthBlob_t
+{
+    uint8_t *data;
+    uint32_t size;
+} pendingSynthBlob_t;
+
+static pendingSynthBlob_t g_pendingV2States[MAX_INST + 1];
+static pendingSynthBlob_t g_pendingOsTirusStates[MAX_INST + 1];
+
+static void free_pending_blob(pendingSynthBlob_t *blob)
+{
+    if (blob == NULL)
+        return;
+
+    free(blob->data);
+    blob->data = NULL;
+    blob->size = 0;
+}
+
+static bool store_pending_blob(pendingSynthBlob_t *dst, const uint8_t *src, uint32_t size)
+{
+    if (dst == NULL || src == NULL || size == 0)
+        return false;
+
+    uint8_t *copy = (uint8_t *)malloc(size);
+    if (copy == NULL)
+        return false;
+
+    memcpy(copy, src, size);
+    free_pending_blob(dst);
+    dst->data = copy;
+    dst->size = size;
+    return true;
+}
+
 static void normalizeSynthFlags(instr_t *ins)
 {
     if (ins == NULL)
         return;
 
-    if (ins->useV2) {
+    if (ins->useOsTirus) {
+        ins->useV2 = false;
+        ins->useDexed = false;
+        ins->useTF4 = false;
+    } else if (ins->useV2) {
         ins->useDexed = false;
         ins->useTF4 = false;
     } else if (ins->useDexed) {
@@ -367,17 +407,10 @@ static void restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
 // Helper: Restore all TF4 instrument states from buffer
 static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
 {
+    (void)chunkLen;
     uint8_t numTF4 = 0;
     fread(&numTF4, sizeof(uint8_t), 1, f);
     printf("[DXM-LOAD] TF4 chunk contains %d instruments\n", numTF4);
-    
-    // CRITICAL: Skip preset loading during DXM restore to prevent overwriting loaded parameters
-    setSkipPresetOnCreate(true);
-
-    if (!ft2_synth_is_initialized()) {
-        int sr = (audio.freq > 0) ? audio.freq : 44100;
-        ft2_unified_synth_set_samplerate(sr);
-    }
     
     for (uint8_t i = 0; i < numTF4; i++) {
         uint8_t instrIdx = 0, nameLen = 0;
@@ -406,23 +439,13 @@ static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
         strncpy(ins->smp[0].name, name, 22);
         int tf4Idx = instrIdx;
         if (tf4Idx < 1 || tf4Idx > 128) continue;
-        
-        // CRITICAL: Set persistent parameters FIRST, then create the instance
-        ft2_synth_set_all_persistent_params(tf4Idx, params, DXM_TF4_PARAM_COUNT);
-        
-        // Now create the TF4 instance - it will pick up the persistent parameters
-        void* tf4inst = createInstrumentInstance(tf4Idx);
-        // Debug print
-        printf("[DXM] Created TF4 instance for instr %d (synthIdx=%d): %p\n", instrIdx, tf4Idx, tf4inst);
+
         // If you have a tf4Params pointer, copy params there:
         #ifdef FT2_TF4_PARAM_PTR
         memcpy(ins->tf4Params, params, DXM_TF4_PARAM_COUNT * sizeof(float));
         #endif
         printf("[DXM-LOAD] After param copy, useTF4 for instr %d = %d\n", instrIdx, ins->useTF4);
     }
-    
-    // Re-enable preset loading for future instruments without persistent state
-    setSkipPresetOnCreate(false);
 }
 
 // Helper: Restore all V2 instrument states from buffer
@@ -474,13 +497,85 @@ static void restoreAllV2StatesDXM(FILE *f, uint32_t chunkLen)
             continue;
         }
 
-        if (ft2_v2_deserialize_state(instrIdx, blob, blobLen)) {
+        if (store_pending_blob(&g_pendingV2States[instrIdx], blob, blobLen)) {
             ins->useV2 = true;
             normalizeSynthFlags(ins);
             ins->isDXMInstrument = true;
-            printf("[DXM-LOAD] Restored V2 state for instr %d\n", instrIdx);
+            printf("[DXM-LOAD] Staged V2 state for instr %d\n", instrIdx);
         } else {
-            printf("[DXM-LOAD] WARNING: Failed to restore V2 state for instr %d\n", instrIdx);
+            printf("[DXM-LOAD] WARNING: Failed to stage V2 state for instr %d\n", instrIdx);
+        }
+
+        free(blob);
+    }
+}
+
+static void restoreAllOsTirusStatesDXM(FILE *f, uint32_t chunkLen)
+{
+    (void)chunkLen;
+    uint8_t numOsTirus = 0;
+    fread(&numOsTirus, sizeof(uint8_t), 1, f);
+    printf("[DXM-LOAD] OsTIrus state chunk contains %d instruments\n", numOsTirus);
+
+    for (uint8_t i = 0; i < numOsTirus; ++i)
+    {
+        uint8_t instrIdx = 0;
+        uint32_t blobLen = 0;
+        fread(&instrIdx, sizeof(uint8_t), 1, f);
+        fread(&blobLen, sizeof(uint32_t), 1, f);
+
+        if (instrIdx < 1 || instrIdx > 128 || blobLen == 0)
+        {
+            if (blobLen > 0)
+                skip_bytes(f, blobLen);
+            continue;
+        }
+
+        if (blobLen > chunkLen || blobLen > (16u * 1024u * 1024u))
+        {
+            printf("[DXM-LOAD] WARNING: Invalid OsTIrus blob length %u for instr %u\n", blobLen, instrIdx);
+            return;
+        }
+
+        uint8_t *blob = (uint8_t *)malloc(blobLen);
+        if (blob == NULL)
+        {
+            skip_bytes(f, blobLen);
+            continue;
+        }
+
+        if (fread(blob, 1, blobLen, f) != blobLen)
+        {
+            free(blob);
+            return;
+        }
+
+        instr_t *ins = instrTmp[instrIdx];
+        if (!ins)
+        {
+            if (!allocateTmpInstr(instrIdx))
+            {
+                free(blob);
+                continue;
+            }
+            ins = instrTmp[instrIdx];
+        }
+        if (!ins)
+        {
+            free(blob);
+            continue;
+        }
+
+        if (store_pending_blob(&g_pendingOsTirusStates[instrIdx], blob, blobLen))
+        {
+            ins->useOsTirus = true;
+            normalizeSynthFlags(ins);
+            ins->isDXMInstrument = true;
+            printf("[DXM-LOAD] Staged OsTIrus state for instr %d\n", instrIdx);
+        }
+        else
+        {
+            printf("[DXM-LOAD] WARNING: Failed to stage OsTIrus state for instr %d\n", instrIdx);
         }
 
         free(blob);
@@ -490,6 +585,7 @@ static void restoreAllV2StatesDXM(FILE *f, uint32_t chunkLen)
 // Helper: Restore DXM instrument metadata to distinguish from XM instruments
 static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
 {
+    const long chunkStart = ftell(f);
     uint8_t numDXMInstruments = 0;
     fread(&numDXMInstruments, sizeof(uint8_t), 1, f);
     
@@ -510,8 +606,8 @@ static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
         }
         if (!ins) continue;
         
-        printf("[DXM-LOAD] DXM instr %d: flags=0x%02X (TF4=%d, stereo=%d, Dexed=%d, V2=%d)\n", 
-               instrIdx, flags, (flags & 1) ? 1 : 0, (flags & 2) ? 1 : 0, (flags & 4) ? 1 : 0, (flags & 8) ? 1 : 0);
+        printf("[DXM-LOAD] DXM instr %d: flags=0x%02X (TF4=%d, stereo=%d, Dexed=%d, V2=%d, OsTIrus=%d)\n",
+               instrIdx, flags, (flags & 1) ? 1 : 0, (flags & 2) ? 1 : 0, (flags & 4) ? 1 : 0, (flags & 8) ? 1 : 0, (flags & 16) ? 1 : 0);
         
         // Mark this as a DXM instrument (not a regular XM instrument)
         // This will be used to determine how to handle stereo samples
@@ -529,6 +625,23 @@ static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
         if (flags & 8) {
             ins->useV2 = true;
             printf("[DXM-LOAD] Set V2 flag for instrument %d from metadata\n", instrIdx);
+        }
+        if (flags & 16) {
+            ins->useOsTirus = true;
+            printf("[DXM-LOAD] Set OsTIrus flag for instrument %d from metadata\n", instrIdx);
+            long bytesRead = ftell(f) - chunkStart;
+            if (bytesRead + (long)(sizeof(uint16_t) + sizeof(uint8_t)) <= (long)chunkLen) {
+                fread(&ins->osTirusPreset, sizeof(uint16_t), 1, f);
+                fread(&ins->osTirusSlot, sizeof(uint8_t), 1, f);
+                printf("[DXM-LOAD] Restored OsTIrus preset=%u slot=%u for instrument %d\n",
+                       (unsigned)ins->osTirusPreset, (unsigned)ins->osTirusSlot, instrIdx);
+            } else {
+                ins->osTirusPreset = 0xFFFF;
+                ins->osTirusSlot = 0xFF;
+            }
+        } else {
+            ins->osTirusPreset = 0xFFFF;
+            ins->osTirusSlot = 0xFF;
         }
         normalizeSynthFlags(ins);
         
@@ -636,9 +749,132 @@ static void restoreMacroPatternDXM(FILE *f, uint32_t chunkLen)
     }
 }
 
+static void restoreOsTirusArpStateDXM(FILE *f, uint32_t chunkLen)
+{
+    const size_t perInstrumentBytes = sizeof(uint8_t) + (16 * sizeof(uint8_t)) + (16 * sizeof(uint8_t)) + (16 * sizeof(uint8_t));
+    if (chunkLen < sizeof(uint8_t))
+    {
+        skip_bytes(f, chunkLen);
+        return;
+    }
+
+    uint8_t numArp = 0;
+    fread(&numArp, sizeof(uint8_t), 1, f);
+
+    const long chunkStart = ftell(f);
+    for (uint8_t i = 0; i < numArp; ++i)
+    {
+        if ((long)(ftell(f) - chunkStart) + (long)perInstrumentBytes > (long)(chunkLen - sizeof(uint8_t)))
+            break;
+
+        uint8_t instrIdx = 0;
+        fread(&instrIdx, sizeof(uint8_t), 1, f);
+        if (instrIdx < 1 || instrIdx > 128)
+        {
+            skip_bytes(f, (uint32_t)(perInstrumentBytes - sizeof(uint8_t)));
+            continue;
+        }
+
+        instr_t *ins = instrTmp[instrIdx];
+        if (!ins)
+        {
+            if (!allocateTmpInstr(instrIdx))
+            {
+                skip_bytes(f, (uint32_t)(perInstrumentBytes - sizeof(uint8_t)));
+                continue;
+            }
+            ins = instrTmp[instrIdx];
+        }
+
+        if (!ins)
+        {
+            skip_bytes(f, (uint32_t)(perInstrumentBytes - sizeof(uint8_t)));
+            continue;
+        }
+
+        fread(ins->osTirusArpStepGate, sizeof(uint8_t), 16, f);
+        fread(ins->osTirusArpStepVelocity, sizeof(uint8_t), 16, f);
+        fread(ins->osTirusArpStepLength, sizeof(uint8_t), 16, f);
+        ins->useOsTirus = true;
+        ins->isDXMInstrument = true;
+    }
+
+    const long consumed = ftell(f) - chunkStart;
+    const long expected = (long)chunkLen - (long)sizeof(uint8_t);
+    if (consumed < expected)
+        skip_bytes(f, (uint32_t)(expected - consumed));
+}
+
+void clearPendingDXMSynthLoadState(void)
+{
+    for (int i = 1; i <= MAX_INST; ++i)
+    {
+        free_pending_blob(&g_pendingV2States[i]);
+        free_pending_blob(&g_pendingOsTirusStates[i]);
+    }
+}
+
+void finalizeDXMSynthLoadState(void)
+{
+    const int sr = (audio.freq > 0) ? audio.freq : 44100;
+
+    if (!ft2_synth_is_initialized() || !ft2_dx_is_initialized() || !ft2_ostirus_is_initialized())
+    {
+        ft2_unified_synth_shutdown();
+        ft2_unified_synth_set_samplerate(sr);
+    }
+
+    setSkipPresetOnCreate(true);
+
+    for (int i = 1; i <= MAX_INST; ++i)
+    {
+        instr_t *ins = instr[i];
+        if (ins == NULL)
+            continue;
+
+        if (ins->useTF4)
+        {
+            ft2_synth_set_all_persistent_params(i, ins->tf4Params, DXM_TF4_PARAM_COUNT);
+            createInstrumentInstance(i);
+        }
+
+        if (ins->useDexed)
+            ft2_dx_load_patch_for_instrument(i, ins->dxParams, 155);
+
+        if (g_pendingV2States[i].data != NULL && g_pendingV2States[i].size > 0)
+        {
+            if (!ft2_v2_deserialize_state(i, g_pendingV2States[i].data, g_pendingV2States[i].size))
+                printf("[DXM-LOAD] WARNING: Failed to finalize V2 state for instr %d\n", i);
+        }
+
+        if (ins->useOsTirus)
+        {
+            if (g_pendingOsTirusStates[i].data != NULL && g_pendingOsTirusStates[i].size > 0)
+            {
+                if (!ft2_ostirus_deserialize_state(i, g_pendingOsTirusStates[i].data, g_pendingOsTirusStates[i].size))
+                    printf("[DXM-LOAD] WARNING: Failed to finalize OsTIrus state for instr %d\n", i);
+            }
+            else if (ins->osTirusPreset != 0xFFFF)
+            {
+                if (!ft2_ostirus_load_factory_preset_for_instrument(i, (int)ins->osTirusPreset))
+                    printf("[DXM-LOAD] WARNING: Failed to restore OsTIrus preset %u for instr %d\n", (unsigned)ins->osTirusPreset, i);
+            }
+            else
+            {
+                (void)ft2_ostirus_assign_slot_for_instrument(i);
+            }
+        }
+    }
+
+    setSkipPresetOnCreate(false);
+    clearPendingDXMSynthLoadState();
+}
+
 // DXM loader: verify header, scan chunks, and restore state
 bool loadDXM(FILE *f, uint32_t filesize)
 {
+    clearPendingDXMSynthLoadState();
+
     // 1. Read and verify DXM magic header
     char dxmMagic[4];
     if (fread(dxmMagic, 1, 4, f) != 4 || dxmMagic[0]!='D' || dxmMagic[1]!='X' || dxmMagic[2]!='M' || dxmMagic[3]!='0')
@@ -705,6 +941,12 @@ FILE *xmFile = NULL;
         } else if (memcmp(chunkId, "DXMV2S", 6) == 0) {
             printf("[DXM-LOAD] Found V2 chunk, length=%d\n", chunkLen);
             restoreAllV2StatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMOTS", 6) == 0) {
+            printf("[DXM-LOAD] Found OsTIrus state chunk, length=%u\n", chunkLen);
+            restoreAllOsTirusStatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMARP", 6) == 0) {
+            printf("[DXM-LOAD] Found OsTIrus arp chunk, length=%u\n", chunkLen);
+            restoreOsTirusArpStateDXM(f, chunkLen);
         } else if (memcmp(chunkId, "DXMMAP", 6) == 0) {
             printf("[DXM-LOAD] Found Macro Map chunk, length=%u\n", chunkLen);
             restoreMacroMapDXM(f, chunkLen);
@@ -721,25 +963,6 @@ FILE *xmFile = NULL;
 
         // Cache persistent mixer/DSP state after loading DXM
         cacheMixerStateFromData();
-
-    // Final post-load synth init pass (cold boot safety)
-    if (!ft2_synth_is_initialized()) {
-        int sr = (audio.freq > 0) ? audio.freq : 44100;
-        ft2_unified_synth_set_samplerate(sr);
-    }
-    if (!ft2_dx_is_initialized()) {
-        int sr = (audio.freq > 0) ? audio.freq : 44100;
-        ft2_dx_init(sr);
-    }
-
-    for (int i = 1; i <= 128; i++) {
-        if (instrTmp[i] && instrTmp[i]->useTF4) {
-            createInstrumentInstance(i);
-        }
-        if (instrTmp[i] && instrTmp[i]->useDexed) {
-            ft2_dx_load_patch_for_instrument(i, instrTmp[i]->dxParams, 155);
-        }
-    }
 
         // Sync mixer GUI scrollbars if screen visible
     if (ui.mixerScreenShown) {
