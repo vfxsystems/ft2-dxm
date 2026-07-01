@@ -1,6 +1,7 @@
 #include "ft2_unified_synth.h"
 #include "ft2_dexed.h"
 #include "ft2_v2.h"
+#include "ft2_ostirus.h"
 #include "ft2_synth.h"
 #include "ft2_replayer.h"
 #include "ft2_header.h"
@@ -24,6 +25,15 @@ static int g_currentSampleRate = 0;
 
 // Helper macros
 #define ENGINE_VALID(engine) ((engine) >= 0 && (engine) < SYNTH_TYPE_COUNT && g_engines[engine].engineName != NULL)
+
+static void clear_state_from_all_engines(int instrID)
+{
+    for (int i = 0; i < SYNTH_TYPE_COUNT; ++i)
+    {
+        if (g_engines[i].clear_state != NULL)
+            g_engines[i].clear_state(instrID);
+    }
+}
 
 static inline float softLimitSample(float x, float threshold)
 {
@@ -472,6 +482,154 @@ static int v2_get_active_voices(int instrID) {
 }
 
 // =============================================================================
+// OSTIRUS ENGINE IMPLEMENTATION
+// =============================================================================
+
+static void ostirus_init(int samplerate) {
+    US_DEBUG("Initializing OsTIrus engine at %d Hz", samplerate);
+    ft2_ostirus_init(samplerate);
+}
+
+static void ostirus_shutdown(void) {
+    US_DEBUG("Shutting down OsTIrus engine");
+    ft2_ostirus_shutdown();
+}
+
+static void ostirus_render(float* bufL, float* bufR, int nsamples, int add) {
+    ft2_ostirus_render(bufL, bufR, nsamples, add);
+}
+
+static void ostirus_render_for_channel(int instrID, float* bufL, float* bufR, int nsamples, int add) {
+    ft2_ostirus_render_for_channel(instrID, bufL, bufR, nsamples, add);
+}
+
+static void ostirus_send_midi(int instrID, const MidiMessage* message) {
+    if (message) {
+        ft2_ostirus_send_midi_to_instrument(instrID, message->status, message->data1, message->data2);
+    }
+}
+
+static void ostirus_panic(void) {
+    ft2_ostirus_panic();
+}
+
+static void ostirus_set_param(int instrID, int paramId, float value) {
+    ft2_ostirus_set_param_for_instrument(instrID, paramId, value);
+}
+
+static float ostirus_get_param(int instrID, int paramId) {
+    return ft2_ostirus_get_param_for_instrument(instrID, paramId);
+}
+
+static const ParameterRange* ostirus_get_param_range(int paramId) {
+    (void)paramId;
+    return NULL;
+}
+
+static int ostirus_get_param_count(void) {
+    return 0;
+}
+
+static const char* ostirus_get_param_name(int paramId) {
+    (void)paramId;
+    return "Unsupported";
+}
+
+static int ostirus_load_patch(int instrID, const uint8_t* data, size_t size) {
+    if (data == NULL)
+        return 0;
+
+    if (ft2_ostirus_deserialize_state(instrID, data, size))
+        return 1;
+    if (size < 3)
+        return 0;
+
+    uint16_t presetIndex = (uint16_t)(data[0] | (data[1] << 8));
+    uint8_t slot = data[2];
+
+    if (instrID >= 1 && instrID <= MAX_INST) {
+        extern instr_t *instr[128+4];
+        instr_t *ins = instr[instrID];
+        if (ins != NULL) {
+            ins->useOsTirus = true;
+            ins->osTirusPreset = presetIndex;
+            ins->osTirusSlot = slot;
+        }
+    }
+
+    if (presetIndex != 0xFFFF) {
+        return ft2_ostirus_load_factory_preset_for_instrument(instrID, (int)presetIndex);
+    }
+
+    return 1;
+}
+
+static int ostirus_save_patch(int instrID, uint8_t* buffer, size_t bufferSize) {
+    if (!buffer)
+        return 0;
+
+    const size_t blobSize = ft2_ostirus_serialize_state(instrID, NULL, 0);
+    if (blobSize > 0 && bufferSize >= blobSize)
+        return (int)ft2_ostirus_serialize_state(instrID, buffer, bufferSize);
+    if (bufferSize < 3)
+        return 0;
+
+    uint16_t presetIndex = 0xFFFF;
+    int currentPreset = ft2_ostirus_get_current_preset_for_instrument(instrID);
+    if (currentPreset >= 0)
+        presetIndex = (uint16_t)currentPreset;
+
+    buffer[0] = (uint8_t)(presetIndex & 0xFF);
+    buffer[1] = (uint8_t)(presetIndex >> 8);
+    const int slot = ft2_ostirus_get_slot_for_instrument(instrID);
+    buffer[2] = (uint8_t)((slot < 0) ? 0xFF : slot);
+    return 3;
+}
+
+static int ostirus_get_patch_size(int instrID) {
+    (void)instrID;
+    const size_t blobSize = ft2_ostirus_serialize_state(instrID, NULL, 0);
+    return blobSize > 0 ? (int)blobSize : 3;
+}
+
+static int ostirus_get_preset_count(void) {
+    return ft2_ostirus_get_factory_preset_count();
+}
+
+static const char* ostirus_get_preset_name(int presetIndex) {
+    return ft2_ostirus_get_factory_preset_name(presetIndex);
+}
+
+static int ostirus_load_preset(int instrID, int presetIndex) {
+    return ft2_ostirus_load_factory_preset_for_instrument(instrID, presetIndex);
+}
+
+static void ostirus_store_state(int instrID) {
+    (void)ft2_ostirus_assign_slot_for_instrument(instrID);
+}
+
+static void ostirus_restore_state(int instrID) {
+    const int presetIndex = ft2_ostirus_get_current_preset_for_instrument(instrID);
+    if (presetIndex >= 0)
+        ft2_ostirus_load_factory_preset_for_instrument(instrID, presetIndex);
+    else
+        (void)ft2_ostirus_assign_slot_for_instrument(instrID);
+}
+
+static bool ostirus_has_state(int instrID) {
+    return ft2_ostirus_get_slot_for_instrument(instrID) >= 0 ||
+           ft2_ostirus_get_current_preset_for_instrument(instrID) >= 0;
+}
+
+static void ostirus_clear_state(int instrID) {
+    ft2_ostirus_release_instrument(instrID);
+}
+
+static int ostirus_get_active_voices(int instrID) {
+    return ft2_ostirus_get_active_voice_count(instrID);
+}
+
+// =============================================================================
 // GLOBAL SYNTH MANAGEMENT
 // =============================================================================
 
@@ -600,6 +758,43 @@ void ft2_unified_synth_init(int samplerate) {
     if (v2_engine.init) {
         v2_engine.init(samplerate);
     }
+
+    // Register OsTIrus engine
+    US_DEBUG("Registering OsTIrus engine");
+    UnifiedSynthInterface ostirus_engine = {
+        .engineType = SYNTH_TYPE_OSTIRUS,
+        .engineName = "OsTIrus",
+        .init = ostirus_init,
+        .shutdown = ostirus_shutdown,
+        .render = ostirus_render,
+        .render_for_channel = ostirus_render_for_channel,
+        .send_midi = ostirus_send_midi,
+        .panic = ostirus_panic,
+        .set_param = ostirus_set_param,
+        .get_param = ostirus_get_param,
+        .get_param_range = ostirus_get_param_range,
+        .get_param_count = ostirus_get_param_count,
+        .get_param_name = ostirus_get_param_name,
+        .load_patch = ostirus_load_patch,
+        .save_patch = ostirus_save_patch,
+        .get_patch_size = ostirus_get_patch_size,
+        .get_preset_count = ostirus_get_preset_count,
+        .get_preset_name = ostirus_get_preset_name,
+        .load_preset = ostirus_load_preset,
+        .store_state = ostirus_store_state,
+        .restore_state = ostirus_restore_state,
+        .has_state = ostirus_has_state,
+        .clear_state = ostirus_clear_state,
+        .get_active_voices = ostirus_get_active_voices,
+        .engineData = NULL
+    };
+
+    g_engines[SYNTH_TYPE_OSTIRUS] = ostirus_engine;
+
+    US_DEBUG("Initializing OsTIrus engine");
+    if (ostirus_engine.init) {
+        ostirus_engine.init(samplerate);
+    }
     
     g_currentSampleRate = samplerate;
     g_initialized = true;
@@ -661,8 +856,8 @@ SynthEngineType ft2_unified_synth_get_active_engine(int instrID) {
         instr_t *ins = instr[instrID];
         
         if (ins) {
-            US_DEBUG("Engine detection for instr %d: useTF4=%d, useDexed=%d, useV2=%d", 
-                    instrID, ins->useTF4 ? 1 : 0, ins->useDexed ? 1 : 0, ins->useV2 ? 1 : 0);
+            US_DEBUG("Engine detection for instr %d: useTF4=%d, useDexed=%d, useV2=%d, useOsTirus=%d",
+                    instrID, ins->useTF4 ? 1 : 0, ins->useDexed ? 1 : 0, ins->useV2 ? 1 : 0, ins->useOsTirus ? 1 : 0);
             if (ins->useV2) {
                 return SYNTH_TYPE_V2;
             }
@@ -671,6 +866,9 @@ SynthEngineType ft2_unified_synth_get_active_engine(int instrID) {
             }
             if (ins->useTF4) {
                 return SYNTH_TYPE_TUNEFISH4;
+            }
+            if (ins->useOsTirus) {
+                return SYNTH_TYPE_OSTIRUS;
             }
             return SYNTH_TYPE_COUNT;
         }
@@ -857,14 +1055,15 @@ bool ft2_unified_synth_has_state(int instrID) {
 
 void ft2_unified_synth_clear_state(int instrID) {
     if (!g_initialized) return;
-    
-    SynthEngineType engineType = ft2_unified_synth_get_active_engine(instrID);
-    if (engineType == SYNTH_TYPE_COUNT) return;
-    
-    const UnifiedSynthInterface* engine = ft2_unified_synth_get_engine(engineType);
-    if (engine && engine->clear_state) {
-        engine->clear_state(instrID);
-    }
+    clear_state_from_all_engines(instrID);
+}
+
+void ft2_unified_synth_clear_all_states(void)
+{
+    if (!g_initialized) return;
+
+    for (int instrID = 1; instrID <= MAX_INST; ++instrID)
+        clear_state_from_all_engines(instrID);
 }
 
 const char* ft2_unified_synth_get_engine_name(SynthEngineType engineType) {

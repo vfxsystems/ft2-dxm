@@ -14,6 +14,7 @@ typedef enum {
     SYNTH_TYPE_TUNEFISH4,
     SYNTH_TYPE_DEXED,
     SYNTH_TYPE_V2,
+    SYNTH_TYPE_OSTIRUS,
     SYNTH_TYPE_SAMPLES,
     SYNTH_TYPE_COUNT
 } SynthEngineType;
@@ -120,6 +121,7 @@ void ft2_unified_synth_store_state(int instrID);
 void ft2_unified_synth_restore_state(int instrID);
 bool ft2_unified_synth_has_state(int instrID);
 void ft2_unified_synth_clear_state(int instrID);
+void ft2_unified_synth_clear_all_states(void);
 
 // Utility functions
 const char* ft2_unified_synth_get_engine_name(SynthEngineType engineType);

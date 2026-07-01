@@ -23,6 +23,7 @@
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
 #include "ft2_v2.h"
+#include "ft2_ostirus.h"
 // Tunefish4 synth helper
 extern void* createInstrumentInstance(int instrID);
 
@@ -362,7 +363,7 @@ static size_t writeDXMInstrumentMetadata(FILE *f)
         
         // Check if this is a DXM instrument (has stereo samples or TF4/Dexed/V2)
         bool isDXMInstrument = false;
-        if (ins->useTF4 || ins->useDexed || ins->useV2) {
+        if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus || ins->osTirusPreset != 0xFFFF || ins->osTirusSlot != 0xFF) {
             isDXMInstrument = true;
         } else {
             // Check for stereo samples
@@ -388,7 +389,7 @@ static size_t writeDXMInstrumentMetadata(FILE *f)
         if (!ins) continue;
         
         bool isDXMInstrument = false;
-        if (ins->useTF4 || ins->useDexed || ins->useV2) {
+        if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus || ins->osTirusPreset != 0xFFFF || ins->osTirusSlot != 0xFF) {
             isDXMInstrument = true;
         } else {
             for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
@@ -416,10 +417,76 @@ static size_t writeDXMInstrumentMetadata(FILE *f)
             }
             if (ins->useDexed) flags |= 4; // Dexed instrument
             if (ins->useV2) flags |= 8;    // V2 instrument
+            const bool hasOsTirusState = ins->useOsTirus || ins->osTirusPreset != 0xFFFF || ins->osTirusSlot != 0xFF;
+            if (hasOsTirusState) flags |= 16; // OsTIrus instrument/state present
             fwrite(&flags, sizeof(uint8_t), 1, f); bytesWritten += 1;
+
+            if (hasOsTirusState) {
+                uint16_t preset = ins->osTirusPreset;
+                uint8_t slot = ins->osTirusSlot;
+                fwrite(&preset, sizeof(uint16_t), 1, f); bytesWritten += sizeof(uint16_t);
+                fwrite(&slot, sizeof(uint8_t), 1, f); bytesWritten += sizeof(uint8_t);
+            }
         }
     }
     
+    return bytesWritten;
+}
+
+static bool hasOsTirusArpState(const instr_t *ins)
+{
+    if (!ins)
+        return false;
+
+    for (int i = 0; i < 16; ++i)
+    {
+        if (ins->osTirusArpStepGate[i] != 0 ||
+            ins->osTirusArpStepVelocity[i] != 0 ||
+            ins->osTirusArpStepLength[i] != 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static size_t writeOsTirusArpStateChunk(FILE *f)
+{
+    size_t bytesWritten = 0;
+    uint8_t numArpInstruments = 0;
+
+    for (int instrIdx = 1; instrIdx <= MAX_INST; ++instrIdx)
+    {
+        const instr_t *ins = instr[instrIdx];
+        if (!ins || !ins->useOsTirus)
+            continue;
+
+        if (hasOsTirusArpState(ins))
+            ++numArpInstruments;
+    }
+
+    fwrite(&numArpInstruments, sizeof(uint8_t), 1, f);
+    bytesWritten += sizeof(uint8_t);
+
+    for (int instrIdx = 1; instrIdx <= MAX_INST; ++instrIdx)
+    {
+        const instr_t *ins = instr[instrIdx];
+        if (!ins || !ins->useOsTirus || !hasOsTirusArpState(ins))
+            continue;
+
+        const uint8_t idx = (uint8_t)instrIdx;
+        fwrite(&idx, sizeof(uint8_t), 1, f);
+        bytesWritten += sizeof(uint8_t);
+
+        fwrite(ins->osTirusArpStepGate, sizeof(uint8_t), 16, f);
+        bytesWritten += 16;
+        fwrite(ins->osTirusArpStepVelocity, sizeof(uint8_t), 16, f);
+        bytesWritten += 16;
+        fwrite(ins->osTirusArpStepLength, sizeof(uint8_t), 16, f);
+        bytesWritten += 16;
+    }
+
     return bytesWritten;
 }
 // Helper: Refresh all TF4 parameter arrays from the synth engine before saving
@@ -524,6 +591,58 @@ static size_t writeAllV2StatesDXM(FILE *f)
 
         if (len == 0 && blobSize == 0)
             printf("[DXM-SAVE] WARNING: Failed to serialize V2 state for instr %d\n", instrIdx);
+    }
+
+    return bytesWritten;
+}
+
+static size_t writeAllOsTirusStatesDXM(FILE *f)
+{
+    size_t bytesWritten = 0;
+    uint8_t numOsTirus = 0;
+
+    for (int instrIdx = 1; instrIdx <= MAX_INST; ++instrIdx)
+    {
+        instr_t *ins = instr[instrIdx];
+        if (ins && ins->useOsTirus)
+            ++numOsTirus;
+    }
+
+    fwrite(&numOsTirus, sizeof(uint8_t), 1, f);
+    bytesWritten += sizeof(uint8_t);
+
+    for (int instrIdx = 1; instrIdx <= MAX_INST; ++instrIdx)
+    {
+        instr_t *ins = instr[instrIdx];
+        if (!ins || !ins->useOsTirus)
+            continue;
+
+        const size_t blobSize = ft2_ostirus_serialize_state(instrIdx, NULL, 0);
+        uint8_t idx = (uint8_t)instrIdx;
+        uint32_t len = 0;
+        uint8_t *blob = NULL;
+
+        if (blobSize > 0)
+        {
+            blob = (uint8_t *)malloc(blobSize);
+            if (blob != NULL && ft2_ostirus_serialize_state(instrIdx, blob, blobSize) == blobSize)
+                len = (uint32_t)blobSize;
+            else
+                printf("[DXM-SAVE] WARNING: Failed to serialize OsTIrus state for instr %d\n", instrIdx);
+        }
+
+        fwrite(&idx, sizeof(uint8_t), 1, f);
+        bytesWritten += sizeof(uint8_t);
+        fwrite(&len, sizeof(uint32_t), 1, f);
+        bytesWritten += sizeof(uint32_t);
+
+        if (len > 0 && blob != NULL)
+        {
+            fwrite(blob, 1, len, f);
+            bytesWritten += len;
+        }
+
+        free(blob);
     }
 
     return bytesWritten;
@@ -889,8 +1008,40 @@ bool saveDXM(UNICHAR *filenameU)
     fseek(f, v2DataEnd, SEEK_SET);
     printf("[DXM-SAVE] V2 chunk: %zu bytes written\n", v2Bytes);
 
-    // 9. Write DXM instrument metadata chunk (distinguishes XM vs DXM instruments)
-        // 9. Write Macro Map chunk
+    // 9. Write OsTIrus full state chunk
+    printf("[DXM-SAVE] Writing OsTIrus state chunk...\n");
+    const char ostChunkId[8] = {'D','X','M','O','T','S',0,0};
+    fwrite(ostChunkId, 1, 8, f);
+    uint32_t ostChunkLen = 0;
+    long ostLenPos = ftell(f);
+    fwrite(&ostChunkLen, 1, 4, f);
+    long ostDataStart = ftell(f);
+    size_t ostBytes = writeAllOsTirusStatesDXM(f);
+    long ostDataEnd = ftell(f);
+    ostChunkLen = (uint32_t)(ostDataEnd - ostDataStart);
+    fseek(f, ostLenPos, SEEK_SET);
+    fwrite(&ostChunkLen, 1, 4, f);
+    fseek(f, ostDataEnd, SEEK_SET);
+    printf("[DXM-SAVE] OsTIrus state chunk: %zu bytes written\n", ostBytes);
+
+    // 10. Write OsTIrus arp editor state chunk
+    printf("[DXM-SAVE] Writing OsTIrus arp state chunk...\n");
+    const char arpChunkId[8] = {'D','X','M','A','R','P',0,0};
+    fwrite(arpChunkId, 1, 8, f);
+    uint32_t arpChunkLen = 0;
+    long arpLenPos = ftell(f);
+    fwrite(&arpChunkLen, 1, 4, f);
+    long arpDataStart = ftell(f);
+    size_t arpBytes = writeOsTirusArpStateChunk(f);
+    long arpDataEnd = ftell(f);
+    arpChunkLen = (uint32_t)(arpDataEnd - arpDataStart);
+    fseek(f, arpLenPos, SEEK_SET);
+    fwrite(&arpChunkLen, 1, 4, f);
+    fseek(f, arpDataEnd, SEEK_SET);
+    printf("[DXM-SAVE] OsTIrus arp chunk: %zu bytes written\n", arpBytes);
+
+    // 11. Write DXM instrument metadata chunk (distinguishes XM vs DXM instruments)
+        // 12. Write Macro Map chunk
     printf("[DXM-SAVE] Writing Macro Map chunk...\n");
     const char mapChunkId[8] = {'D','X','M','M','A','P',0,0};
     fwrite(mapChunkId, 1, 8, f);

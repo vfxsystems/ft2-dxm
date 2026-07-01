@@ -416,11 +416,11 @@ void keyOff(channel_t *ch)
 
 	/* For TF4 synth instruments: send MIDI note-off earlier (done in triggerNote) and keep
 	   channel active so the release tail renders. Skip muting/keyOff flag. */
-	if (ins->useTF4 || ins->useDexed || ins->useV2)
+	if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus)
 	{
 		int chIdx = (int)(ch - channel);
-		printf("[KEYOFF] SYNTH NOTE-OFF (release): instr=%d, note=%d useDexed=%s useTF4=%s\n",
-		       ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
+		printf("[KEYOFF] SYNTH NOTE-OFF (release): instr=%d, note=%d useDexed=%s useTF4=%s useOsTirus=%s\n",
+		       ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
 		/* Ensure we don't call synth twice – but safe either way. */
 		if (ch->noteNum > 0) {
 			ft2_send_synth_midi_dedup(chIdx, ch->instrNum, 0x80 | synthMidiChan(chIdx), ch->noteNum, 0);
@@ -545,10 +545,10 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
         assert(ch->instrNum <= 130);
         instr_t *ins = instr[ch->instrNum];
         
-        if (ins != NULL && (ins->useTF4 || ins->useDexed || ins->useV2))
+        if (ins != NULL && (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus))
         {
-            printf("[TRIGGER] SYNTH NOTE OFF DETECTED: instr=%d, noteNum=%d useDexed=%s useTF4=%s\n",
-                ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
+            printf("[TRIGGER] SYNTH NOTE OFF DETECTED: instr=%d, noteNum=%d useDexed=%s useTF4=%s useOsTirus=%s\n",
+                ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
             
             keyOff(ch);
             return;
@@ -578,10 +578,10 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 	
     		// If instrument uses Tunefish4 or Dexed synth, send MIDI instead of samples.
 		// Prefer Dexed when both flags are set so keyboard/keyjazz and playback route correctly.
-        if (ins->useTF4 || ins->useDexed || ins->useV2)
+        if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus)
 		{
-			printf("[TRIGGER] SYNTH NOTE ON DETECTED: instr=%d, note=%d useDexed=%s useTF4=%s\n",
-				ch->instrNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
+			printf("[TRIGGER] SYNTH NOTE ON DETECTED: instr=%d, note=%d useDexed=%s useTF4=%s useOsTirus=%s\n",
+				ch->instrNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
 			
 			// CRITICAL: Set instrPtr so keyOff() can detect synth instruments later
 			ch->instrPtr = ins;
@@ -2899,6 +2899,8 @@ bool allocateInstr(int16_t insNum)
 		return false;
 
 	memset(p, 0, sizeof (instr_t));
+	p->osTirusPreset = 0xFFFF;
+	p->osTirusSlot = 0xFF;
 	sample_t *s = p->smp;
 	for (int32_t i = 0; i < MAX_SMP_PER_INST; i++, s++)
 	{
@@ -2926,6 +2928,7 @@ void freeInstr(int32_t insNum)
 		return; // not allocated
 
 	pauseAudio(); // channel instrument pointers are now cleared
+	ft2_unified_synth_clear_state(insNum);
 
 	sample_t *s = instr[insNum]->smp;
 	for (int32_t i = 0; i < MAX_SMP_PER_INST; i++, s++) // free sample data
@@ -2940,6 +2943,7 @@ void freeInstr(int32_t insNum)
 void freeAllInstr(void)
 {
 	pauseAudio(); // channel instrument pointers are now cleared
+	ft2_unified_synth_clear_all_states();
 	for (int32_t i = 1; i <= MAX_INST; i++)
 	{
 		if (instr[i] != NULL)
@@ -3302,7 +3306,7 @@ void stopPlaying(void)
 	for (uint8_t i = 0; i < MAX_CHANNELS; i++)
 	{
 		channel_t *ch = &channel[i];
-		if (ch->instrPtr && (ch->instrPtr->useTF4 || ch->instrPtr->useDexed || ch->instrPtr->useV2) && ch->noteNum > 0)
+		if (ch->instrPtr && (ch->instrPtr->useTF4 || ch->instrPtr->useDexed || ch->instrPtr->useV2 || ch->instrPtr->useOsTirus) && ch->noteNum > 0)
 		{
 			ft2_send_synth_midi_dedup(i, ch->instrNum, 0x80 | synthMidiChan(i), ch->noteNum, 0);
 		}
@@ -3356,7 +3360,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 	channel_t *ch = &channel[chNum];
 
 	// Check if instrument uses a synth - handle it separately for keyboard/jamming
-        if (ins->useTF4 || ins->useDexed || ins->useV2)
+        if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus)
 	{
 		lockAudio();
 
@@ -3390,8 +3394,8 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 				velocity = (vol > 64) ? 127 : (vol * 2);
 			}
 
-            printf("[PLAYTONE] SYNTH KEYBOARD INPUT: instr=%d, note=%d, useDexed=%s useTF4=%s\n",
-                insNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE");
+            printf("[PLAYTONE] SYNTH KEYBOARD INPUT: instr=%d, note=%d, useDexed=%s useTF4=%s useOsTirus=%s\n",
+                insNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
 			ft2_send_synth_midi_dedup(chNum, insNum, 0x90 | synthMidiChan(chNum), note, velocity);
 
 			ch->noteNum = note;
