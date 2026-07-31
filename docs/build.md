@@ -83,9 +83,10 @@ CTest currently covers:
 - `ft2_self_test`: core table setup/teardown self-test.
 - `ft2_v2_stress`: V2 preset, patch, MIDI, render, panic, and state serialization stress test.
 
-Disk Op module saving defaults to DXM. XM files remain supported for loading and
-import, but XM export is intentionally not exposed; use the WAV renderer path for
-audio renders.
+Disk Op module saving defaults to `.dxm` filenames. XM files remain supported for
+loading and import, but XM export is intentionally not exposed; use the WAV
+renderer path for audio renders. See [DXM module workflow](dxm.md) for the
+module save/load contract.
 
 Pass extra CMake arguments after `--`:
 

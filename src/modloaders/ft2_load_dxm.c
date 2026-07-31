@@ -202,6 +202,15 @@ static bool skip_bytes(FILE *f, size_t n)
     return fseek(f, (long)n, SEEK_CUR) == 0;
 }
 
+static size_t dxm_sample_payload_size(uint32_t frames, bool sample16Bit, bool stereo)
+{
+    size_t bytes = (size_t)frames;
+    bytes *= sample16Bit ? sizeof(int16_t) : sizeof(int8_t);
+    if (stereo)
+        bytes *= 2u;
+    return bytes;
+}
+
 // Helper: Restore DSP state from buffer
 static void restoreDSPStateDXM(FILE *f, uint32_t chunkLen)
 {
@@ -273,12 +282,13 @@ static void restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
         printf("[DXM-LOAD] instr=%d smp=%d flags=0x%02X frames=%u 16bit=%d stereo=%d\n", instrIdx, smpIdx, flags, frames, sample16Bit, stereo);
         if (instrIdx < 1 || instrIdx > 128 || smpIdx >= 16) {
             printf("[DXM-LOAD] Skipping sample: invalid instrument/sample index\n");
-            fseek(f, (sample16Bit ? 2 : 1) * frames * (stereo ? 2 : 1), SEEK_CUR);
+            skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
             continue;
         }
         instr_t *ins = instrTmp[instrIdx];
         if (!ins) {
             printf("[DXM-LOAD] Skipping sample: instrument %d not allocated\n", instrIdx);
+            skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
             continue;
         }
         sample_t *s = &ins->smp[smpIdx];
@@ -309,7 +319,7 @@ static void restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
             // Allocate the sample data
             if (!allocateSmpData(s, frames, sample16Bit, stereo)) {
                 printf("[DXM-LOAD] Failed to allocate sample data\n");
-                fseek(f, (sample16Bit ? 2 : 1) * frames * (stereo ? 2 : 1), SEEK_CUR);
+                skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
                 continue;
             }
             
@@ -320,7 +330,7 @@ static void restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
         // For stereo samples, ensure R channel is allocated
         if (stereo && s->dataPtrR == NULL) {
             printf("[DXM-LOAD] Skipping stereo sample: R channel not allocated\n");
-            fseek(f, (sample16Bit ? 2 : 1) * frames * 2, SEEK_CUR);
+            skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
             continue;
         }
         // Read sample data: interleaved L+R if stereo, planar L only if mono
@@ -354,6 +364,8 @@ static void restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
                 }
                 
                 free(tempBuffer);
+            } else {
+                skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
             }
         } else {
             // Mono sample - read planar data
@@ -821,7 +833,8 @@ void finalizeDXMSynthLoadState(void)
 {
     const int sr = (audio.freq > 0) ? audio.freq : 44100;
 
-    if (!ft2_synth_is_initialized() || !ft2_dx_is_initialized() || !ft2_ostirus_is_initialized())
+    if (!ft2_synth_is_initialized() || !ft2_dx_is_initialized() ||
+        !ft2_v2_is_initialized() || !ft2_ostirus_is_initialized())
     {
         ft2_unified_synth_shutdown();
         ft2_unified_synth_set_samplerate(sr);
@@ -929,6 +942,11 @@ FILE *xmFile = NULL;
         uint32_t chunkLen = 0;
         if (fread(&chunkLen, 1, 4, f) != 4) break;
         if (chunkLen == 0) continue;
+        const long chunkDataStart = ftell(f);
+        const long chunkDataEnd = chunkDataStart + (long)chunkLen;
+        if (chunkDataEnd < chunkDataStart || chunkDataEnd > (long)filesize)
+            break;
+
         printf("[DXM-LOAD] Found chunk: %.6s, length=%d\n", chunkId, chunkLen);
         if (memcmp(chunkId, "DXMDSP", 6) == 0) {
             restoreDSPStateDXM(f, chunkLen);
@@ -962,6 +980,9 @@ FILE *xmFile = NULL;
             // Unknown chunk, skip
             fseek(f, chunkLen, SEEK_CUR);
         }
+
+        if (ftell(f) != chunkDataEnd)
+            fseek(f, chunkDataEnd, SEEK_SET);
     }
 
         // Cache persistent mixer/DSP state after loading DXM
