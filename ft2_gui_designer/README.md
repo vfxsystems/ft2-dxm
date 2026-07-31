@@ -9,6 +9,9 @@ FT2 GUI Designer is a layout editor that mirrors FastTracker 2 widget behavior a
 - Schema-based C export for FT2 (per-layout descriptor with ID ranges).
 - Bitmap import using FT2 asset registry (BMP/PNG, indexed or 24/32-bit true-color).
 - Bitmap layer and skin metadata for foreground art, backgrounds, and widget skin surfaces.
+- Wider two-column toolbar with readable schema labels.
+- Page-view dropdown for all pages or Page 1 through Page 6.
+- Designer palette themes: FT2 Arctic, OP-1 inspired, Renoise inspired, and VS Code inspired.
 - Built-in file prompt for load/save/export without blocking the app.
 
 ## Build and Run
@@ -46,6 +49,7 @@ Global keys:
 
 - G: toggle grid
 - P: toggle properties panel
+- T: cycle designer color theme
 - Delete: delete selected widget
 - Esc: cancel drag or close prompt
 
@@ -60,6 +64,8 @@ File operations (open prompt in the canvas footer):
 
 - Canvas size is 632x400 with an 8px grid.
 - Drag tools from the toolbar or select a tool and click to place.
+- The toolbar page dropdown controls preview filtering without changing widget coordinates.
+- The theme dropdown changes the designer palette preview while preserving FT2 palette indexes used by export.
 - Selected widgets show handles for visual feedback.
 - Drag to reposition; grid snapping is applied.
 
@@ -143,6 +149,7 @@ Import status appears in the footer and full errors are printed to the console.
 - `main.c`: SDL event loop, UI, file prompts.
 - `widgets.c/h`: widget creation, rendering, schema export, and `.gui` load/save.
 - `font.c/h`: FT2 font rendering (uses the shared asset registry).
+- `palette.c/h`: FT2 palette themes and renderer-aligned clipped/vector drawing helpers.
 - `assets.c/h`: bitmap/font asset access via `ft2_ui_assets`.
 - `shared/ft2_ui_schema.h`: schema descriptor definitions used by both FT2 and the designer.
 
