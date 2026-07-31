@@ -19,7 +19,7 @@
 #include <stdint.h>
 #include "ft2_mixer.h"  // for mixerCh and MAX_MIXER_CHANNELS
 #include "ft2_dsp.h"    // for dspEffectInstance_t, DSP_MAX_SLOTS, dspGetParamInfo, masterEffects
-#include "ft2_diskop.h" // for MOD_SAVE_MODE_XM, MOD_SAVE_MODE_DXM
+#include "ft2_diskop.h" // for module save mode constants
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
 #include "ft2_v2.h"

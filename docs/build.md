@@ -83,6 +83,10 @@ CTest currently covers:
 - `ft2_self_test`: core table setup/teardown self-test.
 - `ft2_v2_stress`: V2 preset, patch, MIDI, render, panic, and state serialization stress test.
 
+Disk Op module saving defaults to DXM. XM files remain supported for loading and
+import, but XM export is intentionally not exposed; use the WAV renderer path for
+audio renders.
+
 Pass extra CMake arguments after `--`:
 
 ```sh
@@ -136,6 +140,10 @@ Classic `ft2_gui.c` primitives delegate to it while preserving the 632x400
 software framebuffer output. SDL_ttf-backed scalable text is available behind
 `-DFT2_ENABLE_TTF=ON`; without that flag, the API compiles as a safe no-op and
 the application keeps using the built-in bitmap fonts.
+
+The renderer layer is always built into `ft2-dxm`; there is currently no
+separate `FT2_ENABLE_VECTOR_UI` build switch. The build-time option only gates
+SDL_ttf-backed scalable text support.
 
 See [UI renderer](ui-renderer.md) for the migration contract and renderer
 self-test coverage.

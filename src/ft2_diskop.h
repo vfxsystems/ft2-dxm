@@ -16,7 +16,8 @@ enum
 	DISKOP_ITEM_DXIPATCH = 6, // standalone synth patch (.dxi), exposed under Disk Op. Instr. save-as
 
 	MOD_SAVE_MODE_DXM = 0,
-	MOD_SAVE_MODE_XM = 1,
+	// XM is load/import-only. Keep WAV at its legacy value so stale XM state (1)
+	// can be detected and normalized back to DXM instead of becoming WAV.
 	MOD_SAVE_MODE_WAV = 2,
 	SMP_SAVE_MODE_RAW = 0,
 	SMP_SAVE_MODE_IFF = 1,
@@ -81,7 +82,6 @@ void rbDiskOpTrack(void);
 void rbDiskOpInsSaveXi(void);
 void rbDiskOpInsSaveDxi(void);
 void rbDiskOpModSaveDxm(void);
-void rbDiskOpModSaveMod(void);
 void rbDiskOpModSaveWav(void);
 void rbDiskOpSmpSaveWav(void);
 void rbDiskOpSmpSaveRaw(void);
