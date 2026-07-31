@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+source "${script_dir}/linux-build-common.sh"
+
+repo_root=$(ft2_repo_root)
+build_dir="${FT2_MACOS_BUILD_DIR:-build-macos}"
+build_type="${FT2_BUILD_TYPE:-Release}"
+jobs="${FT2_JOBS:-$(ft2_default_jobs)}"
+fresh=0
+run_tests=0
+universal=0
+print_deps=0
+declare -a cmake_args=()
+
+usage() {
+    cat <<'EOF'
+Usage: ./scripts/build-macos.sh [options] [-- extra-cmake-args...]
+
+Options:
+  --debug              Configure a Debug build.
+  --release            Configure a Release build. This is the default.
+  --universal          Build x86_64 + arm64 on native macOS.
+  --build-dir DIR      Use a custom CMake build directory.
+  --fresh              Remove and recreate the build directory before configuring.
+  --test               Run CTest after building. Only supported on native macOS.
+  -j, --jobs N         Parallel build jobs. Defaults to detected CPU count.
+  --deps               Print expected macOS build dependencies and exit.
+  -h, --help           Show this help.
+
+Environment:
+  OSXCROSS_ROOT        Optional osxcross installation root for Linux-hosted configure/build.
+  OSXCROSS_TARGET      osxcross compiler command prefix. Defaults to o64-clang.
+  SDL2_DIR             CMake SDL2 package directory.
+  CMAKE_PREFIX_PATH    Extra CMake dependency roots.
+EOF
+}
+
+print_deps() {
+    cat <<'EOF'
+Required for native macOS builds:
+  Xcode Command Line Tools
+  CMake
+  SDL2 framework or CMake package
+
+Linux-hosted macOS cross-builds are only configured when OSXCROSS_ROOT is set,
+and still require a legally obtained macOS SDK plus macOS SDL2 dependency roots.
+CTest can only run on native macOS.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --debug) build_type=Debug ;;
+        --release) build_type=Release ;;
+        --universal) universal=1 ;;
+        --build-dir)
+            shift
+            [ "$#" -gt 0 ] || ft2_die "--build-dir needs a directory"
+            build_dir=$1
+            ;;
+        --fresh) fresh=1 ;;
+        --test) run_tests=1 ;;
+        -j|--jobs)
+            option=$1
+            shift
+            [ "$#" -gt 0 ] || ft2_die "${option} needs a job count"
+            jobs=$1
+            ;;
+        --deps) print_deps=1 ;;
+        -h|--help) usage; exit 0 ;;
+        --)
+            shift
+            cmake_args+=("$@")
+            break
+            ;;
+        *) ft2_die "unknown option: $1" ;;
+    esac
+    shift
+done
+
+if [ "$print_deps" -eq 1 ]; then
+    print_deps
+    exit 0
+fi
+
+ft2_validate_jobs "$jobs"
+ft2_have cmake || ft2_die "cmake was not found in PATH."
+
+build_path=$(ft2_make_abs_path "$build_dir")
+if [ "$fresh" -eq 1 ]; then
+    case "$build_path" in
+        "$repo_root"/*|/tmp/*) rm -rf -- "$build_path" ;;
+        *) ft2_die "refusing to remove unsafe build directory: ${build_path}" ;;
+    esac
+fi
+
+cd -- "$repo_root"
+configure_cmd=(cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE="$build_type")
+
+if [ "$(uname -s)" = "Darwin" ]; then
+    if [ "$universal" -eq 1 ]; then
+        configure_cmd+=("-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64")
+    fi
+elif [ -n "${OSXCROSS_ROOT:-}" ]; then
+    configure_cmd+=(-DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-macos-osxcross.cmake)
+else
+    ft2_die "macOS builds require native macOS or OSXCROSS_ROOT. Run ./scripts/build-macos.sh --deps."
+fi
+
+configure_cmd+=("${cmake_args[@]}")
+"${configure_cmd[@]}"
+
+cmake --build "$build_dir" --target ft2-dxm --parallel "$jobs"
+
+if [ "$run_tests" -eq 1 ]; then
+    [ "$(uname -s)" = "Darwin" ] || ft2_die "--test for macOS builds requires native macOS"
+    ctest --test-dir "$build_dir" --output-on-failure --parallel "$jobs"
+fi
+
+printf 'Done. macOS binary dir: %s/bin\n' "$build_path"

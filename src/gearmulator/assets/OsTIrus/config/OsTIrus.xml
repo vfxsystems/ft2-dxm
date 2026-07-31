@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<PROPERTIES>
+  <VALUE name="pluginPath_vst2" val="C:\VST2\OsTIrus.dll"/>
+  <VALUE name="skinDisplayName" val="TrancyTI"/>
+  <VALUE name="skinFile" val="VirusTI_Trancy.rml"/>
+  <VALUE name="skinFolder" val=""/>
+  <VALUE name="scale" val="85.0"/>
+  <VALUE name="disclaimerSeen" val="1"/>
+  <VALUE name="logoAnimation" val="0"/>
+</PROPERTIES>

@@ -5,6 +5,7 @@
 #include "ft2_synth.h"
 #include "ft2_replayer.h"
 #include "ft2_header.h"
+#include "ft2_macro_map.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -146,24 +147,11 @@ static const ParameterRange* tunefish4_get_param_range(int paramId) {
 }
 
 static int tunefish4_get_param_count(void) {
-    return 128; // Tunefish4 has 128 parameters
+    return tf4_param_count(); // full table, src/ft2_macro_map.c (kept in sync with the TF_* enum)
 }
 
 static const char* tunefish4_get_param_name(int paramId) {
-    static const char* param_names[] = {
-        "Global Gain", "Volume", "Panning", "Detune", "Spread", "Scale",
-        "Bandwidth", "Num Harmonics", "Damp", "Modulation", "Drive",
-        "LP Freq", "LP Res", "HP Freq", "HP Res",
-        "LFO1 Rate", "LFO1 Depth", "LFO2 Rate", "LFO2 Depth",
-        "ADSR1 Attack", "ADSR1 Decay", "ADSR1 Sustain", "ADSR1 Release",
-        "Flanger Freq", "Reverb Room", "Delay Left", "Chorus Freq"
-        // ... more parameter names would go here
-    };
-    
-    if (paramId >= 0 && paramId < 128) {
-        return param_names[paramId];
-    }
-    return "Unknown";
+    return tf4_param_name(paramId); // bounds-checked against the full table
 }
 
 static int tunefish4_load_patch(int instrID, const uint8_t* data, size_t size) {
@@ -376,7 +364,7 @@ static bool dexed_has_state(int instrID) {
 }
 
 static void dexed_clear_state(int instrID) {
-    // TODO: Clear state for instrument
+    ft2_dx_release_instrument(instrID);
 }
 
 static int dexed_get_active_voices(int instrID) {
@@ -527,12 +515,12 @@ static const ParameterRange* ostirus_get_param_range(int paramId) {
 }
 
 static int ostirus_get_param_count(void) {
-    return 0;
+    return ft2_ostirus_get_param_count();
 }
 
 static const char* ostirus_get_param_name(int paramId) {
-    (void)paramId;
-    return "Unsupported";
+    const char *name = ft2_ostirus_get_param_name(paramId);
+    return name ? name : "Unknown";
 }
 
 static int ostirus_load_patch(int instrID, const uint8_t* data, size_t size) {

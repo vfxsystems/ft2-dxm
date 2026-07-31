@@ -1,0 +1,175 @@
+{
+  "patches": {
+    "prog|52|hash|a60034bef3c6f5ef19f6a66e8d72edb3": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Acid"
+          ]
+        }
+      }
+    },
+    "prog|49|hash|603d5c8d62fa3f484b5f495becab7a6a": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Galactic"
+          ]
+        }
+      }
+    },
+    "prog|62|hash|5c2a43c3081ea2d957e0e851cb5151c5": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Acid"
+          ]
+        }
+      }
+    },
+    "prog|60|hash|4019ae1e1c982c6b632ef7ea85024fce": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Galactic"
+          ]
+        }
+      }
+    },
+    "prog|67|hash|8092c6676c5fe0dd20b44771350c97af": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Vox"
+          ]
+        }
+      }
+    },
+    "prog|57|hash|97ecbf9ec56167caab76ec609382863b": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Acid"
+          ]
+        }
+      }
+    },
+    "prog|59|hash|add507b8d291e2d59ce8fbe5481fd413": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Acid"
+          ]
+        }
+      }
+    },
+    "prog|17|hash|223b814c0ebd056f9b22b20ffb9f599a": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Galactic"
+          ]
+        }
+      }
+    },
+    "prog|2|hash|0273094132b85e5c7d2997ed798c2dbe": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Vox"
+          ]
+        }
+      }
+    },
+    "prog|40|hash|947601df64d859f4c0f58bf8d709dcf1": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Galactic"
+          ]
+        }
+      }
+    },
+    "prog|45|hash|b23d05f0e9f8fb5a73886f8b05c375d0": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Vintage"
+          ]
+        }
+      }
+    },
+    "prog|21|hash|3715fabed67f1ec9ea7b96de62318eb9": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Hardcore"
+          ]
+        }
+      }
+    },
+    "prog|27|hash|cf9611ba54cfecfa69c8353194101d72": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Hardcore"
+          ]
+        }
+      }
+    },
+    "prog|22|hash|aec9aa6324381837329f97c57eb9ef27": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Hardcore"
+          ]
+        }
+      }
+    },
+    "prog|23|hash|bf12890fef1748208d44a154c764f774": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Galactic"
+          ]
+        }
+      }
+    },
+    "prog|10|hash|ebf88189da12fde2358417f3c0d6b7df": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Hardcore"
+          ]
+        }
+      }
+    },
+    "prog|28|hash|be7ec66c306bb063dc6d2be918ca6611": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Effects"
+          ]
+        }
+      }
+    },
+    "prog|33|hash|04b65d30f1bc8168743bf94d16a5e5e6": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Hardcore"
+          ]
+        }
+      }
+    },
+    "prog|36|hash|9a3220a2add631543f8def90831fc61d": {
+      "tags": {
+        "favourites": {
+          "added": [
+            "Vox"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,361 @@
+{
+  "datasources": [],
+  "midiBankAssignments": [
+    {
+      "type": "rom",
+      "name": "RAM Bank A",
+      "bank": 0,
+      "midiBankNumber": 0
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom A",
+      "bank": 2,
+      "midiBankNumber": 2
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom B",
+      "bank": 3,
+      "midiBankNumber": 3
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom C",
+      "bank": 4,
+      "midiBankNumber": 4
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom D",
+      "bank": 5,
+      "midiBankNumber": 5
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom E",
+      "bank": 6,
+      "midiBankNumber": 6
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom F",
+      "bank": 7,
+      "midiBankNumber": 7
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom G",
+      "bank": 8,
+      "midiBankNumber": 8
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom H",
+      "bank": 9,
+      "midiBankNumber": 9
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom I",
+      "bank": 10,
+      "midiBankNumber": 10
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom J",
+      "bank": 11,
+      "midiBankNumber": 11
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom K",
+      "bank": 12,
+      "midiBankNumber": 12
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom L",
+      "bank": 13,
+      "midiBankNumber": 13
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom M",
+      "bank": 14,
+      "midiBankNumber": 14
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom N",
+      "bank": 15,
+      "midiBankNumber": 15
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom O",
+      "bank": 16,
+      "midiBankNumber": 16
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom P",
+      "bank": 17,
+      "midiBankNumber": 17
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom Q",
+      "bank": 18,
+      "midiBankNumber": 18
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom R",
+      "bank": 19,
+      "midiBankNumber": 19
+    },
+    {
+      "type": "rom",
+      "name": "TI Rom S",
+      "bank": 20,
+      "midiBankNumber": 20
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom A",
+      "bank": 21,
+      "midiBankNumber": 21
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom B",
+      "bank": 22,
+      "midiBankNumber": 22
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom C",
+      "bank": 23,
+      "midiBankNumber": 23
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom D",
+      "bank": 24,
+      "midiBankNumber": 24
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom E",
+      "bank": 25,
+      "midiBankNumber": 25
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom F",
+      "bank": 26,
+      "midiBankNumber": 26
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom G",
+      "bank": 27,
+      "midiBankNumber": 27
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom H",
+      "bank": 28,
+      "midiBankNumber": 28
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom I",
+      "bank": 29,
+      "midiBankNumber": 29
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom J",
+      "bank": 30,
+      "midiBankNumber": 30
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom K",
+      "bank": 31,
+      "midiBankNumber": 31
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom L",
+      "bank": 32,
+      "midiBankNumber": 32
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom M",
+      "bank": 33,
+      "midiBankNumber": 33
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom N",
+      "bank": 34,
+      "midiBankNumber": 34
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom O",
+      "bank": 35,
+      "midiBankNumber": 35
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom P",
+      "bank": 36,
+      "midiBankNumber": 36
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom Q",
+      "bank": 37,
+      "midiBankNumber": 37
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom R",
+      "bank": 38,
+      "midiBankNumber": 38
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom S",
+      "bank": 39,
+      "midiBankNumber": 39
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom T",
+      "bank": 40,
+      "midiBankNumber": 40
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom U",
+      "bank": 41,
+      "midiBankNumber": 41
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom V",
+      "bank": 42,
+      "midiBankNumber": 42
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom W",
+      "bank": 43,
+      "midiBankNumber": 43
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom X",
+      "bank": 44,
+      "midiBankNumber": 44
+    },
+    {
+      "type": "rom",
+      "name": "TI2 Rom Y",
+      "bank": 45,
+      "midiBankNumber": 45
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom A",
+      "bank": 46,
+      "midiBankNumber": 46
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom B",
+      "bank": 47,
+      "midiBankNumber": 47
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom C",
+      "bank": 48,
+      "midiBankNumber": 48
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom D",
+      "bank": 49,
+      "midiBankNumber": 49
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom E",
+      "bank": 50,
+      "midiBankNumber": 50
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom F",
+      "bank": 51,
+      "midiBankNumber": 51
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom G",
+      "bank": 52,
+      "midiBankNumber": 52
+    },
+    {
+      "type": "rom",
+      "name": "Snow Rom H",
+      "bank": 53,
+      "midiBankNumber": 53
+    }
+  ],
+  "tags": {
+    "category": [
+      "Acid",
+      "Arpeggiator",
+      "Atomizer",
+      "Bass",
+      "Classic",
+      "Decay",
+      "Digital",
+      "Drums",
+      "Effects",
+      "FM",
+      "Favourite 1",
+      "Input",
+      "Lead",
+      "Organ",
+      "Pad",
+      "Percussion",
+      "Piano",
+      "Pluck",
+      "String",
+      "Vocoder"
+    ],
+    "customA": [
+      "TI"
+    ],
+    "customB": [
+      "Chorus",
+      "Phaser"
+    ],
+    "customC": [
+      "Single"
+    ]
+  },
+  "tagColors": {
+  },
+  "patches": {
+  }
+}

@@ -1,1017 +1,1684 @@
 #include "ft2_v2_complete_layout.h"
 
-#include "ft2_audio.h"
-#include "ft2_gui.h"
-#include "ft2_inst_ed.h"
-#include "ft2_mouse.h"
-#include "ft2_structs.h"
-#include "ft2_textboxes.h"
-#include "ft2_video.h"
-
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "ft2_audio.h"
+#include "ft2_gui.h"
+#include "ft2_header.h"
+#include "ft2_inst_ed.h"
+#include "ft2_mouse.h"
+#include "ft2_palette.h"
+#include "ft2_structs.h"
+#include "ft2_v2_complete_layout_schema.h"
+#include "ft2_video.h"
+
 extern editor_t editor;
 extern instr_t *instr[128 + 4];
 
-V2CompleteLayout* g_active_v2_layout = NULL;
+V2CompleteLayout *g_active_v2_layout = NULL;
 
-typedef struct {
-    int paramId;
-    int topicIndex;
-    bool isGlobal;
-    bool isCombo;
-} V2BindingMeta;
+static const char *const k_page_names[V2_PAGE_COUNT] =
+{
+    "Voice / Osc",
+    "Filters",
+    "LFO / Envelopes",
+    "FX",
+    "Master",
+    "Mod Matrix"
+};
 
-static V2BindingMeta g_patch_meta[V2_MAX_PATCH_BINDINGS];
-static V2BindingMeta g_global_meta[V2_MAX_GLOBAL_BINDINGS];
+static const int k_env_param_ids[2][5] =
+{
+    { 32, 33, 34, 35, 36 },
+    { 38, 39, 40, 41, 42 }
+};
 
-static const char* k_page_names[V2_PAGE_COUNT] = { "Patch", "Globals", "Mod" };
-static const int k_grid_cols = 5;
-static const int k_grid_cell_w = 118;
-static const int k_grid_cell_h = 86;
-static const int k_grid_origin_x = 12;
-static const int k_grid_origin_y = 84;
+#define V2_PREVIEW_SAMPLE_COUNT   256
+#define V2_PREVIEW_HARMONICS      12
+#define V2_PREVIEW_OSC_COUNT      3
 
-static int clamp_int(int value, int minValue, int maxValue)
+typedef struct
+{
+    int mode;
+    bool ring;
+    float pitchSemis;
+    float freqRatio;
+    float color;
+    float gain;
+} v2_preview_osc_t;
+
+static void v2_draw_line(int x0, int y0, int x1, int y1, uint8_t color);
+void v2_update_all_widgets_from_synth(V2CompleteLayout *layout);
+
+static int v2_clampi(int value, int minValue, int maxValue)
 {
     if (value < minValue) return minValue;
     if (value > maxValue) return maxValue;
     return value;
 }
 
-static const char* safe_str(const char* s)
+static float v2_clampf(float value, float minValue, float maxValue)
 {
-    return (s && *s) ? s : "";
+    if (value < minValue) return minValue;
+    if (value > maxValue) return maxValue;
+    return value;
 }
 
-static void register_widget(V2CompleteLayout* layout, TunefishWidget* widget)
+static float v2_wrap01(float phase)
 {
-    if (!layout || !widget) return;
-    if (layout->all_widget_count < V2_MAX_WIDGETS) {
+    phase -= floorf(phase);
+    if (phase < 0.0f)
+        phase += 1.0f;
+    return phase;
+}
+
+static int v2_current_instr_id(const V2CompleteLayout *layout)
+{
+    if (layout && layout->active_instrument_id >= 1 && layout->active_instrument_id <= MAX_INST)
+        return layout->active_instrument_id;
+
+    if (editor.curInstr >= 1 && editor.curInstr <= MAX_INST)
+        return editor.curInstr;
+
+    return 0;
+}
+
+static int v2_get_patch_param_raw(const V2CompleteLayout *layout, int paramId)
+{
+    const Ft2V2ParamInfo *info;
+    int instrID;
+    float normalized;
+    int raw;
+
+    instrID = v2_current_instr_id(layout);
+    if (instrID <= 0)
+        return 0;
+
+    info = ft2_v2_get_param_info(paramId);
+    if (!info)
+        return 0;
+
+    normalized = ft2_v2_get_param_for_instrument(instrID, paramId);
+    raw = info->min + (int)lroundf(v2_clampf(normalized, 0.0f, 1.0f) * (float)(info->max - info->min));
+    return v2_clampi(raw, info->min, info->max);
+}
+
+static const char *v2_preview_osc_mode_name(int mode)
+{
+    switch (mode & 7)
+    {
+        default:
+        case 0: return "Off";
+        case 1: return "SawTri";
+        case 2: return "Pulse";
+        case 3: return "Sin";
+        case 4: return "Noise";
+        case 5: return "FM";
+        case 6: return "AuxA";
+        case 7: return "AuxB";
+    }
+}
+
+static float v2_preview_noise(int sampleIndex)
+{
+    uint32_t x = (uint32_t)(sampleIndex + 1) * 0x45d9f3bu;
+    x ^= x >> 16;
+    x *= 0x45d9f3bu;
+    x ^= x >> 16;
+    return ((float)(x & 0xFFFFu) / 32767.5f) - 1.0f;
+}
+
+static float v2_preview_eval_osc_sample(const v2_preview_osc_t *osc, float phase, float currentMix, int sampleIndex)
+{
+    float out = 0.0f;
+    float shapedPhase;
+    float width;
+
+    if (!osc || osc->gain <= 0.0f || osc->mode <= 0)
+        return 0.0f;
+
+    shapedPhase = v2_wrap01(phase * osc->freqRatio);
+    width = v2_clampf(osc->color, 0.03f, 0.97f);
+
+    switch (osc->mode & 7)
+    {
+        default:
+        case 0:
+            out = 0.0f;
+            break;
+
+        case 1: /* Saw/Tri */
+            if (shapedPhase < width)
+                out = -1.0f + (2.0f * shapedPhase / width);
+            else
+                out = 1.0f - (2.0f * (shapedPhase - width) / (1.0f - width));
+            break;
+
+        case 2: /* Pulse */
+            out = (shapedPhase < width) ? 1.0f : -1.0f;
+            break;
+
+        case 3: /* Sin */
+            out = sinf(shapedPhase * 6.28318530718f);
+            break;
+
+        case 4: /* Noise */
+            out = v2_preview_noise(sampleIndex + (int)(osc->freqRatio * 29.0f));
+            break;
+
+        case 5: /* FM */
+            out = sinf((shapedPhase * 6.28318530718f) + (currentMix * 3.14159265359f));
+            break;
+
+        case 6: /* AuxA */
+        case 7: /* AuxB */
+            out = 0.0f;
+            break;
+    }
+
+    return out * osc->gain;
+}
+
+static float v2_preview_apply_filter(float input, int mode, float cutoff, float resonance, float *state1, float *state2)
+{
+    float drive;
+    float a;
+    float low;
+    float high;
+    float band;
+
+    if (mode <= 0)
+        return input;
+
+    drive = 1.0f + (resonance * 0.35f);
+    a = 0.035f + (cutoff * cutoff * 0.85f);
+
+    *state1 += a * ((input * drive) - *state1);
+    *state2 += a * (*state1 - *state2);
+
+    low = *state2;
+    high = input - low;
+    band = *state1 - *state2;
+
+    switch (mode & 7)
+    {
+        default:
+        case 0: return input;
+        case 1: return low;
+        case 2: return band;
+        case 3: return high;
+        case 4: return input - band;
+        case 5: return input;
+        case 6: return v2_clampf((low * 1.2f) - (band * resonance * 0.3f), -1.0f, 1.0f);
+        case 7: return v2_clampf((high * 1.2f) + (band * resonance * 0.25f), -1.0f, 1.0f);
+    }
+}
+
+static void v2_generate_waveform_preview(const V2CompleteLayout *layout, float *samples, float *harmonics)
+{
+    v2_preview_osc_t osc[V2_PREVIEW_OSC_COUNT];
+    int i;
+    int sampleIndex;
+    int voiceTransposeRaw;
+    int routingRaw;
+    int filter1Mode;
+    int filter2Mode;
+    float filter1Cutoff;
+    float filter2Cutoff;
+    float filter1Reso;
+    float filter2Reso;
+    float routingBalance;
+    float oscSync;
+    float phaseOffset;
+    float lp11 = 0.0f, lp12 = 0.0f;
+    float lp21 = 0.0f, lp22 = 0.0f;
+
+    if (!samples || !harmonics)
+        return;
+
+    memset(samples, 0, sizeof(float) * V2_PREVIEW_SAMPLE_COUNT);
+    memset(harmonics, 0, sizeof(float) * V2_PREVIEW_HARMONICS);
+
+    for (i = 0; i < V2_PREVIEW_OSC_COUNT; ++i)
+    {
+        const int base = 2 + (i * 6);
+        const int pitchRaw = v2_get_patch_param_raw(layout, base + 2);
+        const int detuneRaw = v2_get_patch_param_raw(layout, base + 3);
+
+        osc[i].mode = v2_get_patch_param_raw(layout, base + 0);
+        osc[i].ring = (i > 0) && (v2_get_patch_param_raw(layout, base + 1) > 0);
+        osc[i].pitchSemis = 0.0f;
+        osc[i].freqRatio = 1.0f;
+        osc[i].color = (float)v2_get_patch_param_raw(layout, base + 4) / 127.0f;
+        osc[i].gain = (float)v2_get_patch_param_raw(layout, base + 5) / 127.0f;
+
+        osc[i].pitchSemis = (float)(pitchRaw - 64) + ((float)(detuneRaw - 64) / 128.0f);
+        osc[i].freqRatio = powf(2.0f, osc[i].pitchSemis / 12.0f);
+        osc[i].freqRatio = v2_clampf(osc[i].freqRatio, 0.125f, 8.0f);
+    }
+
+    voiceTransposeRaw = v2_get_patch_param_raw(layout, 1);
+    routingRaw = v2_get_patch_param_raw(layout, 26);
+    filter1Mode = v2_get_patch_param_raw(layout, 20);
+    filter2Mode = v2_get_patch_param_raw(layout, 23);
+    filter1Cutoff = (float)v2_get_patch_param_raw(layout, 21) / 127.0f;
+    filter2Cutoff = (float)v2_get_patch_param_raw(layout, 24) / 127.0f;
+    filter1Reso = (float)v2_get_patch_param_raw(layout, 22) / 127.0f;
+    filter2Reso = (float)v2_get_patch_param_raw(layout, 25) / 127.0f;
+    routingBalance = (float)v2_get_patch_param_raw(layout, 27) / 127.0f;
+    oscSync = (float)v2_get_patch_param_raw(layout, 58) / 7.0f;
+
+    phaseOffset = 0.0f;
+    if (layout && v2_current_instr_id(layout) > 0 && ft2_v2_get_active_voice_count(v2_current_instr_id(layout)) > 0)
+        phaseOffset = fmodf((float)SDL_GetTicks() * 0.00025f, 1.0f);
+
+    for (sampleIndex = 0; sampleIndex < V2_PREVIEW_SAMPLE_COUNT; ++sampleIndex)
+    {
+        float basePhase = ((float)sampleIndex / (float)V2_PREVIEW_SAMPLE_COUNT) + phaseOffset;
+        float syncPhase = v2_wrap01(basePhase * powf(2.0f, ((float)(voiceTransposeRaw - 64)) / 12.0f));
+        float mix = 0.0f;
+        float filtered;
+        float filtered2;
+
+        basePhase = v2_wrap01(basePhase);
+        if (oscSync > 0.001f)
+            basePhase = syncPhase;
+
+        for (i = 0; i < V2_PREVIEW_OSC_COUNT; ++i)
+        {
+            const float oscSample = v2_preview_eval_osc_sample(&osc[i], basePhase, mix, sampleIndex);
+            if (osc[i].ring)
+                mix *= oscSample;
+            else
+                mix += oscSample;
+        }
+
+        mix = tanhf(mix * 1.35f);
+
+        if (routingRaw == 1)
+        {
+            filtered = v2_preview_apply_filter(mix, filter1Mode, filter1Cutoff, filter1Reso, &lp11, &lp12);
+            filtered = v2_preview_apply_filter(filtered, filter2Mode, filter2Cutoff, filter2Reso, &lp21, &lp22);
+        }
+        else if (routingRaw == 2)
+        {
+            filtered = v2_preview_apply_filter(mix, filter1Mode, filter1Cutoff, filter1Reso, &lp11, &lp12);
+            filtered2 = v2_preview_apply_filter(mix, filter2Mode, filter2Cutoff, filter2Reso, &lp21, &lp22);
+            filtered = (filtered * (1.0f - routingBalance)) + (filtered2 * routingBalance);
+        }
+        else
+        {
+            filtered = v2_preview_apply_filter(mix,
+                filter1Mode > 0 ? filter1Mode : filter2Mode,
+                filter1Mode > 0 ? filter1Cutoff : filter2Cutoff,
+                filter1Mode > 0 ? filter1Reso : filter2Reso,
+                &lp11, &lp12);
+        }
+
+        samples[sampleIndex] = v2_clampf(filtered, -1.0f, 1.0f);
+    }
+
+    for (i = 0; i < V2_PREVIEW_HARMONICS; ++i)
+    {
+        const float harmonic = (float)(i + 1);
+        float realPart = 0.0f;
+        float imagPart = 0.0f;
+
+        for (sampleIndex = 0; sampleIndex < V2_PREVIEW_SAMPLE_COUNT; ++sampleIndex)
+        {
+            const float angle = 6.28318530718f * harmonic * (float)sampleIndex / (float)V2_PREVIEW_SAMPLE_COUNT;
+            realPart += samples[sampleIndex] * cosf(angle);
+            imagPart -= samples[sampleIndex] * sinf(angle);
+        }
+
+        harmonics[i] = sqrtf((realPart * realPart) + (imagPart * imagPart)) / (float)V2_PREVIEW_SAMPLE_COUNT;
+    }
+}
+
+static void v2_draw_waveform_preview(const V2CompleteLayout *layout, int x, int y, int w, int h)
+{
+    float samples[V2_PREVIEW_SAMPLE_COUNT];
+    float harmonics[V2_PREVIEW_HARMONICS];
+    float harmonicMax = 0.0f;
+    int plotX;
+    int plotY;
+    int plotW;
+    int plotH;
+    int barsY;
+    int barsH;
+    int centerY;
+    int i;
+    int frameX;
+    int frameY;
+    int frameW;
+    int frameH;
+
+    if (!layout)
+        return;
+
+    frameX = x;
+    frameY = y;
+    frameW = w;
+    frameH = h;
+
+    if (frameX < 0 || frameY < 0 || frameW <= 0 || frameH <= 0)
+        return;
+    if (frameX >= SCREEN_W || frameY >= SCREEN_H)
+        return;
+    if (frameX + frameW > SCREEN_W)
+        frameW = SCREEN_W - frameX;
+    if (frameY + frameH > SCREEN_H)
+        frameH = SCREEN_H - frameY;
+    if (frameW < 16 || frameH < 16)
+        return;
+
+    plotX = frameX + 6;
+    plotY = frameY + 6;
+    plotW = frameW - 12;
+    plotH = (frameH * 2) / 3;
+    barsY = plotY + plotH + 6;
+    barsH = (frameY + frameH - 6) - barsY;
+    centerY = plotY + (plotH / 2);
+
+    fillRect(frameX, frameY, frameW, frameH, PAL_BUTTON2);
+    hLine(frameX, frameY, frameW, PAL_BCKGRND);
+    hLine(frameX, frameY + frameH - 1, frameW, PAL_BCKGRND);
+    vLine(frameX, frameY, frameH, PAL_BCKGRND);
+    vLine(frameX + frameW - 1, frameY, frameH, PAL_BCKGRND);
+
+    if (plotW < 32 || plotH < 16)
+        return;
+
+    {
+        const float t = (float)(SDL_GetTicks() & 0x7FFFFFFF) * 0.0015f;
+        for (i = 0; i < V2_PREVIEW_SAMPLE_COUNT; ++i)
+        {
+            const float p = (float)i / (float)V2_PREVIEW_SAMPLE_COUNT;
+            const float s1 = sinf((p * 6.28318530718f * 1.0f) + t);
+            const float s2 = 0.35f * sinf((p * 6.28318530718f * 2.0f) - (t * 0.73f));
+            const float s3 = 0.20f * sinf((p * 6.28318530718f * 5.0f) + (t * 1.37f));
+            const float tri = (2.0f * fabsf((2.0f * (p + (t * 0.03f - floorf(t * 0.03f)))) - 1.0f)) - 1.0f;
+            samples[i] = v2_clampf((s1 * 0.55f) + s2 + s3 + (tri * 0.18f), -1.0f, 1.0f);
+        }
+
+        for (i = 0; i < V2_PREVIEW_HARMONICS; ++i)
+        {
+            const float phase = t * (0.4f + (i * 0.09f));
+            harmonics[i] = 0.18f + 0.82f * fabsf(sinf(phase));
+            if (harmonics[i] > harmonicMax)
+                harmonicMax = harmonics[i];
+        }
+    }
+
+    if (harmonicMax < 0.0001f)
+        harmonicMax = 0.0001f;
+
+    for (i = 0; i <= 8; ++i)
+    {
+        const int gx = plotX + (i * plotW) / 8;
+        const int gy = plotY + (i * plotH) / 4;
+        if (i < 8)
+            vLine(gx, plotY, plotH, PAL_DSKTOP2);
+        if (i < 4)
+            hLine(plotX, gy, plotW, PAL_DSKTOP2);
+    }
+    hLine(plotX, centerY, plotW, PAL_BUTTON1);
+
+    for (i = 1; i < V2_PREVIEW_SAMPLE_COUNT; ++i)
+    {
+        const int x0 = plotX + ((i - 1) * (plotW - 1)) / (V2_PREVIEW_SAMPLE_COUNT - 1);
+        const int x1 = plotX + (i * (plotW - 1)) / (V2_PREVIEW_SAMPLE_COUNT - 1);
+        const int y0 = centerY - (int)lroundf(samples[i - 1] * ((float)(plotH - 6) * 0.5f));
+        const int y1 = centerY - (int)lroundf(samples[i] * ((float)(plotH - 6) * 0.5f));
+        v2_draw_line(x0, y0, x1, y1, PAL_PATTEXT);
+    }
+
+    if (barsH >= 10)
+    {
+        const int barW = plotW / V2_PREVIEW_HARMONICS;
+        for (i = 0; i < V2_PREVIEW_HARMONICS; ++i)
+        {
+            const int x = plotX + (i * barW);
+            const int usableW = barW - 3;
+            const int barHeight = (int)lroundf((harmonics[i] / harmonicMax) * (float)(barsH - 4));
+            if (usableW > 1 && barHeight > 0)
+                fillRect(x + 1, barsY + barsH - 2 - barHeight, usableW, barHeight, PAL_TEXTMRK);
+        }
+    }
+}
+
+static bool v2_widget_visible_on_page(const TunefishWidget *widget, int currentPage)
+{
+    if (!widget) return false;
+    if (widget->page == FT2_UI_WIDGET_PAGE_BOTH) return true;
+    return widget->page == (currentPage + 1);
+}
+
+static void v2_register_widget(V2CompleteLayout *layout, TunefishWidget *widget, ft2_ui_widget_page_t page)
+{
+    if (!layout || !widget)
+    {
+        tf_widget_destroy(widget);
+        return;
+    }
+
+    widget->page = (int)page;
+    widget->visible = v2_widget_visible_on_page(widget, layout->current_page);
+
+    if (layout->all_widget_count < V2_MAX_WIDGETS)
+    {
         layout->all_widgets[layout->all_widget_count++] = widget;
     }
-}
-
-static V2BindingMeta* find_patch_meta_by_widget(V2CompleteLayout* layout, TunefishWidget* widget)
-{
-    if (!layout || !widget) return NULL;
-    for (int i = 0; i < layout->patch_param_count; ++i) {
-        if (layout->patch_params[i].control == widget || layout->patch_params[i].label == widget)
-            return &g_patch_meta[i];
+    else
+    {
+        tf_widget_destroy(widget);
     }
-    return NULL;
 }
 
-static V2BindingMeta* find_global_meta_by_widget(V2CompleteLayout* layout, TunefishWidget* widget)
+static void v2_add_combo_items_from_ctlstr(TunefishWidget *combo, const char *ctlstr)
 {
-    if (!layout || !widget) return NULL;
-    for (int i = 0; i < layout->global_param_count; ++i) {
-        if (layout->global_params[i].control == widget || layout->global_params[i].label == widget)
-            return &g_global_meta[i];
-    }
-    return NULL;
-}
+    char text[128];
+    size_t outLen;
+    size_t i;
 
-static V2ParamControlBinding* find_patch_binding(V2CompleteLayout* layout, TunefishWidget* widget)
-{
-    if (!layout || !widget) return NULL;
-    for (int i = 0; i < layout->patch_param_count; ++i) {
-        if (layout->patch_params[i].control == widget || layout->patch_params[i].label == widget)
-            return &layout->patch_params[i];
-    }
-    return NULL;
-}
-
-static V2ParamControlBinding* find_global_binding(V2CompleteLayout* layout, TunefishWidget* widget)
-{
-    if (!layout || !widget) return NULL;
-    for (int i = 0; i < layout->global_param_count; ++i) {
-        if (layout->global_params[i].control == widget || layout->global_params[i].label == widget)
-            return &layout->global_params[i];
-    }
-    return NULL;
-}
-
-static V2ModRowWidgets* find_mod_row(V2CompleteLayout* layout, TunefishWidget* widget)
-{
-    if (!layout || !widget) return NULL;
-    for (int i = 0; i < V2_MOD_ROWS; ++i) {
-        V2ModRowWidgets* row = &layout->mod_rows[i];
-        if (row->slot_label == widget || row->source_combo == widget || row->amount_control == widget || row->dest_combo == widget)
-            return row;
-    }
-    return NULL;
-}
-
-static int current_instrument_id(void)
-{
-    if (g_active_v2_layout != NULL &&
-        g_active_v2_layout->active_instrument_id >= 1 &&
-        g_active_v2_layout->active_instrument_id <= MAX_INST) {
-        return g_active_v2_layout->active_instrument_id;
-    }
-
-    if (editor.curInstr < 1 || editor.curInstr > MAX_INST) return 0;
-    return editor.curInstr;
-}
-
-static int topic_visible_param_count(bool global, int topicIndex)
-{
-    if (global) return ft2_v2_get_global_topic_param_count(topicIndex);
-    return ft2_v2_get_topic_param_count(topicIndex);
-}
-
-static int topic_param_start(bool global, int topicIndex)
-{
-    if (global) return ft2_v2_get_global_topic_param_start(topicIndex);
-    return ft2_v2_get_topic_param_start(topicIndex);
-}
-
-static const Ft2V2TopicInfo* topic_info(bool global, int topicIndex)
-{
-    if (global) return ft2_v2_get_global_topic_info(topicIndex);
-    return ft2_v2_get_topic_info(topicIndex);
-}
-
-static void clear_combo_items(TunefishWidget* combo)
-{
-    if (!combo) return;
-    tf_widget_clear_combo_items(combo);
-}
-
-static void add_items_from_ctlstr(TunefishWidget* combo, const char* ctlstr)
-{
     if (!combo || !ctlstr) return;
 
-    const char* p = ctlstr;
+    const char *p = ctlstr;
     if (*p == '!') ++p;
 
-    const char* start = p;
-    while (*p) {
-        if (*p == '|') {
-            if (p > start) {
-                char tmp[128];
+    const char *start = p;
+    while (*p != '\0')
+    {
+        if (*p == '|')
+        {
+            if (p > start)
+            {
                 size_t len = (size_t)(p - start);
-                if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
-                memcpy(tmp, start, len);
-                tmp[len] = '\0';
-                tf_widget_add_combo_item(combo, tmp);
+                if (len >= sizeof(text)) len = sizeof(text) - 1;
+
+                outLen = 0;
+                for (i = 0; i < len && outLen < sizeof(text) - 1; ++i)
+                {
+                    const unsigned char ch = (unsigned char)start[i];
+                    if (ch >= 32 && ch <= 126)
+                    {
+                        text[outLen++] = (char)ch;
+                    }
+                    else
+                    {
+                        static const char replacement[] = "+/-";
+                        size_t j;
+                        for (j = 0; j < sizeof(replacement) - 1 && outLen < sizeof(text) - 1; ++j)
+                            text[outLen++] = replacement[j];
+                    }
+                }
+                text[outLen] = '\0';
+                tf_widget_add_combo_item(combo, text);
             }
             start = p + 1;
         }
         ++p;
     }
-    if (p > start) {
-        char tmp[128];
+
+    if (p > start)
+    {
         size_t len = (size_t)(p - start);
-        if (len >= sizeof(tmp)) len = sizeof(tmp) - 1;
-        memcpy(tmp, start, len);
-        tmp[len] = '\0';
-        tf_widget_add_combo_item(combo, tmp);
+        if (len >= sizeof(text)) len = sizeof(text) - 1;
+
+        outLen = 0;
+        for (i = 0; i < len && outLen < sizeof(text) - 1; ++i)
+        {
+            const unsigned char ch = (unsigned char)start[i];
+            if (ch >= 32 && ch <= 126)
+            {
+                text[outLen++] = (char)ch;
+            }
+            else
+            {
+                static const char replacement[] = "+/-";
+                size_t j;
+                for (j = 0; j < sizeof(replacement) - 1 && outLen < sizeof(text) - 1; ++j)
+                    text[outLen++] = replacement[j];
+            }
+        }
+        text[outLen] = '\0';
+        tf_widget_add_combo_item(combo, text);
     }
 }
 
-static void set_widget_position(TunefishWidget* widget, int x, int y, int w, int h)
+static const Ft2V2ParamInfo *v2_param_info_for_binding(V2BindingKind kind, int target)
 {
-    if (!widget) return;
-    tf_widget_set_position(widget, x, y);
-    tf_widget_set_size(widget, w, h);
+    if (kind == V2_BIND_PATCH_PARAM)
+        return ft2_v2_get_param_info(target);
+    if (kind == V2_BIND_GLOBAL_PARAM)
+        return ft2_v2_get_global_param_info(target);
+    return NULL;
 }
 
-static void v2_sync_page_buttons(V2CompleteLayout* layout)
+static void v2_populate_param_combo(TunefishWidget *widget, V2BindingKind kind, int target)
+{
+    const Ft2V2ParamInfo *info;
+
+    if (!widget || widget->type != TF_WIDGET_COMBO_BOX)
+        return;
+
+    info = v2_param_info_for_binding(kind, target);
+    if (!info) return;
+
+    tf_widget_clear_combo_items(widget);
+    if (info->ctltype == FT2_V2_CTL_MB)
+        v2_add_combo_items_from_ctlstr(widget, info->ctlstr);
+}
+
+static void v2_populate_mod_source_combo(TunefishWidget *widget)
+{
+    int i;
+
+    if (!widget) return;
+    tf_widget_clear_combo_items(widget);
+
+    for (i = 0; i < ft2_v2_get_mod_source_count(); ++i)
+    {
+        const char *name = ft2_v2_get_mod_source_name(i);
+        tf_widget_add_combo_item(widget, name ? name : "");
+    }
+}
+
+static void v2_populate_mod_dest_combo(TunefishWidget *widget)
+{
+    int i;
+
+    if (!widget) return;
+    tf_widget_clear_combo_items(widget);
+
+    for (i = 0; i < ft2_v2_get_mod_dest_count(); ++i)
+    {
+        const char *name = ft2_v2_get_mod_dest_name(i);
+        tf_widget_add_combo_item(widget, name ? name : "");
+    }
+}
+
+static void v2_populate_mod_bank_combo(TunefishWidget *widget, int currentBank)
+{
+    int i;
+
+    if (!widget) return;
+    tf_widget_clear_combo_items(widget);
+
+    for (i = 0; i < 32; ++i)
+    {
+        char text[24];
+        const int start = (i * V2_MOD_ROWS) + 1;
+        const int end = start + V2_MOD_ROWS - 1;
+        snprintf(text, sizeof(text), "%03d-%03d", start, end);
+        tf_widget_add_combo_item(widget, text);
+    }
+
+    widget->selectedIndex = v2_clampi(currentBank, 0, 31);
+    widget->value = (float)widget->selectedIndex / 31.0f;
+}
+
+static void v2_populate_preset_combo(V2CompleteLayout *layout)
+{
+    int i;
+    int count;
+    int presetIndex;
+    int instrID;
+
+    if (!layout || !layout->preset_combo) return;
+
+    tf_widget_clear_combo_items(layout->preset_combo);
+
+    count = ft2_v2_get_factory_preset_count();
+    for (i = 0; i < count; ++i)
+    {
+        const char *name = ft2_v2_get_preset_name_for_instrument(v2_current_instr_id(layout), i);
+        char fallback[32];
+
+        if (!name || !*name)
+        {
+            snprintf(fallback, sizeof(fallback), "Preset %03d", i + 1);
+            name = fallback;
+        }
+
+        tf_widget_add_combo_item(layout->preset_combo, name);
+    }
+
+    instrID = v2_current_instr_id(layout);
+    presetIndex = (instrID > 0) ? ft2_v2_get_current_preset_for_instrument(instrID) : 0;
+    if (count <= 0)
+    {
+        layout->preset_combo->selectedIndex = 0;
+        layout->preset_combo->value = 0.0f;
+    }
+    else
+    {
+        presetIndex = v2_clampi(presetIndex, 0, count - 1);
+        layout->preset_combo->selectedIndex = presetIndex;
+        layout->preset_combo->value = (count > 1) ? ((float)presetIndex / (float)(count - 1)) : 0.0f;
+    }
+}
+
+static void v2_style_widget(TunefishWidget *widget)
+{
+    if (!widget) return;
+
+    tf_apply_tunefish_styling(widget);
+
+    switch (widget->type)
+    {
+        case TF_WIDGET_BUTTON:
+            tf_style_as_main_button(widget);
+            break;
+
+        case TF_WIDGET_ROTARY_SLIDER:
+            tf_style_as_parameter_knob(widget);
+            break;
+
+        case TF_WIDGET_COMBO_BOX:
+            tf_apply_combo_styling(widget);
+            break;
+
+        case TF_WIDGET_LEVEL_METER:
+            tf_style_as_level_indicator(widget);
+            break;
+
+        case TF_WIDGET_LABEL:
+            widget->textColor = TF_COL_TEXT_NORMAL;
+            break;
+
+        default:
+            break;
+    }
+}
+
+void v2_style_all_widgets_authentic(V2CompleteLayout *layout)
+{
+    int i;
+
+    if (!layout) return;
+    for (i = 0; i < layout->all_widget_count; ++i)
+        v2_style_widget(layout->all_widgets[i]);
+}
+
+static void v2_apply_page_button_state(V2CompleteLayout *layout)
 {
     if (!layout) return;
-    if (layout->page_patch_button) layout->page_patch_button->pressed = (layout->current_page == V2_PAGE_PATCH);
-    if (layout->page_globals_button) layout->page_globals_button->pressed = (layout->current_page == V2_PAGE_GLOBALS);
+
+    if (layout->page_voice_button) layout->page_voice_button->pressed = (layout->current_page == V2_PAGE_VOICE_OSC);
+    if (layout->page_filter_button) layout->page_filter_button->pressed = (layout->current_page == V2_PAGE_FILTER);
+    if (layout->page_lfo_env_button) layout->page_lfo_env_button->pressed = (layout->current_page == V2_PAGE_LFO_ENV);
+    if (layout->page_fx_button) layout->page_fx_button->pressed = (layout->current_page == V2_PAGE_FX);
+    if (layout->page_master_button) layout->page_master_button->pressed = (layout->current_page == V2_PAGE_MASTER);
     if (layout->page_mod_button) layout->page_mod_button->pressed = (layout->current_page == V2_PAGE_MOD);
 }
 
-static void v2_update_caption(V2CompleteLayout* layout)
+static void v2_update_caption(V2CompleteLayout *layout)
 {
     if (!layout || !layout->page_caption_label) return;
+    tf_widget_set_label(layout->page_caption_label, k_page_names[v2_clampi(layout->current_page, 0, V2_PAGE_COUNT - 1)]);
+}
 
-    char buf[128];
-    const int instrID = current_instrument_id();
-    switch (layout->current_page) {
-        case V2_PAGE_PATCH: {
-            const Ft2V2TopicInfo* info = topic_info(false, layout->current_patch_topic);
-            snprintf(buf, sizeof(buf), "Patch: %s", info ? safe_str(info->name) : "Patch");
-            break;
-        }
-        case V2_PAGE_GLOBALS: {
-            const Ft2V2TopicInfo* info = topic_info(true, layout->current_global_topic);
-            snprintf(buf, sizeof(buf), "Globals: %s", info ? safe_str(info->name) : "Globals");
-            break;
-        }
-        case V2_PAGE_MOD:
-        default:
-            if (instrID > 0)
-                snprintf(buf, sizeof(buf), "Mod Matrix: Instr %d", instrID);
-            else
-                snprintf(buf, sizeof(buf), "Mod Matrix");
-            break;
+static void v2_update_widget_visibility(V2CompleteLayout *layout)
+{
+    int i;
+
+    if (!layout) return;
+
+    for (i = 0; i < layout->all_widget_count; ++i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (!widget) continue;
+        widget->visible = v2_widget_visible_on_page(widget, layout->current_page);
     }
-    tf_widget_set_label(layout->page_caption_label, buf);
-}
 
-static void v2_update_top_level_visibility(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    if (layout->patch_topic_combo) layout->patch_topic_combo->visible = (layout->current_page == V2_PAGE_PATCH);
-    if (layout->patch_topic_group) layout->patch_topic_group->visible = (layout->current_page == V2_PAGE_PATCH);
-    if (layout->global_topic_combo) layout->global_topic_combo->visible = (layout->current_page == V2_PAGE_GLOBALS);
-    if (layout->global_topic_group) layout->global_topic_group->visible = (layout->current_page == V2_PAGE_GLOBALS);
-    if (layout->mod_bank_combo) layout->mod_bank_combo->visible = (layout->current_page == V2_PAGE_MOD);
-    if (layout->mod_group) layout->mod_group->visible = (layout->current_page == V2_PAGE_MOD);
-}
+    if (layout->title_label) layout->title_label->visible = true;
+    if (layout->page_caption_label) layout->page_caption_label->visible = true;
+    if (layout->preset_combo) layout->preset_combo->visible = true;
+    if (layout->voice_meter) layout->voice_meter->visible = true;
+    if (layout->close_button) layout->close_button->visible = true;
+    if (layout->page_voice_button) layout->page_voice_button->visible = true;
+    if (layout->page_filter_button) layout->page_filter_button->visible = true;
+    if (layout->page_lfo_env_button) layout->page_lfo_env_button->visible = true;
+    if (layout->page_fx_button) layout->page_fx_button->visible = true;
+    if (layout->page_master_button) layout->page_master_button->visible = true;
+    if (layout->page_mod_button) layout->page_mod_button->visible = true;
 
-static void v2_update_patch_binding_visibility(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    for (int i = 0; i < layout->patch_param_count; ++i) {
-        const bool visible = (layout->current_page == V2_PAGE_PATCH && layout->patch_params[i].topicIndex == layout->current_patch_topic);
-        if (layout->patch_params[i].label) layout->patch_params[i].label->visible = visible;
-        if (layout->patch_params[i].control) layout->patch_params[i].control->visible = visible;
-    }
-}
-
-static void v2_update_global_binding_visibility(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    for (int i = 0; i < layout->global_param_count; ++i) {
-        const bool visible = (layout->current_page == V2_PAGE_GLOBALS && layout->global_params[i].topicIndex == layout->current_global_topic);
-        if (layout->global_params[i].label) layout->global_params[i].label->visible = visible;
-        if (layout->global_params[i].control) layout->global_params[i].control->visible = visible;
-    }
-}
-
-static void v2_update_mod_visibility(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    const int instrID = current_instrument_id();
-    const int modCount = (instrID > 0) ? ft2_v2_get_mod_count_for_instrument(instrID) : 0;
-    const int bankBase = layout->current_mod_bank * V2_MOD_ROWS;
-
-    for (int i = 0; i < V2_MOD_ROWS; ++i) {
-        const int slot = bankBase + i;
-        const bool visible = (layout->current_page == V2_PAGE_MOD && slot < modCount);
-        V2ModRowWidgets* row = &layout->mod_rows[i];
-        if (row->slot_label) row->slot_label->visible = visible;
-        if (row->source_combo) row->source_combo->visible = visible;
-        if (row->amount_control) row->amount_control->visible = visible;
-        if (row->dest_combo) row->dest_combo->visible = visible;
-    }
-}
-
-static void v2_update_all_visibility(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    v2_update_top_level_visibility(layout);
-    v2_update_patch_binding_visibility(layout);
-    v2_update_global_binding_visibility(layout);
-    v2_update_mod_visibility(layout);
+    v2_apply_page_button_state(layout);
     v2_update_caption(layout);
-    v2_sync_page_buttons(layout);
 }
 
-static void v2_patch_param_changed(TunefishWidget* widget, float value);
-static void v2_global_param_changed(TunefishWidget* widget, float value);
-static void v2_page_button_clicked(TunefishWidget* widget);
-static void v2_close_button_clicked(TunefishWidget* widget);
-static void v2_preset_combo_changed(TunefishWidget* widget, int selectedIndex);
-static void v2_topic_combo_changed(TunefishWidget* widget, int selectedIndex);
-static void v2_mod_bank_combo_changed(TunefishWidget* widget, int selectedIndex);
-static void v2_mod_amount_changed(TunefishWidget* widget, float value);
-
-static void v2_build_patch_param_widgets(V2CompleteLayout* layout)
+static int v2_find_binding_index_for_widget(const V2CompleteLayout *layout, const TunefishWidget *widget)
 {
+    int i;
+
+    if (!layout || !widget) return -1;
+
+    for (i = 0; i < layout->binding_count; ++i)
+    {
+        if (layout->bindings[i].widget == widget)
+            return i;
+    }
+
+    return -1;
+}
+
+static void v2_sync_patch_or_global_binding(V2CompleteLayout *layout, const V2WidgetBinding *binding)
+{
+    int instrID;
+    float value;
+    const Ft2V2ParamInfo *info;
+
+    if (!layout || !binding || !binding->widget) return;
+
+    instrID = v2_current_instr_id(layout);
+    if (instrID <= 0) return;
+
+    if (binding->kind == V2_BIND_PATCH_PARAM)
+        value = ft2_v2_get_param_for_instrument(instrID, binding->target);
+    else
+        value = ft2_v2_get_global_param_for_instrument(instrID, binding->target);
+
+    value = v2_clampf(value, 0.0f, 1.0f);
+
+    if (binding->widget->type == TF_WIDGET_COMBO_BOX)
+    {
+        if (binding->widget->comboItemCount > 1)
+        {
+            int idx = (int)lroundf(value * (float)(binding->widget->comboItemCount - 1));
+            binding->widget->selectedIndex = v2_clampi(idx, 0, binding->widget->comboItemCount - 1);
+            binding->widget->value = (float)binding->widget->selectedIndex / (float)(binding->widget->comboItemCount - 1);
+        }
+        else
+        {
+            binding->widget->selectedIndex = 0;
+            binding->widget->value = 0.0f;
+        }
+    }
+    else
+    {
+        binding->widget->value = value;
+    }
+
+    info = v2_param_info_for_binding(binding->kind, binding->target);
+    if (info && binding->widget->type == TF_WIDGET_ROTARY_SLIDER && binding->widget->text[0] == '\0')
+        tf_widget_set_label(binding->widget, info->name ? info->name : "");
+}
+
+static void v2_sync_mod_widgets(V2CompleteLayout *layout)
+{
+    int row;
+    int instrID;
+    int baseSlot;
+
     if (!layout) return;
 
-    layout->patch_param_count = 0;
-    for (int topic = 0; topic < ft2_v2_get_topic_count(); ++topic) {
-        const int start = topic_param_start(false, topic);
-        const int count = topic_visible_param_count(false, topic);
-        int visibleIndex = 0;
+    instrID = v2_current_instr_id(layout);
+    if (instrID <= 0) return;
 
-        for (int i = 0; i < count; ++i) {
-            const int paramId = start + i;
-            const Ft2V2ParamInfo* info = ft2_v2_get_param_info(paramId);
-            if (!info || info->ctltype == FT2_V2_CTL_SKIP || !info->name || !*info->name) {
-                continue;
-            }
+    baseSlot = layout->current_mod_bank * V2_MOD_ROWS;
+    for (row = 0; row < V2_MOD_ROWS; ++row)
+    {
+        int slot = baseSlot + row;
+        int source = 0;
+        int amount = 0;
+        int dest = 0;
+        int destListIndex;
+        char text[24];
 
-            if (layout->patch_param_count >= V2_MAX_PATCH_BINDINGS) {
-                return;
-            }
+        ft2_v2_get_mod_slot_for_instrument(instrID, slot, &source, &amount, &dest);
 
-            V2ParamControlBinding* binding = &layout->patch_params[layout->patch_param_count];
-            memset(binding, 0, sizeof(*binding));
-            binding->paramId = paramId;
-            binding->topicIndex = topic;
-            binding->isGlobal = false;
-            binding->ctlType = info->ctltype;
+        if (layout->mod_slot_labels[row])
+        {
+            snprintf(text, sizeof(text), "Slot %d", slot + 1);
+            tf_widget_set_label(layout->mod_slot_labels[row], text);
+        }
 
-            const int col = visibleIndex % k_grid_cols;
-            const int row = visibleIndex / k_grid_cols;
-            const int cellX = k_grid_origin_x + (col * k_grid_cell_w);
-            const int cellY = k_grid_origin_y + (row * k_grid_cell_h);
+        if (layout->mod_source_widgets[row])
+        {
+            layout->mod_source_widgets[row]->selectedIndex =
+                v2_clampi(source, 0, layout->mod_source_widgets[row]->comboItemCount > 0 ? layout->mod_source_widgets[row]->comboItemCount - 1 : 0);
+            if (layout->mod_source_widgets[row]->comboItemCount > 1)
+                layout->mod_source_widgets[row]->value =
+                    (float)layout->mod_source_widgets[row]->selectedIndex / (float)(layout->mod_source_widgets[row]->comboItemCount - 1);
+            else
+                layout->mod_source_widgets[row]->value = 0.0f;
+        }
 
-            char labelName[64];
-            char controlName[64];
-            snprintf(labelName, sizeof(labelName), "v2_p_label_%d", paramId);
-            snprintf(controlName, sizeof(controlName), "v2_p_ctrl_%d", paramId);
+        if (layout->mod_amount_widgets[row])
+            layout->mod_amount_widgets[row]->value = (float)v2_clampi(amount, 0, 127) / 127.0f;
 
-            if (info->ctltype == FT2_V2_CTL_MB) {
-                binding->label = tf_create_label(labelName, safe_str(info->name), cellX, cellY, 112, 10);
-                binding->control = tf_create_combo_box(controlName, cellX, cellY + 12, 112, 18, NULL, 0);
-                if (binding->control) {
-                    add_items_from_ctlstr(binding->control, info->ctlstr);
-                    binding->control->onValueChange = v2_patch_param_changed;
-                }
-                register_widget(layout, binding->label);
-                register_widget(layout, binding->control);
-            } else {
-                binding->label = NULL;
-                binding->control = tf_create_rotary_slider(controlName, cellX + 56, cellY + 32, 22, -2.35f, 2.35f);
-                if (binding->control) {
-                    tf_widget_set_label(binding->control, safe_str(info->name));
-                    binding->control->onValueChange = v2_patch_param_changed;
-                }
-                register_widget(layout, binding->control);
-            }
-
-            g_patch_meta[layout->patch_param_count] = (V2BindingMeta){ paramId, topic, false, info->ctltype == FT2_V2_CTL_MB };
-            layout->patch_param_count++;
-            ++visibleIndex;
+        destListIndex = ft2_v2_find_mod_dest_list_index(dest);
+        if (layout->mod_dest_widgets[row])
+        {
+            if (destListIndex < 0) destListIndex = 0;
+            layout->mod_dest_widgets[row]->selectedIndex =
+                v2_clampi(destListIndex, 0, layout->mod_dest_widgets[row]->comboItemCount > 0 ? layout->mod_dest_widgets[row]->comboItemCount - 1 : 0);
+            if (layout->mod_dest_widgets[row]->comboItemCount > 1)
+                layout->mod_dest_widgets[row]->value =
+                    (float)layout->mod_dest_widgets[row]->selectedIndex / (float)(layout->mod_dest_widgets[row]->comboItemCount - 1);
+            else
+                layout->mod_dest_widgets[row]->value = 0.0f;
         }
     }
 }
 
-static void v2_build_global_param_widgets(V2CompleteLayout* layout)
+static void v2_sync_voice_meter(V2CompleteLayout *layout)
 {
-    if (!layout) return;
+    int instrID;
+    int voices;
+    float norm;
 
-    layout->global_param_count = 0;
-    for (int topic = 0; topic < ft2_v2_get_global_topic_count(); ++topic) {
-        const int start = topic_param_start(true, topic);
-        const int count = topic_visible_param_count(true, topic);
-        int visibleIndex = 0;
+    if (!layout || !layout->voice_meter) return;
 
-        for (int i = 0; i < count; ++i) {
-            const int paramId = start + i;
-            const Ft2V2ParamInfo* info = ft2_v2_get_global_param_info(paramId);
-            if (!info || info->ctltype == FT2_V2_CTL_SKIP || !info->name || !*info->name) {
-                continue;
-            }
-
-            if (layout->global_param_count >= V2_MAX_GLOBAL_BINDINGS) {
-                return;
-            }
-
-            V2ParamControlBinding* binding = &layout->global_params[layout->global_param_count];
-            memset(binding, 0, sizeof(*binding));
-            binding->paramId = paramId;
-            binding->topicIndex = topic;
-            binding->isGlobal = true;
-            binding->ctlType = info->ctltype;
-
-            const int col = visibleIndex % k_grid_cols;
-            const int row = visibleIndex / k_grid_cols;
-            const int cellX = k_grid_origin_x + (col * k_grid_cell_w);
-            const int cellY = k_grid_origin_y + (row * k_grid_cell_h);
-
-            char labelName[64];
-            char controlName[64];
-            snprintf(labelName, sizeof(labelName), "v2_g_label_%d", paramId);
-            snprintf(controlName, sizeof(controlName), "v2_g_ctrl_%d", paramId);
-
-            if (info->ctltype == FT2_V2_CTL_MB) {
-                binding->label = tf_create_label(labelName, safe_str(info->name), cellX, cellY, 112, 10);
-                binding->control = tf_create_combo_box(controlName, cellX, cellY + 12, 112, 18, NULL, 0);
-                if (binding->control) {
-                    add_items_from_ctlstr(binding->control, info->ctlstr);
-                    binding->control->onValueChange = v2_global_param_changed;
-                }
-                register_widget(layout, binding->label);
-                register_widget(layout, binding->control);
-            } else {
-                binding->label = NULL;
-                binding->control = tf_create_rotary_slider(controlName, cellX + 56, cellY + 32, 22, -2.35f, 2.35f);
-                if (binding->control) {
-                    tf_widget_set_label(binding->control, safe_str(info->name));
-                    binding->control->onValueChange = v2_global_param_changed;
-                }
-                register_widget(layout, binding->control);
-            }
-
-            g_global_meta[layout->global_param_count] = (V2BindingMeta){ paramId, topic, true, info->ctltype == FT2_V2_CTL_MB };
-            layout->global_param_count++;
-            ++visibleIndex;
-        }
-    }
-}
-
-static void v2_build_mod_widgets(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-
-    const int labelY = 110;
-    const int rowBaseY = 128;
-    const int rowH = 26;
-
-    for (int i = 0; i < V2_MOD_ROWS; ++i) {
-        V2ModRowWidgets* row = &layout->mod_rows[i];
-        memset(row, 0, sizeof(*row));
-        row->slotIndex = i;
-
-        const int y = rowBaseY + (i * rowH);
-        char tmp[64];
-
-        snprintf(tmp, sizeof(tmp), "v2_mod_slot_%d", i);
-        row->slot_label = tf_create_label(tmp, "Slot", 18, y + 2, 56, 10);
-
-        snprintf(tmp, sizeof(tmp), "v2_mod_src_%d", i);
-        row->source_combo = tf_create_combo_box(tmp, 72, y, 140, 18, NULL, 0);
-        if (row->source_combo) {
-            for (int s = 0; s < ft2_v2_get_mod_source_count(); ++s) {
-                tf_widget_add_combo_item(row->source_combo, ft2_v2_get_mod_source_name(s));
-            }
-            row->source_combo->onComboSelect = v2_mod_bank_combo_changed;
-        }
-
-        snprintf(tmp, sizeof(tmp), "v2_mod_amt_%d", i);
-        row->amount_control = tf_create_parameter_control(tmp, "Amt", 220, y, 110, 18);
-        if (row->amount_control) {
-            row->amount_control->minValue = 0.0f;
-            row->amount_control->maxValue = 127.0f;
-            row->amount_control->value = 0.0f;
-            row->amount_control->onValueChange = v2_mod_amount_changed;
-        }
-
-        snprintf(tmp, sizeof(tmp), "v2_mod_dst_%d", i);
-        row->dest_combo = tf_create_combo_box(tmp, 342, y, 276, 18, NULL, 0);
-        if (row->dest_combo) {
-            for (int d = 0; d < ft2_v2_get_mod_dest_count(); ++d) {
-                tf_widget_add_combo_item(row->dest_combo, ft2_v2_get_mod_dest_name(d));
-            }
-            row->dest_combo->onComboSelect = v2_mod_bank_combo_changed;
-        }
-
-        register_widget(layout, row->slot_label);
-        register_widget(layout, row->source_combo);
-        register_widget(layout, row->amount_control);
-        register_widget(layout, row->dest_combo);
-    }
-
-    (void)labelY;
-}
-
-static void v2_populate_preset_combo(V2CompleteLayout* layout)
-{
-    if (!layout || !layout->preset_combo) return;
-
-    clear_combo_items(layout->preset_combo);
-    const int count = ft2_v2_get_factory_preset_count();
-    for (int i = 0; i < count; ++i) {
-        const char* name = ft2_v2_get_preset_name_for_instrument(current_instrument_id(), i);
-        char buf[160];
-        if (!name || !*name) {
-            snprintf(buf, sizeof(buf), "Preset %03d", i + 1);
-            name = buf;
-        }
-        tf_widget_add_combo_item(layout->preset_combo, name);
-    }
-    if (count > 0) {
-        layout->preset_combo->selectedIndex = clamp_int(ft2_v2_get_current_preset_for_instrument(current_instrument_id()), 0, count - 1);
-        layout->preset_combo->value = (count > 1) ? ((float)layout->preset_combo->selectedIndex / (float)(count - 1)) : 0.0f;
-    } else {
-        layout->preset_combo->selectedIndex = 0;
-        layout->preset_combo->value = 0.0f;
-    }
-}
-
-static void v2_sync_preset_combo_selection(V2CompleteLayout* layout)
-{
-    if (!layout || !layout->preset_combo) return;
-
-    const int count = layout->preset_combo->comboItemCount;
-    if (count <= 0) {
-        layout->preset_combo->selectedIndex = 0;
-        layout->preset_combo->value = 0.0f;
+    instrID = v2_current_instr_id(layout);
+    if (instrID <= 0)
+    {
+        layout->voice_meter->value = 0.0f;
+        layout->voice_meter->peakLevel = 0.0f;
         return;
     }
 
-    const int preset = clamp_int(ft2_v2_get_current_preset_for_instrument(current_instrument_id()), 0, count - 1);
-    layout->preset_combo->selectedIndex = preset;
-    layout->preset_combo->value = (count > 1) ? ((float)preset / (float)(count - 1)) : 0.0f;
+    voices = ft2_v2_get_active_voice_count(instrID);
+    norm = (voices <= 0) ? 0.0f : ((voices >= 16) ? 1.0f : ((float)voices / 16.0f));
+    layout->voice_meter->value = norm;
+    layout->voice_meter->peakLevel = norm;
 }
 
-static void v2_populate_topic_combo(V2CompleteLayout* layout, bool global)
+static void v2_refresh_runtime_state(V2CompleteLayout *layout)
 {
+    int currentInstr;
+
     if (!layout) return;
-    TunefishWidget* combo = global ? layout->global_topic_combo : layout->patch_topic_combo;
-    if (!combo) return;
 
-    clear_combo_items(combo);
-    const int count = global ? ft2_v2_get_global_topic_count() : ft2_v2_get_topic_count();
-    for (int i = 0; i < count; ++i) {
-        const Ft2V2TopicInfo* info = topic_info(global, i);
-        if (!info) continue;
-        tf_widget_add_combo_item(combo, safe_str(info->name));
-    }
-    if (count > 0) {
-        combo->selectedIndex = clamp_int(global ? layout->current_global_topic : layout->current_patch_topic, 0, count - 1);
-        combo->value = (count > 1) ? ((float)combo->selectedIndex / (float)(count - 1)) : 0.0f;
-    } else {
-        combo->selectedIndex = 0;
-        combo->value = 0.0f;
-    }
-}
-
-static void v2_populate_mod_bank_combo(V2CompleteLayout* layout)
-{
-    if (!layout || !layout->mod_bank_combo) return;
-    clear_combo_items(layout->mod_bank_combo);
-    for (int i = 0; i < 32; ++i) {
-        char buf[32];
-        const int start = (i * V2_MOD_ROWS) + 1;
-        const int end = start + V2_MOD_ROWS - 1;
-        snprintf(buf, sizeof(buf), "%03d-%03d", start, end);
-        tf_widget_add_combo_item(layout->mod_bank_combo, buf);
-    }
-    layout->mod_bank_combo->selectedIndex = clamp_int(layout->current_mod_bank, 0, 31);
-    layout->mod_bank_combo->value = (float)layout->mod_bank_combo->selectedIndex / 31.0f;
-}
-
-static void v2_sync_mod_rows(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) return;
-
-    const int modCount = ft2_v2_get_mod_count_for_instrument(instrID);
-    const int base = layout->current_mod_bank * V2_MOD_ROWS;
-
-    for (int i = 0; i < V2_MOD_ROWS; ++i) {
-        const int slot = base + i;
-        V2ModRowWidgets* row = &layout->mod_rows[i];
-        if (!row->source_combo || !row->amount_control || !row->dest_combo) continue;
-
-        row->slotIndex = slot;
-        char slotLabel[32];
-        snprintf(slotLabel, sizeof(slotLabel), "Slot %d", slot + 1);
-        tf_widget_set_label(row->slot_label, slotLabel);
-
-        if (slot < modCount) {
-            int source = 0, amount = 0, dest = 0;
-            ft2_v2_get_mod_slot_for_instrument(instrID, slot, &source, &amount, &dest);
-
-            if (row->source_combo->comboItemCount > 0) {
-                row->source_combo->selectedIndex = clamp_int(source, 0, row->source_combo->comboItemCount - 1);
-            } else {
-                row->source_combo->selectedIndex = 0;
-            }
-            if (row->source_combo->comboItemCount > 1)
-                row->source_combo->value = (float)row->source_combo->selectedIndex / (float)(row->source_combo->comboItemCount - 1);
-            else
-                row->source_combo->value = 0.0f;
-
-            row->amount_control->value = clamp_int(amount, 0, 127) / 127.0f;
-            row->amount_control->minValue = 0.0f;
-            row->amount_control->maxValue = 127.0f;
-
-            const int destListIndex = ft2_v2_find_mod_dest_list_index(dest);
-            if (row->dest_combo->comboItemCount > 0) {
-                row->dest_combo->selectedIndex = clamp_int(destListIndex, 0, row->dest_combo->comboItemCount - 1);
-            } else {
-                row->dest_combo->selectedIndex = 0;
-            }
-            if (row->dest_combo->comboItemCount > 1)
-                row->dest_combo->value = (float)row->dest_combo->selectedIndex / (float)(row->dest_combo->comboItemCount - 1);
-            else
-                row->dest_combo->value = 0.0f;
-        }
-        else {
-            if (row->source_combo) {
-                row->source_combo->selectedIndex = 0;
-                row->source_combo->value = 0.0f;
-            }
-            if (row->amount_control) {
-                row->amount_control->value = 0.0f;
-            }
-            if (row->dest_combo) {
-                row->dest_combo->selectedIndex = 0;
-                row->dest_combo->value = 0.0f;
-            }
-        }
-    }
-}
-
-static void v2_sync_patch_controls(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) return;
-
-    for (int i = 0; i < layout->patch_param_count; ++i) {
-        V2ParamControlBinding* binding = &layout->patch_params[i];
-        if (!binding->control) continue;
-        float value = ft2_v2_get_param_for_instrument(instrID, binding->paramId);
-        value = (value < 0.0f) ? 0.0f : (value > 1.0f) ? 1.0f : value;
-        binding->control->value = value;
-        if (binding->ctlType == FT2_V2_CTL_MB && binding->control->comboItemCount > 1) {
-            const int idx = clamp_int((int)(value * (float)(binding->control->comboItemCount - 1) + 0.5f), 0, binding->control->comboItemCount - 1);
-            binding->control->selectedIndex = idx;
-        }
-    }
-}
-
-static void v2_sync_global_controls(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) return;
-
-    for (int i = 0; i < layout->global_param_count; ++i) {
-        V2ParamControlBinding* binding = &layout->global_params[i];
-        if (!binding->control) continue;
-        float value = ft2_v2_get_global_param_for_instrument(instrID, binding->paramId);
-        value = (value < 0.0f) ? 0.0f : (value > 1.0f) ? 1.0f : value;
-        binding->control->value = value;
-        if (binding->ctlType == FT2_V2_CTL_MB && binding->control->comboItemCount > 1) {
-            const int idx = clamp_int((int)(value * (float)(binding->control->comboItemCount - 1) + 0.5f), 0, binding->control->comboItemCount - 1);
-            binding->control->selectedIndex = idx;
-        }
-    }
-}
-
-static void v2_sync_voice_meter(V2CompleteLayout* layout)
-{
-    if (!layout || !layout->active_voices_meter) return;
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) {
-        layout->active_voices_meter->value = 0.0f;
+    currentInstr = v2_current_instr_id(layout);
+    if (currentInstr != layout->active_instrument_id)
+    {
+        layout->active_instrument_id = currentInstr;
+        v2_update_all_widgets_from_synth(layout);
         return;
     }
-    const int voices = ft2_v2_get_active_voice_count(instrID);
-    const float norm = (voices <= 0) ? 0.0f : (voices >= 16 ? 1.0f : (float)voices / 16.0f);
-    layout->active_voices_meter->value = norm;
-    layout->active_voices_meter->peakLevel = norm;
+
+    v2_sync_voice_meter(layout);
 }
 
-static void v2_sync_current_page_selection(V2CompleteLayout* layout)
+void v2_update_all_widgets_from_synth(V2CompleteLayout *layout)
 {
-    if (!layout) return;
-    if (layout->current_page == V2_PAGE_PATCH && layout->patch_topic_combo) {
-        const int count = ft2_v2_get_topic_count();
-        layout->patch_topic_combo->selectedIndex = (count > 0) ? clamp_int(layout->current_patch_topic, 0, count - 1) : 0;
-    } else if (layout->current_page == V2_PAGE_GLOBALS && layout->global_topic_combo) {
-        const int count = ft2_v2_get_global_topic_count();
-        layout->global_topic_combo->selectedIndex = (count > 0) ? clamp_int(layout->current_global_topic, 0, count - 1) : 0;
-    } else if (layout->current_page == V2_PAGE_MOD && layout->mod_bank_combo) {
-        layout->mod_bank_combo->selectedIndex = clamp_int(layout->current_mod_bank, 0, 31);
-    }
-}
+    int i;
+    int currentInstr;
 
-static void v2_sync_all_controls(V2CompleteLayout* layout)
-{
     if (!layout) return;
+
+    currentInstr = v2_current_instr_id(layout);
+    if (currentInstr != layout->active_instrument_id)
+        layout->active_instrument_id = currentInstr;
+
     v2_populate_preset_combo(layout);
-    v2_populate_topic_combo(layout, false);
-    v2_populate_topic_combo(layout, true);
-    v2_populate_mod_bank_combo(layout);
-    v2_sync_patch_controls(layout);
-    v2_sync_global_controls(layout);
-    v2_sync_mod_rows(layout);
+    if (layout->mod_bank_combo)
+        v2_populate_mod_bank_combo(layout->mod_bank_combo, layout->current_mod_bank);
+
+    for (i = 0; i < layout->binding_count; ++i)
+    {
+        const V2WidgetBinding *binding = &layout->bindings[i];
+        switch (binding->kind)
+        {
+            case V2_BIND_PATCH_PARAM:
+            case V2_BIND_GLOBAL_PARAM:
+                v2_sync_patch_or_global_binding(layout, binding);
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    v2_sync_mod_widgets(layout);
     v2_sync_voice_meter(layout);
-    v2_update_all_visibility(layout);
-    v2_sync_current_page_selection(layout);
+    v2_update_widget_visibility(layout);
 }
 
-static void v2_sync_controls_for_current_preset(V2CompleteLayout* layout)
+void v2_sync_widgets_with_parameters(V2CompleteLayout *layout)
 {
-    if (!layout) return;
-    v2_sync_preset_combo_selection(layout);
-    v2_sync_patch_controls(layout);
-    v2_sync_global_controls(layout);
-    v2_sync_mod_rows(layout);
-    v2_sync_voice_meter(layout);
-    v2_update_all_visibility(layout);
-    v2_sync_current_page_selection(layout);
+    v2_update_all_widgets_from_synth(layout);
 }
 
-static void v2_set_page(V2CompleteLayout* layout, int page)
+static void v2_button_clicked(TunefishWidget *widget)
 {
-    if (!layout) return;
-    layout->current_page = clamp_int(page, 0, V2_PAGE_COUNT - 1);
-    v2_update_all_visibility(layout);
+    if (!g_active_v2_layout || !widget) return;
+
+    if (widget == g_active_v2_layout->page_voice_button)
+        v2_switch_to_page(g_active_v2_layout, V2_PAGE_VOICE_OSC);
+    else if (widget == g_active_v2_layout->page_filter_button)
+        v2_switch_to_page(g_active_v2_layout, V2_PAGE_FILTER);
+    else if (widget == g_active_v2_layout->page_lfo_env_button)
+        v2_switch_to_page(g_active_v2_layout, V2_PAGE_LFO_ENV);
+    else if (widget == g_active_v2_layout->page_fx_button)
+        v2_switch_to_page(g_active_v2_layout, V2_PAGE_FX);
+    else if (widget == g_active_v2_layout->page_master_button)
+        v2_switch_to_page(g_active_v2_layout, V2_PAGE_MASTER);
+    else if (widget == g_active_v2_layout->page_mod_button)
+        v2_switch_to_page(g_active_v2_layout, V2_PAGE_MOD);
+    else if (widget == g_active_v2_layout->close_button)
+    {
+        v2_hide_layout(g_active_v2_layout);
+        ft2_close_synth_editor();
+    }
 }
 
-static void v2_patch_param_changed(TunefishWidget* widget, float value)
+static void v2_value_changed(TunefishWidget *widget, float newValue)
 {
-    V2CompleteLayout* layout = g_active_v2_layout;
-    V2ParamControlBinding* binding = find_patch_binding(layout, widget);
-    if (!layout || !binding) return;
-    const int instrID = current_instrument_id();
+    int bindIndex;
+    int instrID;
+    V2WidgetBinding *binding;
+
+    if (!g_active_v2_layout || !widget) return;
+
+    bindIndex = v2_find_binding_index_for_widget(g_active_v2_layout, widget);
+    if (bindIndex < 0) return;
+
+    instrID = v2_current_instr_id(g_active_v2_layout);
     if (instrID <= 0) return;
 
-    ft2_v2_set_param_for_instrument(instrID, binding->paramId, value);
-    v2_sync_patch_controls(layout);
+    binding = &g_active_v2_layout->bindings[bindIndex];
+    switch (binding->kind)
+    {
+        case V2_BIND_PATCH_PARAM:
+            ft2_v2_set_param_for_instrument(instrID, binding->target, v2_clampf(newValue, 0.0f, 1.0f));
+            break;
+
+        case V2_BIND_GLOBAL_PARAM:
+            ft2_v2_set_global_param_for_instrument(instrID, binding->target, v2_clampf(newValue, 0.0f, 1.0f));
+            break;
+
+        case V2_BIND_MOD_AMOUNT:
+        {
+            int slot = binding->target;
+            int source = 0;
+            int dest = 0;
+            int amount = v2_clampi((int)lroundf(newValue * 127.0f), 0, 127);
+
+            ft2_v2_get_mod_slot_for_instrument(instrID, slot, &source, NULL, &dest);
+            ft2_v2_set_mod_slot_for_instrument(instrID, slot, source, amount, dest);
+            break;
+        }
+
+        default:
+            break;
+    }
 }
 
-static void v2_global_param_changed(TunefishWidget* widget, float value)
+static void v2_combo_changed(TunefishWidget *widget, int selectedIndex)
 {
-    V2CompleteLayout* layout = g_active_v2_layout;
-    V2ParamControlBinding* binding = find_global_binding(layout, widget);
-    if (!layout || !binding) return;
-    const int instrID = current_instrument_id();
+    int bindIndex;
+    int instrID;
+    V2WidgetBinding *binding;
+
+    if (!g_active_v2_layout || !widget) return;
+
+    if (widget == g_active_v2_layout->preset_combo)
+    {
+        instrID = v2_current_instr_id(g_active_v2_layout);
+        if (instrID > 0)
+            ft2_v2_load_preset_for_instrument(instrID, selectedIndex);
+        v2_update_all_widgets_from_synth(g_active_v2_layout);
+        return;
+    }
+
+    if (widget == g_active_v2_layout->mod_bank_combo)
+    {
+        g_active_v2_layout->current_mod_bank = v2_clampi(selectedIndex, 0, 31);
+        v2_update_all_widgets_from_synth(g_active_v2_layout);
+        return;
+    }
+
+    bindIndex = v2_find_binding_index_for_widget(g_active_v2_layout, widget);
+    if (bindIndex < 0) return;
+
+    instrID = v2_current_instr_id(g_active_v2_layout);
     if (instrID <= 0) return;
 
-    ft2_v2_set_global_param_for_instrument(instrID, binding->paramId, value);
-    v2_sync_global_controls(layout);
+    binding = &g_active_v2_layout->bindings[bindIndex];
+    switch (binding->kind)
+    {
+        case V2_BIND_PATCH_PARAM:
+        {
+            float value = (widget->comboItemCount > 1) ?
+                ((float)v2_clampi(selectedIndex, 0, widget->comboItemCount - 1) / (float)(widget->comboItemCount - 1)) : 0.0f;
+            ft2_v2_set_param_for_instrument(instrID, binding->target, value);
+            break;
+        }
+
+        case V2_BIND_GLOBAL_PARAM:
+        {
+            float value = (widget->comboItemCount > 1) ?
+                ((float)v2_clampi(selectedIndex, 0, widget->comboItemCount - 1) / (float)(widget->comboItemCount - 1)) : 0.0f;
+            ft2_v2_set_global_param_for_instrument(instrID, binding->target, value);
+            break;
+        }
+
+        case V2_BIND_MOD_SOURCE:
+        {
+            int amount = 0;
+            int dest = 0;
+            ft2_v2_get_mod_slot_for_instrument(instrID, binding->target, NULL, &amount, &dest);
+            ft2_v2_set_mod_slot_for_instrument(instrID, binding->target, selectedIndex, amount, dest);
+            break;
+        }
+
+        case V2_BIND_MOD_DEST:
+        {
+            int source = 0;
+            int amount = 0;
+            ft2_v2_get_mod_slot_for_instrument(instrID, binding->target, &source, &amount, NULL);
+            ft2_v2_set_mod_slot_for_instrument(instrID, binding->target, source, amount, selectedIndex);
+            break;
+        }
+
+        default:
+            break;
+    }
 }
 
-static void v2_mod_amount_changed(TunefishWidget* widget, float value)
+static void v2_bind_widget(V2CompleteLayout *layout, TunefishWidget *widget, V2BindingKind kind, int target)
 {
-    V2CompleteLayout* layout = g_active_v2_layout;
+    V2WidgetBinding *binding;
+
+    if (!layout || !widget || kind == V2_BIND_NONE) return;
+    if (layout->binding_count >= V2_MAX_BINDINGS) return;
+
+    binding = &layout->bindings[layout->binding_count++];
+    binding->widget = widget;
+    binding->kind = kind;
+    binding->target = target;
+
+    switch (kind)
+    {
+        case V2_BIND_PATCH_PARAM:
+        case V2_BIND_GLOBAL_PARAM:
+            if (widget->type == TF_WIDGET_COMBO_BOX)
+            {
+                v2_populate_param_combo(widget, kind, target);
+                widget->onComboSelect = v2_combo_changed;
+            }
+            else
+            {
+                widget->onValueChange = v2_value_changed;
+            }
+            break;
+
+        case V2_BIND_MOD_SOURCE:
+            v2_populate_mod_source_combo(widget);
+            widget->onComboSelect = v2_combo_changed;
+            break;
+
+        case V2_BIND_MOD_AMOUNT:
+            widget->onValueChange = v2_value_changed;
+            break;
+
+        case V2_BIND_MOD_DEST:
+            v2_populate_mod_dest_combo(widget);
+            widget->onComboSelect = v2_combo_changed;
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void v2_assign_named_widget(V2CompleteLayout *layout, TunefishWidget *widget)
+{
+    int index;
+    int target;
+
     if (!layout || !widget) return;
 
-    V2ModRowWidgets* row = find_mod_row(layout, widget);
-    if (!row) return;
-
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) return;
-
-    int source = 0;
-    int dest = 0;
-    ft2_v2_get_mod_slot_for_instrument(instrID, row->slotIndex, &source, NULL, &dest);
-    const int rawAmount = clamp_int((int)(value * 127.0f + 0.5f), 0, 127);
-    ft2_v2_set_mod_slot_for_instrument(instrID, row->slotIndex, source, rawAmount, dest);
-    v2_sync_mod_rows(layout);
-}
-
-static void v2_page_button_clicked(TunefishWidget* widget)
-{
-    if (!widget || !g_active_v2_layout) return;
-    if (widget == g_active_v2_layout->page_patch_button) {
-        v2_set_page(g_active_v2_layout, V2_PAGE_PATCH);
-    } else if (widget == g_active_v2_layout->page_globals_button) {
-        v2_set_page(g_active_v2_layout, V2_PAGE_GLOBALS);
-    } else if (widget == g_active_v2_layout->page_mod_button) {
-        v2_set_page(g_active_v2_layout, V2_PAGE_MOD);
-    }
-}
-
-static void v2_close_button_clicked(TunefishWidget* widget)
-{
-    (void)widget;
-    if (!g_active_v2_layout) return;
-    v2_hide_layout(g_active_v2_layout);
-    ft2_close_synth_editor();
-}
-
-static void v2_preset_combo_changed(TunefishWidget* widget, int selectedIndex)
-{
-    V2CompleteLayout* layout = g_active_v2_layout;
-    if (!layout) return;
-
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) return;
-
-    const int count = ft2_v2_get_factory_preset_count();
-    const int preset = (count > 0) ? clamp_int(selectedIndex, 0, count - 1) : 0;
-    if (!ft2_v2_load_preset_for_instrument(instrID, preset))
+    if (strcmp(widget->name, "title_label") == 0) { layout->title_label = widget; return; }
+    if (strcmp(widget->name, "page_caption_label") == 0) { layout->page_caption_label = widget; return; }
+    if (strcmp(widget->name, "preset_combo") == 0)
+    {
+        layout->preset_combo = widget;
+        widget->onComboSelect = v2_combo_changed;
         return;
-
-    if (widget) {
-        widget->selectedIndex = preset;
-        widget->value = (count > 1) ? ((float)preset / (float)(count - 1)) : 0.0f;
     }
-
-    v2_sync_controls_for_current_preset(layout);
-}
-
-static void v2_topic_combo_changed(TunefishWidget* widget, int selectedIndex)
-{
-    if (!widget || !g_active_v2_layout) return;
-    if (widget == g_active_v2_layout->patch_topic_combo) {
-        g_active_v2_layout->current_patch_topic = clamp_int(selectedIndex, 0, ft2_v2_get_topic_count() - 1);
-    } else if (widget == g_active_v2_layout->global_topic_combo) {
-        g_active_v2_layout->current_global_topic = clamp_int(selectedIndex, 0, ft2_v2_get_global_topic_count() - 1);
+    if (strcmp(widget->name, "voice_meter") == 0) { layout->voice_meter = widget; return; }
+    if (strcmp(widget->name, "close_btn") == 0) { layout->close_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "page_voice_btn") == 0) { layout->page_voice_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "page_filter_btn") == 0) { layout->page_filter_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "page_lfo_env_btn") == 0) { layout->page_lfo_env_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "page_fx_btn") == 0) { layout->page_fx_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "page_master_btn") == 0) { layout->page_master_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "page_mod_btn") == 0) { layout->page_mod_button = widget; widget->onClick = v2_button_clicked; return; }
+    if (strcmp(widget->name, "mod_bank_combo") == 0)
+    {
+        layout->mod_bank_combo = widget;
+        v2_populate_mod_bank_combo(widget, layout->current_mod_bank);
+        widget->onComboSelect = v2_combo_changed;
+        return;
     }
-    v2_update_all_visibility(g_active_v2_layout);
-}
+    if (strcmp(widget->name, "amp_env_display") == 0) { layout->amp_env_display = widget; return; }
+    if (strcmp(widget->name, "eg2_env_display") == 0) { layout->eg2_env_display = widget; return; }
 
-static void v2_mod_bank_combo_changed(TunefishWidget* widget, int selectedIndex)
-{
-    if (!widget || !g_active_v2_layout) return;
-
-    if (widget == g_active_v2_layout->mod_bank_combo) {
-        g_active_v2_layout->current_mod_bank = clamp_int(selectedIndex, 0, 31);
-        v2_update_mod_visibility(g_active_v2_layout);
-        v2_sync_mod_rows(g_active_v2_layout);
+    if (sscanf(widget->name, "p_%d", &target) == 1)
+    {
+        v2_bind_widget(layout, widget, V2_BIND_PATCH_PARAM, target);
         return;
     }
 
-    const int instrID = current_instrument_id();
-    if (instrID <= 0) return;
-
-    for (int i = 0; i < V2_MOD_ROWS; ++i) {
-        V2ModRowWidgets* row = &g_active_v2_layout->mod_rows[i];
-        const int slot = row->slotIndex;
-        if (widget == row->source_combo) {
-            int amount = 0, dest = 0;
-            ft2_v2_get_mod_slot_for_instrument(instrID, slot, NULL, &amount, &dest);
-            ft2_v2_set_mod_slot_for_instrument(instrID, slot, selectedIndex, amount, dest);
-        } else if (widget == row->dest_combo) {
-            int source = 0, amount = 0;
-            ft2_v2_get_mod_slot_for_instrument(instrID, slot, &source, &amount, NULL);
-            ft2_v2_set_mod_slot_for_instrument(instrID, slot, source, amount, selectedIndex);
-        } else if (widget == row->amount_control) {
-            int source = 0, dest = 0;
-            ft2_v2_get_mod_slot_for_instrument(instrID, slot, &source, NULL, &dest);
-            int rawAmount = clamp_int((int)(widget->value * 127.0f + 0.5f), 0, 127);
-            ft2_v2_set_mod_slot_for_instrument(instrID, slot, source, rawAmount, dest);
-        }
+    if (sscanf(widget->name, "g_%d", &target) == 1)
+    {
+        v2_bind_widget(layout, widget, V2_BIND_GLOBAL_PARAM, target);
+        return;
     }
-    v2_sync_mod_rows(g_active_v2_layout);
+
+    if (sscanf(widget->name, "m_src_%d", &index) == 1 && index >= 0 && index < V2_MOD_ROWS)
+    {
+        layout->mod_source_widgets[index] = widget;
+        v2_bind_widget(layout, widget, V2_BIND_MOD_SOURCE, index);
+        return;
+    }
+
+    if (sscanf(widget->name, "m_amt_%d", &index) == 1 && index >= 0 && index < V2_MOD_ROWS)
+    {
+        layout->mod_amount_widgets[index] = widget;
+        v2_bind_widget(layout, widget, V2_BIND_MOD_AMOUNT, index);
+        return;
+    }
+
+    if (sscanf(widget->name, "m_dst_%d", &index) == 1 && index >= 0 && index < V2_MOD_ROWS)
+    {
+        layout->mod_dest_widgets[index] = widget;
+        v2_bind_widget(layout, widget, V2_BIND_MOD_DEST, index);
+        return;
+    }
+
+    if (sscanf(widget->name, "m_lbl_%d", &index) == 1 && index >= 0 && index < V2_MOD_ROWS)
+    {
+        layout->mod_slot_labels[index] = widget;
+        return;
+    }
 }
 
-V2CompleteLayout* v2_create_complete_layout(void)
+static TunefishWidget *v2_create_label_from_desc(const ft2_ui_tf_label_desc_t *desc)
 {
-    V2CompleteLayout* layout = (V2CompleteLayout*)calloc(1, sizeof(V2CompleteLayout));
+    if (!desc) return NULL;
+    return tf_create_label(desc->name ? desc->name : "label", desc->text ? desc->text : "", desc->x, desc->y, desc->w, desc->h);
+}
+
+static TunefishWidget *v2_create_button_from_desc(const ft2_ui_tf_button_desc_t *desc)
+{
+    if (!desc) return NULL;
+    return tf_create_button(desc->name ? desc->name : "button", desc->text ? desc->text : "", desc->x, desc->y, desc->w, desc->h);
+}
+
+static TunefishWidget *v2_create_rotary_from_desc(const ft2_ui_tf_rotary_slider_desc_t *desc)
+{
+    TunefishWidget *widget;
+
+    if (!desc) return NULL;
+
+    widget = tf_create_rotary_slider(desc->name ? desc->name : "rotary",
+        (int)desc->x + (int)desc->radius,
+        (int)desc->y + (int)desc->radius,
+        (int)desc->radius,
+        desc->start_angle,
+        desc->end_angle);
+    if (widget && desc->label)
+        tf_widget_set_label(widget, desc->label);
+    return widget;
+}
+
+static TunefishWidget *v2_create_linear_from_desc(const ft2_ui_tf_linear_slider_desc_t *desc)
+{
+    if (!desc) return NULL;
+    return tf_create_linear_slider(desc->name ? desc->name : "linear", desc->x, desc->y, desc->w, desc->h, desc->vertical);
+}
+
+static TunefishWidget *v2_create_combo_from_desc(const ft2_ui_tf_combo_box_desc_t *desc)
+{
+    TunefishWidget *widget;
+
+    if (!desc) return NULL;
+    widget = tf_create_combo_box(desc->name ? desc->name : "combo", desc->x, desc->y, desc->w, desc->h, NULL, 0);
+    if (widget)
+        widget->selectedIndex = desc->selected_index;
+    return widget;
+}
+
+static TunefishWidget *v2_create_meter_from_desc(const ft2_ui_tf_level_meter_desc_t *desc)
+{
+    if (!desc) return NULL;
+    return tf_create_level_meter(desc->name ? desc->name : "meter", desc->x, desc->y, desc->w, desc->h,
+        desc->num_leds > 0 ? desc->num_leds : 12, desc->show_peak);
+}
+
+static TunefishWidget *v2_create_group_from_desc(const ft2_ui_tf_group_box_desc_t *desc)
+{
+    if (!desc) return NULL;
+    return tf_create_group_box(desc->name ? desc->name : "group", desc->title ? desc->title : "", desc->x, desc->y, desc->w, desc->h);
+}
+
+static TunefishWidget *v2_create_env_from_desc(const ft2_ui_tf_envelope_display_desc_t *desc)
+{
+    if (!desc) return NULL;
+    return tf_create_envelope_display(desc->name ? desc->name : "env", desc->x, desc->y, desc->w, desc->h);
+}
+
+static TunefishWidget *v2_create_wave_from_desc(const ft2_ui_waveform_view_desc_t *desc)
+{
+    if (!desc) return NULL;
+    return tf_create_waveform_view(desc->name ? desc->name : "waveform_view", desc->x, desc->y, desc->w, desc->h);
+}
+
+static V2CompleteLayout *v2_create_complete_layout_from_schema(const ft2_ui_layout_desc_t *desc)
+{
+    V2CompleteLayout *layout;
+    uint16_t i;
+
+    if (!desc) return NULL;
+
+    layout = (V2CompleteLayout *)calloc(1, sizeof(V2CompleteLayout));
     if (!layout) return NULL;
 
-    layout->current_page = V2_PAGE_PATCH;
-    layout->current_patch_topic = 0;
-    layout->current_global_topic = 0;
+    layout->current_page = V2_PAGE_VOICE_OSC;
     layout->current_mod_bank = 0;
-    layout->active_instrument_id = (editor.curInstr >= 1 && editor.curInstr <= MAX_INST) ? editor.curInstr : 0;
+    layout->active_instrument_id = v2_current_instr_id(layout);
     layout->initialized = true;
+    layout->visible = false;
 
-    layout->title_label = tf_create_label("v2_title_label", "V2 Synth Editor", 12, 10, 160, 18);
-    layout->page_caption_label = tf_create_label("v2_caption_label", "Patch", 12, 34, 320, 14);
-    layout->preset_combo = tf_create_combo_box("v2_preset_combo", 150, 8, 190, 18, NULL, 0);
-    layout->page_patch_button = tf_create_button("v2_page_patch_btn", "Patch", 348, 8, 50, 18);
-    layout->page_globals_button = tf_create_button("v2_page_globals_btn", "Globals", 402, 8, 58, 18);
-    layout->page_mod_button = tf_create_button("v2_page_mod_btn", "Mod", 464, 8, 38, 18);
-    layout->close_button = tf_create_button("v2_close_btn", "X", 596, 8, 24, 18);
-    layout->active_voices_meter = tf_create_level_meter("v2_voices_meter", 528, 10, 58, 12, 12, true);
-    layout->patch_topic_combo = tf_create_combo_box("v2_patch_topic_combo", 12, 54, 180, 18, NULL, 0);
-    layout->patch_topic_group = tf_create_group_box("v2_patch_topic_group", "Patch", 10, 80, 612, 260);
-    layout->global_topic_combo = tf_create_combo_box("v2_global_topic_combo", 12, 54, 180, 18, NULL, 0);
-    layout->global_topic_group = tf_create_group_box("v2_global_topic_group", "Globals", 10, 80, 612, 260);
-    layout->mod_bank_combo = tf_create_combo_box("v2_mod_bank_combo", 12, 54, 150, 18, NULL, 0);
-    layout->mod_group = tf_create_group_box("v2_mod_group", "Mod Matrix", 10, 80, 612, 260);
+    if (desc->waveform_views.count > 0 && desc->waveform_view_desc)
+    {
+        for (i = 0; i < desc->waveform_views.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_wave_from_desc(&desc->waveform_view_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->waveform_view_desc[i].page);
+        }
+    }
 
-    if (layout->preset_combo) layout->preset_combo->onComboSelect = v2_preset_combo_changed;
-    if (layout->page_patch_button) layout->page_patch_button->onClick = v2_page_button_clicked;
-    if (layout->page_globals_button) layout->page_globals_button->onClick = v2_page_button_clicked;
-    if (layout->page_mod_button) layout->page_mod_button->onClick = v2_page_button_clicked;
-    if (layout->close_button) layout->close_button->onClick = v2_close_button_clicked;
-    if (layout->patch_topic_combo) layout->patch_topic_combo->onComboSelect = v2_topic_combo_changed;
-    if (layout->global_topic_combo) layout->global_topic_combo->onComboSelect = v2_topic_combo_changed;
-    if (layout->mod_bank_combo) layout->mod_bank_combo->onComboSelect = v2_mod_bank_combo_changed;
+    if (desc->tf_buttons.count > 0 && desc->tf_button_desc)
+    {
+        for (i = 0; i < desc->tf_buttons.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_button_from_desc(&desc->tf_button_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_button_desc[i].page);
+        }
+    }
 
-    register_widget(layout, layout->title_label);
-    register_widget(layout, layout->page_caption_label);
-    register_widget(layout, layout->preset_combo);
-    register_widget(layout, layout->page_patch_button);
-    register_widget(layout, layout->page_globals_button);
-    register_widget(layout, layout->page_mod_button);
-    register_widget(layout, layout->close_button);
-    register_widget(layout, layout->active_voices_meter);
-    register_widget(layout, layout->patch_topic_combo);
-    register_widget(layout, layout->patch_topic_group);
-    register_widget(layout, layout->global_topic_combo);
-    register_widget(layout, layout->global_topic_group);
-    register_widget(layout, layout->mod_bank_combo);
-    register_widget(layout, layout->mod_group);
+    if (desc->tf_labels.count > 0 && desc->tf_label_desc)
+    {
+        for (i = 0; i < desc->tf_labels.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_label_from_desc(&desc->tf_label_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_label_desc[i].page);
+        }
+    }
 
-    v2_build_patch_param_widgets(layout);
-    v2_build_global_param_widgets(layout);
-    v2_build_mod_widgets(layout);
+    if (desc->tf_rotary_sliders.count > 0 && desc->tf_rotary_slider_desc)
+    {
+        for (i = 0; i < desc->tf_rotary_sliders.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_rotary_from_desc(&desc->tf_rotary_slider_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_rotary_slider_desc[i].page);
+        }
+    }
 
-    v2_sync_all_controls(layout);
-    v2_style_all_widgets_authentic(layout);
-    v2_update_all_visibility(layout);
+    if (desc->tf_linear_sliders.count > 0 && desc->tf_linear_slider_desc)
+    {
+        for (i = 0; i < desc->tf_linear_sliders.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_linear_from_desc(&desc->tf_linear_slider_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_linear_slider_desc[i].page);
+        }
+    }
+
+    if (desc->tf_combo_boxes.count > 0 && desc->tf_combo_box_desc)
+    {
+        for (i = 0; i < desc->tf_combo_boxes.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_combo_from_desc(&desc->tf_combo_box_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_combo_box_desc[i].page);
+        }
+    }
+
+    if (desc->tf_level_meters.count > 0 && desc->tf_level_meter_desc)
+    {
+        for (i = 0; i < desc->tf_level_meters.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_meter_from_desc(&desc->tf_level_meter_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_level_meter_desc[i].page);
+        }
+    }
+
+    if (desc->tf_envelope_displays.count > 0 && desc->tf_envelope_display_desc)
+    {
+        for (i = 0; i < desc->tf_envelope_displays.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_env_from_desc(&desc->tf_envelope_display_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_envelope_display_desc[i].page);
+        }
+    }
+
+    if (desc->tf_group_boxes.count > 0 && desc->tf_group_box_desc)
+    {
+        for (i = 0; i < desc->tf_group_boxes.count; ++i)
+        {
+            TunefishWidget *widget = v2_create_group_from_desc(&desc->tf_group_box_desc[i]);
+            if (!widget) continue;
+            v2_style_widget(widget);
+            v2_register_widget(layout, widget, desc->tf_group_box_desc[i].page);
+        }
+    }
+
+    for (i = 0; i < (uint16_t)layout->all_widget_count; ++i)
+        v2_assign_named_widget(layout, layout->all_widgets[i]);
+
+    v2_update_all_widgets_from_synth(layout);
     return layout;
 }
 
-void v2_destroy_complete_layout(V2CompleteLayout* layout)
+static void v2_set_active_instrument(V2CompleteLayout *layout)
 {
     if (!layout) return;
-    for (int i = 0; i < layout->all_widget_count; ++i) {
+    layout->active_instrument_id = v2_current_instr_id(layout);
+}
+
+V2CompleteLayout *v2_create_complete_layout(void)
+{
+    return v2_create_complete_layout_from_schema(&ft2_v2_complete_layout_layout);
+}
+
+void v2_destroy_complete_layout(V2CompleteLayout *layout)
+{
+    int i;
+
+    if (!layout) return;
+
+    for (i = 0; i < layout->all_widget_count; ++i)
         tf_widget_destroy(layout->all_widgets[i]);
-    }
+
+    if (g_active_v2_layout == layout)
+        g_active_v2_layout = NULL;
+
     free(layout);
-    if (g_active_v2_layout == layout) g_active_v2_layout = NULL;
 }
 
-void v2_show_layout(V2CompleteLayout* layout)
+void v2_show_layout(V2CompleteLayout *layout)
 {
     if (!layout) return;
+
     g_active_v2_layout = layout;
-    layout->active_instrument_id = (editor.curInstr >= 1 && editor.curInstr <= MAX_INST) ? editor.curInstr : 0;
     layout->visible = true;
-    v2_sync_all_controls(layout);
+    v2_set_active_instrument(layout);
+    v2_update_all_widgets_from_synth(layout);
 }
 
-void v2_hide_layout(V2CompleteLayout* layout)
+void v2_hide_layout(V2CompleteLayout *layout)
 {
     if (!layout) return;
     layout->visible = false;
-    if (g_active_v2_layout == layout) g_active_v2_layout = NULL;
+    if (g_active_v2_layout == layout)
+        g_active_v2_layout = NULL;
 }
 
-void v2_switch_to_page(V2CompleteLayout* layout, int page)
+void v2_switch_to_page(V2CompleteLayout *layout, int page)
 {
     if (!layout) return;
-    layout->current_page = clamp_int(page, 0, V2_PAGE_COUNT - 1);
-    v2_update_all_visibility(layout);
+    layout->current_page = v2_clampi(page, 0, V2_PAGE_COUNT - 1);
+    v2_update_widget_visibility(layout);
 }
 
-void v2_render_complete_layout(V2CompleteLayout* layout)
+TunefishWidget *v2_find_widget_by_name(V2CompleteLayout *layout, const char *name)
 {
+    int i;
+
+    if (!layout || !name) return NULL;
+
+    for (i = 0; i < layout->all_widget_count; ++i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (widget && strcmp(widget->name, name) == 0)
+            return widget;
+    }
+
+    return NULL;
+}
+
+static void v2_draw_env_pixel(int x, int y, uint8_t color)
+{
+    if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) return;
+    video.frameBuffer[(size_t)y * SCREEN_W + (size_t)x] = video.palette[color];
+}
+
+static void v2_draw_line(int x0, int y0, int x1, int y1, uint8_t color)
+{
+    int dx = abs(x1 - x0);
+    int sx = (x0 < x1) ? 1 : -1;
+    int dy = -abs(y1 - y0);
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
+
+    for (;;)
+    {
+        v2_draw_env_pixel(x0, y0, color);
+        if (x0 == x1 && y0 == y1) break;
+        if ((err * 2) >= dy) { err += dy; x0 += sx; }
+        if ((err * 2) <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+static void v2_get_env_points(V2CompleteLayout *layout, int envIndex, const TunefishWidget *widget, int points[5][2])
+{
+    int instrID;
+    int left;
+    int right;
+    int top;
+    int bottom;
+    int width;
+    int height;
+    float attack;
+    float decay;
+    float sustain;
+    float sustainTime;
+    float release;
+    float spans[4];
+    float total;
+    int i;
+    int x;
+
+    if (!layout || !widget || !points) return;
+
+    for (i = 0; i < 5; ++i)
+    {
+        points[i][0] = widget->x + 6;
+        points[i][1] = widget->y + widget->h - 8;
+    }
+
+    instrID = v2_current_instr_id(layout);
+    if (instrID <= 0)
+        return;
+
+    left = widget->x + 6;
+    right = widget->x + widget->w - 7;
+    top = widget->y + 8;
+    bottom = widget->y + widget->h - 8;
+    width = right - left;
+    height = bottom - top;
+    if (width <= 8 || height <= 8)
+        return;
+
+    attack = ft2_v2_get_param_for_instrument(instrID, k_env_param_ids[envIndex][0]);
+    decay = ft2_v2_get_param_for_instrument(instrID, k_env_param_ids[envIndex][1]);
+    sustain = ft2_v2_get_param_for_instrument(instrID, k_env_param_ids[envIndex][2]);
+    sustainTime = ft2_v2_get_param_for_instrument(instrID, k_env_param_ids[envIndex][3]);
+    release = ft2_v2_get_param_for_instrument(instrID, k_env_param_ids[envIndex][4]);
+
+    spans[0] = 12.0f + attack * (width * 0.22f);
+    spans[1] = 12.0f + decay * (width * 0.18f);
+    spans[2] = 18.0f + sustainTime * (width * 0.26f);
+    spans[3] = 12.0f + release * (width * 0.20f);
+    total = spans[0] + spans[1] + spans[2] + spans[3];
+    if (total > width)
+    {
+        float scale = (float)width / total;
+        for (i = 0; i < 4; ++i)
+            spans[i] *= scale;
+    }
+
+    points[0][0] = left;
+    points[0][1] = bottom;
+
+    x = left + (int)lroundf(spans[0]);
+    points[1][0] = x;
+    points[1][1] = top;
+
+    x += (int)lroundf(spans[1]);
+    points[2][0] = v2_clampi(x, left, right - 2);
+    points[2][1] = bottom - (int)lroundf(v2_clampf(sustain, 0.0f, 1.0f) * (float)height);
+
+    x += (int)lroundf(spans[2]);
+    points[3][0] = v2_clampi(x, points[2][0], right - 1);
+    points[3][1] = points[2][1];
+
+    points[4][0] = right;
+    points[4][1] = bottom;
+}
+
+static void v2_draw_env_display(V2CompleteLayout *layout, const TunefishWidget *widget, int envIndex)
+{
+    int points[5][2];
+    int i;
+
+    if (!layout || !widget || !widget->visible) return;
+    if (envIndex < 0 || envIndex >= 2) return;
+    if (widget->w < 8 || widget->h < 8) return;
+
+    fillRect(widget->x + 1, widget->y + 1, widget->w - 2, widget->h - 2, PAL_BUTTON2);
+    hLine(widget->x, widget->y, widget->w, PAL_BCKGRND);
+    hLine(widget->x, widget->y + widget->h - 1, widget->w, PAL_BCKGRND);
+    vLine(widget->x, widget->y, widget->h, PAL_BCKGRND);
+    vLine(widget->x + widget->w - 1, widget->y, widget->h, PAL_BCKGRND);
+
+    v2_get_env_points(layout, envIndex, widget, points);
+
+    for (i = 0; i < 5; ++i)
+        fillRect(points[i][0] - 1, points[i][1] - 1, 3, 3, PAL_FORGRND);
+
+    for (i = 1; i < 5; ++i)
+        v2_draw_line(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1], PAL_PATTEXT);
+}
+
+void v2_render_complete_layout(V2CompleteLayout *layout)
+{
+    int i;
+
     if (!layout || !layout->visible) return;
-    v2_sync_controls_for_current_preset(layout);
+
+    v2_refresh_runtime_state(layout);
     fillRect(0, 0, SCREEN_W, SCREEN_H, PAL_DESKTOP);
 
-    for (int i = 0; i < layout->all_widget_count; ++i) {
-        TunefishWidget* w = layout->all_widgets[i];
-        if (w && w->visible && w->type != TF_WIDGET_BITMAP) {
-            tf_draw_widget(w);
-        }
+    for (i = 0; i < layout->all_widget_count; ++i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (!widget || !widget->visible || widget->type != TF_WIDGET_GROUP_BOX) continue;
+        tf_draw_widget(widget);
+    }
+
+    if (layout->current_page == V2_PAGE_LFO_ENV && layout->amp_env_display && layout->amp_env_display->visible)
+        v2_draw_env_display(layout, layout->amp_env_display, 0);
+    if (layout->current_page == V2_PAGE_LFO_ENV && layout->eg2_env_display && layout->eg2_env_display->visible)
+        v2_draw_env_display(layout, layout->eg2_env_display, 1);
+    for (i = 0; i < layout->all_widget_count; ++i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (!widget || !widget->visible) continue;
+        if (widget->type == TF_WIDGET_GROUP_BOX || widget->type == TF_WIDGET_ENVELOPE_DISPLAY ||
+            widget->type == TF_WIDGET_LABEL)
+            continue;
+        tf_draw_widget(widget);
+    }
+
+    for (i = 0; i < layout->all_widget_count; ++i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (!widget || !widget->visible || widget->type != TF_WIDGET_LABEL) continue;
+        tf_draw_widget(widget);
     }
 }
 
-bool v2_handle_layout_mouse_event(V2CompleteLayout* layout, int mouseX, int mouseY, bool pressed)
+bool v2_handle_layout_mouse_event(V2CompleteLayout *layout, int mouseX, int mouseY, bool pressed)
 {
+    int i;
+
     if (!layout || !layout->visible) return false;
-    for (int i = 0; i < layout->all_widget_count; ++i) {
-        TunefishWidget* w = layout->all_widgets[i];
-        if (!w || !w->visible) continue;
-        if (tf_widget_handle_mouse_event(w, mouseX, mouseY, pressed)) {
+
+    v2_set_active_instrument(layout);
+
+    for (i = layout->all_widget_count - 1; i >= 0; --i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (!widget || !widget->visible) continue;
+        if (tf_widget_handle_mouse_event(widget, mouseX, mouseY, pressed))
             return true;
-        }
     }
+
     return false;
 }
 
-bool v2_handle_layout_mouse_drag(V2CompleteLayout* layout, int mouseX, int mouseY)
+bool v2_handle_layout_mouse_drag(V2CompleteLayout *layout, int mouseX, int mouseY)
 {
-    (void)layout;
-    (void)mouseX;
-    (void)mouseY;
+    int i;
+
+    if (!layout || !layout->visible) return false;
+
+    for (i = layout->all_widget_count - 1; i >= 0; --i)
+    {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (!widget || !widget->visible) continue;
+        if (widget->type != TF_WIDGET_ROTARY_SLIDER && widget->type != TF_WIDGET_LINEAR_SLIDER)
+            continue;
+        if (!tf_widget_is_point_inside(widget, mouseX, mouseY))
+            continue;
+        if (tf_widget_handle_mouse_event(widget, mouseX, mouseY, true))
+            return true;
+    }
+
     return false;
 }
 
-bool v2_handle_layout_keyboard_test(V2CompleteLayout* layout, int key)
+bool v2_handle_layout_keyboard_test(V2CompleteLayout *layout, int key)
 {
     if (!layout || !layout->visible) return false;
-    switch (key) {
+
+    switch (key)
+    {
         case SDLK_ESCAPE:
             v2_hide_layout(layout);
             ft2_close_synth_editor();
             return true;
+
         case SDLK_TAB:
             v2_switch_to_page(layout, (layout->current_page + 1) % V2_PAGE_COUNT);
             return true;
+
         default:
             return false;
-    }
-}
-
-void v2_sync_widgets_with_parameters(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    v2_sync_all_controls(layout);
-}
-
-void v2_update_all_widgets_from_synth(V2CompleteLayout* layout)
-{
-    v2_sync_widgets_with_parameters(layout);
-}
-
-TunefishWidget* v2_find_widget_by_name(V2CompleteLayout* layout, const char* name)
-{
-    if (!layout || !name) return NULL;
-    for (int i = 0; i < layout->all_widget_count; ++i) {
-        TunefishWidget* w = layout->all_widgets[i];
-        if (w && strcmp(w->name, name) == 0) return w;
-    }
-    return NULL;
-}
-
-void v2_style_all_widgets_authentic(V2CompleteLayout* layout)
-{
-    if (!layout) return;
-    for (int i = 0; i < layout->all_widget_count; ++i) {
-        TunefishWidget* w = layout->all_widgets[i];
-        if (w) {
-            tf_apply_tunefish_styling(w);
-        }
     }
 }

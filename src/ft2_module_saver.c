@@ -1079,7 +1079,7 @@ bool saveDXM(UNICHAR *filenameU)
     fwrite(&macChunkLen, 1, 4, f);
     long macDataStart = ftell(f);
 
-    uint16_t pattCount = song.pattNum;
+    uint16_t pattCount = h.numPatterns;
     uint16_t chCount = MAX_STEREO_PAIRS;
     uint16_t macroModeMask = 0;
     for (int ch = 0; ch < MAX_STEREO_PAIRS; ch++)

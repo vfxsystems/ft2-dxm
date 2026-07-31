@@ -39,6 +39,9 @@ const char *ft2_ostirus_get_current_preset_name_for_instrument(int instrID);
 void ft2_ostirus_set_param_for_instrument(int instrID, int paramId, float value);
 float ft2_ostirus_get_param_for_instrument(int instrID, int paramId);
 int ft2_ostirus_get_active_voice_count(int instrID);
+bool ft2_ostirus_has_pending_audio(int instrID);
+int ft2_ostirus_get_param_count(void);
+const char *ft2_ostirus_get_param_name(int paramId);
 
 int ft2_ostirus_assign_slot_for_instrument(int instrID);
 int ft2_ostirus_get_slot_for_instrument(int instrID);

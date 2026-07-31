@@ -1,23 +1,63 @@
 cmake_minimum_required(VERSION 3.7)
 
-# Enable debugging symbols
-set(CMAKE_BUILD_TYPE Debug)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_C_FLAGS_DEBUG "-g")
 
 project(ft2-dxm LANGUAGES C CXX)
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy compatibility for bundled subprojects" FORCE)
 
 option(EXTERNAL_LIBFLAC "use external(system) flac library" OFF)
+option(FT2_ENABLE_VENDOR_TESTS "Enable tests registered by bundled third-party subprojects" OFF)
 
 # ----- Dexed FM synth integration (optional) -----
 option(WITH_DEXED "Build with embedded Dexed FM synth" ON)
 
+if(BUILD_TESTING AND NOT FT2_ENABLE_VENDOR_TESTS)
+    set(_FT2_TOP_LEVEL_BUILD_TESTING "${BUILD_TESTING}")
+    set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
+endif()
+
+add_subdirectory(src/gearmulator/source/dsp56300/source EXCLUDE_FROM_ALL)
+add_subdirectory(src/gearmulator/source/baseLib EXCLUDE_FROM_ALL)
+add_subdirectory(src/gearmulator/source/libresample EXCLUDE_FROM_ALL)
+add_subdirectory(src/gearmulator/source/synthLib EXCLUDE_FROM_ALL)
+add_subdirectory(src/gearmulator/source/virusLib EXCLUDE_FROM_ALL)
+add_subdirectory(src/gearmulator/source/dsp56300/source/wxWidgets/src/zlib EXCLUDE_FROM_ALL)
+
+if(DEFINED _FT2_TOP_LEVEL_BUILD_TESTING)
+    set(BUILD_TESTING "${_FT2_TOP_LEVEL_BUILD_TESTING}" CACHE BOOL "Build tests" FORCE)
+endif()
+
 find_package(SDL2 REQUIRED)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/release/other/")
+if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
+# On non-Windows we want the *system* SDL2 to win over the bundled src/SDL2/
+# headers (which exist for the MSVC build). Because src/ is on the -I path,
+# `<SDL2/SDL.h>` would otherwise resolve to the bundled copy and mismatch the
+# linked system libSDL2. Adding the system SDL2's parent dir BEFORE src/
+# (computed from SDL2_INCLUDE_DIRS) ensures `<SDL2/...>` hits the system copy.
+if(NOT WIN32)
+    if(SDL2_INCLUDE_DIRS)
+        list(GET SDL2_INCLUDE_DIRS 0 _ft2_sdl2_inc0)
+    elseif(TARGET SDL2::SDL2)
+        get_target_property(_ft2_sdl2_inc0 SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
+    endif()
+    if(_ft2_sdl2_inc0)
+        get_filename_component(_ft2_sdl2_inc_parent "${_ft2_sdl2_inc0}" DIRECTORY)
+        message(STATUS "ft2-dxm: SDL2 include parent = ${_ft2_sdl2_inc_parent}")
+    endif()
+endif()
 
 file(GLOB ft2_dxm_SRC
     "${CMAKE_SOURCE_DIR}/src/rtmidi/*.cpp"
@@ -41,6 +81,23 @@ target_include_directories(ft2-dxm SYSTEM
 
 target_include_directories(ft2-dxm PRIVATE
     ${CMAKE_SOURCE_DIR}/src)
+
+if(NOT WIN32 AND _ft2_sdl2_inc_parent)
+    # CMake silently drops implicit system include paths (like /usr/include)
+    # from target_include_directories. Stage a build-dir alias that just
+    # re-exports the system SDL2 headers, then put that on the include path
+    # ahead of src/ so `<SDL2/SDL.h>` resolves to the system headers rather
+    # than the bundled src/SDL2/ (which targets a newer SDL2 than the libs
+    # actually linked on Linux distros like Ubuntu 22.04).
+    set(_ft2_sdl2_shim "${CMAKE_BINARY_DIR}/_ft2_sdl2_shim")
+    file(MAKE_DIRECTORY "${_ft2_sdl2_shim}/SDL2")
+    file(GLOB _ft2_sdl2_sys_hdrs "${_ft2_sdl2_inc0}/*.h")
+    foreach(_h ${_ft2_sdl2_sys_hdrs})
+        get_filename_component(_hn "${_h}" NAME)
+        configure_file("${_h}" "${_ft2_sdl2_shim}/SDL2/${_hn}" COPYONLY)
+    endforeach()
+    target_include_directories(ft2-dxm BEFORE PRIVATE "${_ft2_sdl2_shim}")
+endif()
 
 if("${SDL2_LIBRARIES}" STREQUAL "")
     message(WARNING "SDL2_LIBRARIES wasn't set, manually setting to SDL2::SDL2")
@@ -122,16 +179,60 @@ if(WITH_DEXED)
     )
     target_compile_definitions(ft2-dxm PRIVATE HAS_DEXED)
 
-    # Builtin program ZIP (optional). We do not attempt to auto-extract here to avoid
-    # using CMake features that may not be available on older CMake versions.
     set(DEXED_BUILTIN_ZIP "${CMAKE_SOURCE_DIR}/src/dexed/builtin_pgm.zip")
-    if(EXISTS ${DEXED_BUILTIN_ZIP})
-        message(STATUS "Found builtin Dexed program ZIP: ${DEXED_BUILTIN_ZIP} - automatic extraction disabled in this build.")
-        message(STATUS "If you want CMake to extract it, upgrade to CMake 3.18+ or extract manually to ${CMAKE_BINARY_DIR}/dexed_builtin_extract or place .syx files under src/dexed/patches/")
+    if(EXISTS "${DEXED_BUILTIN_ZIP}")
+        set(DEXED_EMBED_SRC "${CMAKE_BINARY_DIR}/generated/ft2_dexed_builtin_pgm_zip.cpp")
+        add_custom_command(
+            OUTPUT "${DEXED_EMBED_SRC}"
+            COMMAND ${CMAKE_COMMAND}
+                    -DINPUT=${DEXED_BUILTIN_ZIP}
+                    -DOUTPUT=${DEXED_EMBED_SRC}
+                    -DSYMBOL=ft2_dexed_builtin_pgm_zip
+                    -P "${CMAKE_SOURCE_DIR}/cmake/embed_binary.cmake"
+            DEPENDS "${DEXED_BUILTIN_ZIP}" "${CMAKE_SOURCE_DIR}/cmake/embed_binary.cmake"
+            VERBATIM)
+        target_sources(ft2-dxm PRIVATE "${DEXED_EMBED_SRC}")
+        target_compile_definitions(ft2-dxm PRIVATE FT2_DEXED_EMBEDDED_BUILTIN_ZIP)
+
+        add_custom_command(TARGET ft2-dxm POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ft2-dxm>/Dexed"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${DEXED_BUILTIN_ZIP}"
+                    "$<TARGET_FILE_DIR:ft2-dxm>/Dexed/builtin_pgm.zip"
+            VERBATIM)
     endif()
 endif()
 
+target_include_directories(ft2-dxm PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/gearmulator/source/dsp56300/source/wxWidgets/src/zlib
+    ${CMAKE_BINARY_DIR}/src/gearmulator/source/dsp56300/source/wxWidgets/src/zlib
+)
 
+target_sources(ft2-dxm PRIVATE src/ft2_ostirus_wrapper.cpp)
+target_link_libraries(ft2-dxm PRIVATE virusLib zlibstatic)
+
+set(OSTIRUS_ASSET_ZIP "${CMAKE_SOURCE_DIR}/src/gearmulator/assets/otstirusdat.zip")
+if(EXISTS "${OSTIRUS_ASSET_ZIP}")
+    set(OSTIRUS_EMBED_SRC "${CMAKE_BINARY_DIR}/generated/ft2_ostirusdat_zip.cpp")
+    add_custom_command(
+        OUTPUT "${OSTIRUS_EMBED_SRC}"
+        COMMAND ${CMAKE_COMMAND}
+                -DINPUT=${OSTIRUS_ASSET_ZIP}
+                -DOUTPUT=${OSTIRUS_EMBED_SRC}
+                -DSYMBOL=ft2_ostirusdat_zip
+                -P "${CMAKE_SOURCE_DIR}/cmake/embed_binary.cmake"
+        DEPENDS "${OSTIRUS_ASSET_ZIP}" "${CMAKE_SOURCE_DIR}/cmake/embed_binary.cmake"
+        VERBATIM)
+    target_sources(ft2-dxm PRIVATE "${OSTIRUS_EMBED_SRC}")
+    target_compile_definitions(ft2-dxm PRIVATE FT2_OSTIRUS_EMBEDDED_ZIP)
+
+    add_custom_command(TARGET ft2-dxm POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ft2-dxm>/OsTIrus"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${OSTIRUS_ASSET_ZIP}"
+                "$<TARGET_FILE_DIR:ft2-dxm>/OsTIrus/otstirusdat.zip"
+        VERBATIM)
+endif()
 
 install(TARGETS ft2-dxm
     RUNTIME DESTINATION bin)
@@ -171,6 +272,10 @@ target_sources(ft2-dxm PRIVATE
     src/ft2_tunefish_widgets.c
     src/ft2_tunefish_complete_layout.c
     src/ft2_tunefish_complete_layout_schema.c
+    src/ft2_v2_complete_layout.c
+    src/ft2_v2_complete_layout_schema.c
+    src/ft2_ostirus_complete_layout.c
+    src/ft2_ostirus_complete_layout_schema.c
     src/ft2_mixer_layout_schema.c
 )
 target_compile_definitions(ft2-dxm PRIVATE TF_USE_SCHEMA_LAYOUT)
@@ -193,3 +298,11 @@ target_sources(ft2-dxm PRIVATE src/ft2_popup_list.c)
 
 # Render selection to sample slot implementation
 target_sources(ft2-dxm PRIVATE src/ft2_slot_renderer.c)
+
+# DXI (DXM Instrument) standalone synth patch file save/load
+target_sources(ft2-dxm PRIVATE src/ft2_dxi.c)
+
+if(BUILD_TESTING)
+    add_test(NAME ft2_version COMMAND ft2-dxm --version)
+    add_test(NAME ft2_self_test COMMAND ft2-dxm --self-test)
+endif()

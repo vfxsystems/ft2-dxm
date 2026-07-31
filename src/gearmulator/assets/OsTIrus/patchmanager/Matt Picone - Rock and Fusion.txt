@@ -1,0 +1,186 @@
+February 16, 2004
+
+
+Friends, Virusians, and musicians of the world! 
+
+I am very pleased to offer you another soundset in honor of the Virus and its fantastic new OS features. I hope you’ll agree that the patches in this collection include some of the most enjoyable I’ve ever created. There are so many awesome possibilities with this synth its sounds almost take on a life of their own, evolving and striving towards a final musical purpose. I believe we own the world’s best synthesizer.
+
+More than “optimized this set was made specifically for Virus C, relying on the use of the new OS 6.5 filter types, the equalizers, extended modulation matrix architecture, and other features of the synth.
+
+As usual, the work I do is for you, the friends of Access, in gratitude to the creators of this wonderful instrument. While I would never imagine selling my sounds for money, I ask that you send me an email if you enjoy my programs or use my sounds in your musical endeavors. I very much enjoy hearing from you all.
+
+In closing, I thank you all for the inspiration to finalize, organize, and present, “The Return of M@”, my fourth soundset!
+
+
+Yours truly, 
+
+
+Matt Picone,
+Ringoes NJ
+matman@mysticworks.com
+
+PS: You’ll notice my new programmer’s signature is now just the @ symbol, without the previously prefixed “M”. I enjoyed having the extra space to create longer more communicative patch names. 
+THE RETURN OF M@
+USER GUIDE
+
+General Notes
+
+• Though not always ON, arp, phaser, chorus, OSC3 etc. are often “optimized” anyway.
+• Most of my soft knobs functions are set to CC15 and CC16
+•  I often use the category “Decay” for sounds designed for chord “comping”
+
+
+Program  Notes
+
+Aeternal @ -  Tap the keys to enter an eternal hall… hold any one to instantly reduce.
+Anaklav1 @ - Variations on a classic theme: the synth clav from before a synth COULD sound like a clav
+Anaklav2 @ - This one has a lush chorus
+Anaklav3 @ - And this one is more real sounding.
+AnlogFeel@ - Hey, it stays in tune too!
+AprilPad@ - I could listen to this one all day. I actually began this one on my Virus B
+AtariCr@sh - Those days in front of the 2600 so long ago…Can you name the game?
+BeautySyn@ - Made for intros, outros… but great all over!
+Before  @ - The latest word in infected organs
+BellLead @ - Modeled slightly on an old JV program
+BlackHole@ - In the constellation Cygnus…
+BladeRun @ - Replicant meets chopper?
+BPF+2P! @ - A perfect soundtrack pad; great behind guitar or vocals too.
+BrassKlav@ - Basically the same program as HornStab, but this one is really playable
+Bs2Pole! @ - First of 5 More in my BS series…
+BsBuster @ - Big punch… 
+BsKonKilr@ - Big bottom, inspired by a visit from Matt Stolley
+BsNoog  @ - The filter softknob determines which way it is evolving… 
+BsSpiral @ - Crunchy variant of a patch from my ORIGINAL Soundset
+BsTaurean@ - Got midi pedals? I do :)
+BsWaveSel@ - The softknob changes ‘OSC1+2 Wave’ in tandem
+BukRogers@ - in the 24th-and-a-half century?
+CanHappen@ - Strike hard and press for a little autobend aftertouch action.
+CommonTon@ - Three notes, one finger… Hi Phonk.
+CrstlCave@ - Wildly cycling waveforms in the depths of the earth
+Dancer  @ - Just add drum machine. 
+Deinos @ - Sound for a small moon.
+DelayLama@ - So many controls to play with!
+Dgtalrido@ - "Digital-Reedoo". Didge ala Virus
+DigiBel1,2,3,4 - A series of four chimes, each lovely and different from the others
+Dimril  @ - Pedal notes, turn up fear, then crank destroy as you release the pedal!
+DlayVerb!@ - Delay and reverb… At the same time!!!!?
+DoubleSyn@ - Layers for getting your funk all out.
+Dragons @ - Ready for a Discovery channel vignette
+DrownedP@d – Soaked in effects, still tight enough for single lines
+DrummerG8@ - A gated reverb patch. Nice arp too.
+Dryadae @ - This practically plays itself. Great layered on a pad for slow ambient lines
+DubChrdsM@ - Arp or play manually for random timbres. Adjust the delay time for your groove
+DWBelComp@ - homage to an old favorite
+ELP-ulse @ - A rich lively rock synth
+EP3DogNyt@ - Not quite as warbled as EPZeply… Built on a different base too.
+EP Res  @ - A nice sticky EP… energy makes it slightly more resonant, even!
+Fanfare @ - Impressionistic take on a sound for Aaron Copland and subsequent performers
+FeedBkSyn@ - If only virus ENV sync'd to midi clock! Amp decay to simulate
+Flangepad@ - Try the effects from this one with the inputs too. SO nice!
+Foogpad2P@ - Morph operates on timbre… Try with attack up and release down too
+Gently 1 @ - My all time favorite virus patch of all time. Did I mention “all time”?
+Gently 2 @ - That's randomness in the voice, great on a held arp…listen for hours
+GertLead @ - For the best Indigo player I know! 
+Gruvalimb@ - Just kind of happened, a groovy kalimba thing
+Halo Pad @ - Watch your speakers, Master Chief!
+Hammono @ - A killer heavy lead, also hasd cc4 Foot control for the filter
+Harmoshn2@ - Variation on one of my first Virus patches, an organ-esque piano pad thing
+Heroes  @ - Add some life to those terrible French horns in your ROMpler
+Hi*Lo Seq@ - A permutation of the "Dancer" program that was too good to exclude
+Himalysh@ - Cyber monks from the planet Himal
+Hornstab @ - Play lines in octaves for a less than hifi brass experience. Press for Sforzando!
+Industrng@ - Industrial mellotron
+Laura  @ - in memory of Theresa Banks
+LayerHold@ - Hold mode fun… Speed1 is entry time of the little visitor, Speed2 is departure, Filter balance keeps him away
+Ld4Quincy@ - Dr. Jones to the O.R., Dr Jones to the O.R.
+Ld-OB 82 @ - Eats polyphony for lunch to stay so FAT
+LeedSneed@ - Now you too can velo-wowmp with Sy Snootles
+LFantSqid@ - What do you get when you cross an El-Eph-Ant with that thing that washed up on the music bar? Let it go before it goes toooo far…
+LFOverkil@ - “Does not suck”
+LikeSkin @ - Smooth and soft, but with real form underneath
+LunarArp @ - Moonish madness here, especially with both soft knobs cranked
+Majman  @ - Chilled triads are always so “up” sounding.
+MalletStk@ - Tap and hold JUST long enough to hear two notes played by the arp
+Melodica @ - Or is it a Chromatic harmonica? Either way, LOADS of performance control!
+MixChime @ - Make your own tape and sneak it into the steeple
+Monterey @ - Wait for it… Wait for it… Feedback!!!
+MPianoHi @ - For upper 8vas staccato playing
+MPianoLo@ - haiku: Closer and closer. One of these days I’ll nail it. Dumb piano quest.
+MWSpitfyr@ - That's "Modulation-wheel controlled Spitfire" for the patch deciphering impaired.
+M@inTheBox - Just needs a POP! At the end.
+M@ Olympus - Another Soundtrack pad for your ascents to the myth shrouded heavens
+m@stock - Favorite lead of synth-jammers from seven countries
+NextOrbit@ - Resonant noise par excellence
+Nocoder @ - You can hear vowels and consonants if you get it just right
+Noog 4P @ - Isn't the delay terrible? I love it. Belongs in a bad ad from the 70s
+NumanesqM@ - Dual balance to control the two tones
+OrchBrass@ - The only survivor of my abandoned Horns0X series
+OrganDigi@ -Something familiar about this, though it's no clone of the D-50 or M-1
+PatiencPd@ - LONG envelopes
+p/g Chime@ - “The world weighs on my shoulders…”
+p/g Poly @ - The new filter REALLY is amazing. It eats polyphony on this one though.
+Phobos @ - For another small moon
+PizzaKato@ - dink dink dink dink dink. Bugs Bunny on Tiptoes.
+PoleNoise@ - The tightened version of “NextOrbit” for leads
+PowerPluk@ - Great rock comper, Also nice loosened up behind some reberb
+PPG Comp @ - Wavey EP gone wild. Randomized “EP Reso” turned out a keeper!
+ProlesLog@ - Adjust for the “just right” harmonic balance
+PVC Drum @ - PVC plus rubber sheeting and a handful of polystyrene beads. Arp for groove.
+Quintesnc@ - SO FAT without Unison mode!
+Quivery @ - Play quarter note chords behind some heavy prog
+ReedPad M@ - Weird thing I could never bring myself to evolve.
+RingDrone@ - Turn on the arp and this ringing drone takes on a whole new meaning
+S-1973 @ - Another Viral Psuedo Tron thanks to the new filter!
+Shredder @ - Pick noise?
+SineLang @ - The simplest sound I ever loved.
+SnareG@te - Another gated reverb, over my really lame snare drum.
+SpAcEvOx @ - Play a sci-fi theme make it mono2 for a cool effect.
+Spiritu @ - You wrote and said you wanted pads, so there ARE a lot of them in this set!
+Spitter @ - This and the next one are simple but useful leads…
+Splatter @ - And also good for some countermelody improve. 
+StpSeqMe!@ - The AsPlayed arp almost makes you think so, right?
+Stratpad @ - BETTER than the real thing through 50 effects
+StringSyn@ - Mix hi and lo notes to balance the tone… knobs to tweak. It works.
+StViolate@ - Play with dynamics and try the arp! For Shannon.
+StViolint@ -  The OSC VOL knob reduces aliasing, but its SO rich with filter saturation!
+Terraform@ - R-5-9 plus a little sub for harmonic content that really works.
+TouchGate@ - Another gate, this time melodic. Try chords lefty and solo over top in the groove.
+TremThing@ -  Just add drum machine, again.
+TrippyPad@ - Try as I did, I cound't fit the name "20,000 Leagues Under the Sea"
+TXStack86@ - You can't wait to hear this one. 1986 all over again for me.
+Upwards @ - Get out all your fingers and play a huge chord. Pedal. Say goodnight!
+Vampyr  @ - If Count Orlock had had a synth, I think it would have been a Redback.
+Venusian @ -  The atmosphere is mostly CO2, but this pad still breathes.
+V-Organ @ - Good old E-Organ meets the new 3P filter
+Warper  @ - Play with the FX Send to see what this one is all about
+Wind4p  @ - I leave the soft-knobs to YOU on this one. Can go anywhere. Needed re-visiting.
+Wired  @ - A more playable "Monterey" inspired by Sir Jeff. If you want to use the foot pedal, go in and change ModMatrix source 3 to OFF
+WireThing@ - The sound that took 2 years to perfect. Less is so much more.
+ x(o-o)x @ - Take me to your leader…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The Return of M@ - February 16, 2004
+© 2004 by Matt Picone Send an email “hello” to matman@mysticworks.com

@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+source "${script_dir}/linux-build-common.sh"
+
+repo_root=$(ft2_repo_root)
+build_dir="${FT2_RASPI_BUILD_DIR:-build-raspi-armhf}"
+build_type="${FT2_BUILD_TYPE:-Release}"
+jobs="${FT2_JOBS:-$(ft2_default_jobs)}"
+fresh=0
+run_tests=0
+native=0
+print_deps=0
+declare -a cmake_args=()
+
+usage() {
+    cat <<'EOF'
+Usage: ./scripts/build-raspi-alsa.sh [options] [-- extra-cmake-args...]
+
+Options:
+  --debug              Configure a Debug build.
+  --release            Configure a Release build. This is the default.
+  --native             Build natively on the current Raspberry Pi instead of cross-compiling.
+  --build-dir DIR      Use a custom CMake build directory.
+  --fresh              Remove and recreate the build directory before configuring.
+  --test               Run CTest after building. Only supported for native builds.
+  -j, --jobs N         Parallel build jobs. Defaults to detected CPU count.
+  --deps               Print expected Raspberry Pi ALSA dependencies and exit.
+  -h, --help           Show this help.
+
+Environment:
+  RASPI_TOOLCHAIN_PREFIX  Cross compiler prefix. Defaults to arm-linux-gnueabihf.
+  RASPI_SYSROOT           Optional Raspberry Pi sysroot with SDL2 and ALSA dev files.
+  SDL2_DIR                CMake SDL2 package directory inside the sysroot/prefix.
+  CMAKE_PREFIX_PATH       Extra CMake dependency roots.
+EOF
+}
+
+print_deps() {
+    cat <<'EOF'
+Required for native Raspberry Pi builds:
+  build-essential cmake libsdl2-dev libasound2-dev
+
+Required for Linux-hosted Raspberry Pi armhf cross-builds:
+  arm-linux-gnueabihf-gcc and arm-linux-gnueabihf-g++
+  Raspberry Pi sysroot with SDL2 and ALSA development files
+
+Common Debian/Ubuntu cross packages:
+  gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+Set RASPI_SYSROOT when dependencies are not installed in the compiler default sysroot.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --debug) build_type=Debug ;;
+        --release) build_type=Release ;;
+        --native) native=1 ;;
+        --build-dir)
+            shift
+            [ "$#" -gt 0 ] || ft2_die "--build-dir needs a directory"
+            build_dir=$1
+            ;;
+        --fresh) fresh=1 ;;
+        --test) run_tests=1 ;;
+        -j|--jobs)
+            option=$1
+            shift
+            [ "$#" -gt 0 ] || ft2_die "${option} needs a job count"
+            jobs=$1
+            ;;
+        --deps) print_deps=1 ;;
+        -h|--help) usage; exit 0 ;;
+        --)
+            shift
+            cmake_args+=("$@")
+            break
+            ;;
+        *) ft2_die "unknown option: $1" ;;
+    esac
+    shift
+done
+
+if [ "$print_deps" -eq 1 ]; then
+    print_deps
+    exit 0
+fi
+
+ft2_validate_jobs "$jobs"
+ft2_have cmake || ft2_die "cmake was not found in PATH."
+
+build_path=$(ft2_make_abs_path "$build_dir")
+if [ "$fresh" -eq 1 ]; then
+    case "$build_path" in
+        "$repo_root"/*|/tmp/*) rm -rf -- "$build_path" ;;
+        *) ft2_die "refusing to remove unsafe build directory: ${build_path}" ;;
+    esac
+fi
+
+cd -- "$repo_root"
+configure_cmd=(cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE="$build_type")
+
+if [ "$native" -eq 1 ]; then
+    :
+else
+    prefix="${RASPI_TOOLCHAIN_PREFIX:-arm-linux-gnueabihf}"
+    ft2_have "${prefix}-gcc" || ft2_die "${prefix}-gcc was not found. Run ./scripts/build-raspi-alsa.sh --deps."
+    ft2_have "${prefix}-g++" || ft2_die "${prefix}-g++ was not found. Run ./scripts/build-raspi-alsa.sh --deps."
+    configure_cmd+=(
+        -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-raspi-armhf.cmake
+        -DRASPI_TOOLCHAIN_PREFIX="$prefix"
+    )
+fi
+
+configure_cmd+=("${cmake_args[@]}")
+"${configure_cmd[@]}"
+
+cmake --build "$build_dir" --target ft2-dxm --parallel "$jobs"
+
+if [ "$run_tests" -eq 1 ]; then
+    [ "$native" -eq 1 ] || ft2_die "--test for Raspberry Pi cross-builds requires running on the target or an emulator"
+    ctest --test-dir "$build_dir" --output-on-failure --parallel "$jobs"
+fi
+
+printf 'Done. Raspberry Pi ALSA binary: %s/bin/ft2-dxm\n' "$build_path"
