@@ -15,6 +15,7 @@
 #include "ft2_bmp.h"
 #include "ft2_structs.h"
 #include "ft2_synth.h"
+#include "ft2_ostirus.h"
 #include "ft2_dexed.h"
 #include "ft2_v2.h"
 
@@ -1258,6 +1259,38 @@ void updateInstrumentTextBoxNames(void)
 				}
 
 				strncpy(song.instrName[instrNum], v2Name, 22);
+				song.instrName[instrNum][22] = '\0';
+			}
+			else if (instr[instrNum]->useOsTirus)
+			{
+				const int slot = ft2_ostirus_get_slot_for_instrument(instrNum);
+				const char *presetName = ft2_ostirus_get_current_preset_name_for_instrument(instrNum);
+				char oName[23];
+
+				if (presetName != NULL && *presetName)
+				{
+					if (slot >= 0)
+						snprintf(oName, sizeof(oName), "OT#%dS%d:%s", instrNum, slot, presetName);
+					else
+						snprintf(oName, sizeof(oName), "OT#%d:%s", instrNum, presetName);
+
+					if (strlen(oName) > 22)
+					{
+						if (slot >= 0)
+							snprintf(oName, sizeof(oName), "OT#%dS%d:%.8s", instrNum, slot, presetName);
+						else
+							snprintf(oName, sizeof(oName), "OT#%d:%.10s", instrNum, presetName);
+					}
+				}
+				else
+				{
+					if (slot >= 0)
+						snprintf(oName, sizeof(oName), "OT#%dS%d", instrNum, slot);
+					else
+						snprintf(oName, sizeof(oName), "OT#%d", instrNum);
+				}
+
+				strncpy(song.instrName[instrNum], oName, 22);
 				song.instrName[instrNum][22] = '\0';
 			}
 			// Prefer showing Tunefish4 status when enabled

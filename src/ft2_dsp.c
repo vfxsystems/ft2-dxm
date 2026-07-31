@@ -61,7 +61,11 @@ typedef struct
 
 typedef struct { float *bufL,*bufR; uint32_t bufSize,writePos; float lfoPhase,lfoInc; } chorusState_t;
 typedef struct { float *bufL, *bufR; uint32_t bufSize, writePos; float lfoPhase, lfoInc; float feedback; } flangerState_t;
-typedef struct { float a[6], x1[6], y1[6], lfoPhase, lfoInc; float lastOutL, lastOutR; } phaserState_t;
+
+#define PHASER_STAGES 4
+#define PHASER_STATE_SLOTS (PHASER_STAGES * 2)
+
+typedef struct { float x1[PHASER_STATE_SLOTS], y1[PHASER_STATE_SLOTS], lfoPhase, lfoInc; float lastOutL, lastOutR; } phaserState_t;
 
 // 5-band Parametric EQ state (Direct Form II transposed)
 typedef struct {
@@ -640,7 +644,7 @@ void dspResetEffectState(dspEffectInstance_t *inst)
                 st->lfoPhase = 0.0f;
                 st->lastOutL = 0.0f;
                 st->lastOutR = 0.0f;
-                for (int i = 0; i < 6; i++)
+                for (int i = 0; i < PHASER_STATE_SLOTS; i++)
                 {
                     st->x1[i] = 0.0f;
                     st->y1[i] = 0.0f;
@@ -1389,7 +1393,6 @@ static void dspProcessPhaser(struct dspEffectInstance_t *inst, float *bufL, floa
     float stereoOff    = inst->params.phaser.stereoOffset * 2.0f * M_PI;
     // update LFO increment
     st->lfoInc = 2.0f * M_PI * rateHz / inst->sampleRate;
-    const int stages = 4;
     for (uint32_t i = 0; i < frames; i++) {
         // compute per-sample LFO phases
         float phaseL = st->lfoPhase;
@@ -1406,11 +1409,11 @@ static void dspProcessPhaser(struct dspEffectInstance_t *inst, float *bufL, floa
         float lfoR = sinf(phaseR) * 0.5f + 0.5f;
         float acoefR = depth * lfoR;
         // cascade stages
-        for (int s = 0; s < stages; s++) {
+        for (int s = 0; s < PHASER_STAGES; s++) {
             float yL = acoefL * xpL + st->x1[s] - acoefL * st->y1[s];
-            float yR = acoefR * xpR + st->x1[s+stages] - acoefR * st->y1[s+stages];
+            float yR = acoefR * xpR + st->x1[s+PHASER_STAGES] - acoefR * st->y1[s+PHASER_STAGES];
             st->x1[s] = xpL; st->y1[s] = yL;
-            st->x1[s+stages] = xpR; st->y1[s+stages] = yR;
+            st->x1[s+PHASER_STAGES] = xpR; st->y1[s+PHASER_STAGES] = yR;
             xpL = yL; xpR = yR;
         }
         // store output for feedback

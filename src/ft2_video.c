@@ -40,6 +40,7 @@
 #include "ft2_mixer_gui.h"
 #include "ft2_dsp_editor.h"
 #include "ft2_v2_complete_layout.h"
+#include "ft2_ostirus_complete_layout.h"
 
 
 static const uint8_t textCursorData[12] =
@@ -1043,6 +1044,11 @@ void handleRedrawing(void)
 			{
 				// Render V2 editor
 				v2_render_complete_layout(g_active_v2_layout);
+			}
+			else if (ins->useOsTirus && g_active_ostirus_layout != NULL)
+			{
+				// Render OsTIrus editor
+				osti_render_complete_layout(g_active_ostirus_layout);
 			}
 			else if (ins->useDexed && g_dexed_layout_singleton != NULL)
 			{

@@ -24,21 +24,41 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifdef FT2_OSTIRUS_EMBEDDED_ZIP
+extern "C" {
+extern const unsigned char ft2_ostirusdat_zip[];
+extern const size_t ft2_ostirusdat_zip_len;
+}
+#endif
 
 #ifndef MAX_INST
 #define MAX_INST 128
 #endif
 
-#define OSTI_DEBUG_ENABLED 1
+#ifndef OSTI_DEBUG_ENABLED
+#define OSTI_DEBUG_ENABLED 0
+#endif
 
 #if OSTI_DEBUG_ENABLED
 #define OSTI_DEBUG(fmt, ...) do { std::printf("[OSTIRUS] " fmt "\n", ##__VA_ARGS__); std::fflush(stdout); } while (0)
 #else
 #define OSTI_DEBUG(fmt, ...)
 #endif
+
+// Guards every access to g_slots / OsTirusSlot::device against concurrent use from
+// the audio callback thread (render, and MIDI dispatched from pattern playback) and
+// the main/UI thread (editor knob/preset changes, instrument (re)assignment, DXM/DXI
+// load) - both of which call into the same virusLib::Device instances. Recursive so
+// that functions which call other guarded functions internally (e.g. render() calling
+// render_for_channel(), or deserialize_state() falling back to
+// load_factory_preset_for_instrument()) don't deadlock on themselves.
+static std::recursive_mutex g_ostirusMutex;
+#define OSTIRUS_LOCK_GUARD() std::lock_guard<std::recursive_mutex> ostirusLock(g_ostirusMutex)
 
 struct OsTirusSlot
 {
@@ -48,6 +68,18 @@ struct OsTirusSlot
     int currentPreset = -1;
     int activeNotes = 0;
     std::array<float, 256> paramCache{};
+
+    /* Persistent render scratch storage (RT-safe, grow-only; sized lazily on
+       first render call, then only ever grown). Eliminates per-block heap
+       allocation on the audio thread. */
+    std::vector<float> scratchZero;
+    std::array<std::vector<float>, 12> scratchOut;
+    std::vector<synthLib::SMidiEvent> scratchMidiIn;
+    std::vector<synthLib::SMidiEvent> scratchMidiOut;
+
+    /* Samples remaining to keep rendering after the last note-off, so
+       release/reverb/delay tails aren't cut short. 0 means fully idle. */
+    int tailRemainingSamples = 0;
 
     OsTirusSlot()
     {
@@ -74,9 +106,15 @@ static const char *const k_ostirus_category_names[FT2_OSTIRUS_MAX_CATEGORIES] =
 
 static bool g_initialized = false;
 static int g_sampleRate = 44100;
+
+/* Approximate max audible decay of the Virus TI's onboard delay/reverb and
+   release/decay envelope stages after the last note-off. 4s covers the large
+   majority of factory/user patches without rendering idle slots indefinitely. */
+static const double k_ostirus_tail_hold_seconds = 4.0;
 static std::vector<uint8_t> g_romData;
 static std::vector<uint8_t> g_patchDbData;
 static std::string g_romPath;
+static std::string g_homePath;
 static virusLib::DeviceModel g_romModel = virusLib::DeviceModel::Invalid;
 static std::vector<OsTirusPresetEntry> g_presetEntries;
 static int g_defaultPresetIndex = -1;
@@ -288,6 +326,128 @@ namespace
         return true;
     }
 
+    static bool load_zip_payload_from_memory(const uint8_t *zipBytes, size_t zipSize, const std::string &entryName, std::vector<uint8_t> &out)
+    {
+        if (!zipBytes || zipSize == 0)
+            return false;
+
+        std::vector<uint8_t> zipData(zipBytes, zipBytes + zipSize);
+        return extract_zip_entry(zipData, entryName, out);
+    }
+
+    static std::string normalize_dir(std::string path)
+    {
+        for (char &ch : path)
+        {
+            if (ch == '\\')
+                ch = '/';
+        }
+
+        while (!path.empty() && path.back() == '/')
+            path.pop_back();
+
+        return path;
+    }
+
+    static std::string join_dir_file(const std::string &dir, const std::string &file)
+    {
+        if (dir.empty())
+            return file;
+        if (dir.back() == '/' || dir.back() == '\\')
+            return dir + file;
+        return dir + "/" + file;
+    }
+
+    static std::string runtime_ostirus_dir(void)
+    {
+        std::string modulePath = normalize_dir(synthLib::getModulePath());
+        if (modulePath.empty())
+            modulePath = normalize_dir(baseLib::filesystem::getCurrentDirectory());
+        return join_dir_file(modulePath, "OsTIrus");
+    }
+
+    static bool file_matches_size(const std::string &path, size_t expectedSize)
+    {
+        std::vector<uint8_t> data;
+        if (!read_file(path, data))
+            return false;
+        return data.size() == expectedSize;
+    }
+
+    static bool write_file_bytes(const std::string &path, const std::vector<uint8_t> &data)
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        if (!f)
+            return false;
+        if (!data.empty())
+            f.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
+        return f.good();
+    }
+
+    static bool extract_embedded_asset_entry(const std::string &assetDir, const char *entryName, std::vector<uint8_t> *outData)
+    {
+#ifdef FT2_OSTIRUS_EMBEDDED_ZIP
+        std::vector<uint8_t> data;
+        if (!load_zip_payload_from_memory(ft2_ostirusdat_zip, ft2_ostirusdat_zip_len, entryName, data))
+            return false;
+
+        const std::string path = join_dir_file(assetDir, entryName);
+        if (!file_matches_size(path, data.size()))
+        {
+            if (!write_file_bytes(path, data))
+            {
+                OSTI_DEBUG("Failed to extract embedded '%s' to '%s'", entryName, path.c_str());
+                return false;
+            }
+            OSTI_DEBUG("Extracted embedded '%s' to '%s' (%zu bytes)", entryName, path.c_str(), data.size());
+        }
+
+        if (outData)
+            *outData = std::move(data);
+        return true;
+#else
+        (void)assetDir;
+        (void)entryName;
+        (void)outData;
+        return false;
+#endif
+    }
+
+    static bool ensure_embedded_assets_extracted(std::vector<uint8_t> *romOut, std::vector<uint8_t> *cacheOut, std::string *romPathOut)
+    {
+#ifdef FT2_OSTIRUS_EMBEDDED_ZIP
+        const std::string assetDir = runtime_ostirus_dir();
+        if (assetDir.empty())
+            return false;
+
+        (void)baseLib::filesystem::createDirectory(assetDir);
+        g_homePath = assetDir;
+
+        std::vector<uint8_t> romData;
+        std::vector<uint8_t> cacheData;
+        if (!extract_embedded_asset_entry(assetDir, "rom.bin", &romData))
+            return false;
+
+        (void)extract_embedded_asset_entry(assetDir, "patchdb.cache", &cacheData);
+        if (cacheData.empty())
+            (void)extract_embedded_asset_entry(assetDir, "patchmanagerdb.cache", &cacheData);
+
+        if (romOut)
+            *romOut = std::move(romData);
+        if (cacheOut)
+            *cacheOut = std::move(cacheData);
+        if (romPathOut)
+            *romPathOut = join_dir_file(assetDir, "rom.bin");
+
+        return true;
+#else
+        (void)romOut;
+        (void)cacheOut;
+        (void)romPathOut;
+        return false;
+#endif
+    }
+
     static std::vector<std::string> build_asset_roots(void)
     {
         std::vector<std::string> roots;
@@ -317,6 +477,16 @@ namespace
 
     static bool try_load_asset_zip(std::vector<uint8_t> &romOut, std::vector<uint8_t> &cacheOut, std::string &romPathOut)
     {
+#ifdef FT2_OSTIRUS_EMBEDDED_ZIP
+        if (ensure_embedded_assets_extracted(&romOut, &cacheOut, &romPathOut))
+        {
+            OSTI_DEBUG("Loaded embedded ROM from extracted runtime asset '%s' (%zu bytes)", romPathOut.c_str(), romOut.size());
+            if (!cacheOut.empty())
+                OSTI_DEBUG("Loaded embedded patch cache from extracted runtime assets (%zu bytes)", cacheOut.size());
+            return true;
+        }
+#endif
+
         const std::vector<std::string> roots = build_asset_roots();
         const char *zipCandidates[] = {
             "src/gearmulator/assets/otstirusdat.zip",
@@ -824,7 +994,7 @@ static OsTirusSlot *slot_for_instr(int instrID, bool create)
             params.romName = g_romPath;
             params.romData = g_romData;
             params.customData = static_cast<uint32_t>(g_romModel);
-            params.homePath = "OsTIrus";
+            params.homePath = g_homePath.empty() ? runtime_ostirus_dir() : g_homePath;
 
             try
             {
@@ -893,8 +1063,9 @@ static bool apply_preset_to_slot(OsTirusSlot *slot, int instrID, int presetIndex
 
     std::vector<synthLib::SMidiEvent> events;
     std::vector<synthLib::SMidiEvent> midiOut;
-    push_midi(events, slot->midiChannel, 0xB0, 0, 0);
-    push_midi(events, slot->midiChannel, 0xB0, 32, static_cast<uint8_t>(entry.bank & 0x7F));
+    // ROMFile uses zero-based bank indexes, while the Virus MIDI bank byte is
+    // one-based because 0 represents the edit buffer in gearmulator.
+    push_midi(events, slot->midiChannel, 0xB0, 32, static_cast<uint8_t>((entry.bank + 1) & 0x7F));
     push_midi(events, slot->midiChannel, 0xC0, static_cast<uint8_t>(entry.program & 0x7F), 0);
     process_slot_events(slot, events, midiOut);
     populate_param_cache_from_preset(slot, preset);
@@ -921,10 +1092,20 @@ static int current_preset_index_for_instr(int instrID)
     return -1;
 }
 
+static void ensure_scratch_size(std::vector<float> &buf, size_t sizeNeeded)
+{
+    /* Grow-only resize: never shrinks, so a slot's scratch buffers only ever
+       allocate a handful of times total (whenever a strictly larger nsamples
+       is requested than ever seen before), never on a per-block basis. */
+    if (buf.size() < sizeNeeded)
+        buf.resize(sizeNeeded, 0.0f);
+}
+
 extern "C" {
 
 void ft2_ostirus_init(int samplerate)
 {
+    OSTIRUS_LOCK_GUARD();
     g_sampleRate = samplerate > 0 ? samplerate : 44100;
     g_patchDbData.clear();
     g_initialized = load_rom_if_needed();
@@ -941,6 +1122,7 @@ void ft2_ostirus_init(int samplerate)
 
 void ft2_ostirus_shutdown(void)
 {
+    OSTIRUS_LOCK_GUARD();
     ft2_ostirus_panic();
     for (auto &slot : g_slots)
         slot = OsTirusSlot();
@@ -950,12 +1132,14 @@ void ft2_ostirus_shutdown(void)
     g_romData.clear();
     g_patchDbData.clear();
     g_romPath.clear();
+    g_homePath.clear();
     g_romModel = virusLib::DeviceModel::Invalid;
     g_initialized = false;
 }
 
 bool ft2_ostirus_is_initialized(void)
 {
+    OSTIRUS_LOCK_GUARD();
     return g_initialized;
 }
 
@@ -970,28 +1154,43 @@ void ft2_ostirus_render_for_channel(int instrID, float *bufL, float *bufR, int n
         std::memset(bufR, 0, sizeof(float) * static_cast<size_t>(nsamples));
     }
 
+    OSTIRUS_LOCK_GUARD();
+
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     if (!slot || !slot->device)
         return;
 
-    std::vector<float> zero(static_cast<size_t>(nsamples), 0.0f);
-    std::array<std::vector<float>, 12> outStorage;
-    for (auto &out : outStorage)
-        out.assign(static_cast<size_t>(nsamples), 0.0f);
+    /* Render gate: no notes held and any post-release tail has fully
+       decayed, so skip the DSP call entirely. Output is already correct
+       silence (either just zeroed above, or left untouched when add != 0). */
+    if (slot->activeNotes <= 0 && slot->tailRemainingSamples <= 0)
+        return;
 
-    synthLib::TAudioInputs inputs = { zero.data(), zero.data(), nullptr, nullptr };
+    const size_t n = static_cast<size_t>(nsamples);
+
+    ensure_scratch_size(slot->scratchZero, n);
+
+    for (auto &out : slot->scratchOut)
+    {
+        ensure_scratch_size(out, n);
+        /* Output buffers are written with += accumulation semantics inside
+           the DSP, so (unlike scratchZero) they must be re-zeroed every call. */
+        std::memset(out.data(), 0, sizeof(float) * n);
+    }
+
+    synthLib::TAudioInputs inputs = { slot->scratchZero.data(), slot->scratchZero.data(), nullptr, nullptr };
     synthLib::TAudioOutputs outputs = {
-        outStorage[0].data(), outStorage[1].data(),
-        outStorage[2].data(), outStorage[3].data(),
-        outStorage[4].data(), outStorage[5].data(),
-        outStorage[6].data(), outStorage[7].data(),
-        outStorage[8].data(), outStorage[9].data(),
-        outStorage[10].data(), outStorage[11].data()
+        slot->scratchOut[0].data(),  slot->scratchOut[1].data(),
+        slot->scratchOut[2].data(),  slot->scratchOut[3].data(),
+        slot->scratchOut[4].data(),  slot->scratchOut[5].data(),
+        slot->scratchOut[6].data(),  slot->scratchOut[7].data(),
+        slot->scratchOut[8].data(),  slot->scratchOut[9].data(),
+        slot->scratchOut[10].data(), slot->scratchOut[11].data()
     };
 
-    std::vector<synthLib::SMidiEvent> midiIn;
-    std::vector<synthLib::SMidiEvent> midiOut;
-    slot->device->process(inputs, outputs, static_cast<size_t>(nsamples), midiIn, midiOut);
+    slot->scratchMidiIn.clear();
+    slot->scratchMidiOut.clear();
+    slot->device->process(inputs, outputs, n, slot->scratchMidiIn, slot->scratchMidiOut);
 
     for (int i = 0; i < nsamples; ++i)
     {
@@ -999,11 +1198,21 @@ void ft2_ostirus_render_for_channel(int instrID, float *bufL, float *bufR, int n
         float r = 0.0f;
         for (int pair = 0; pair < 6; ++pair)
         {
-            l += outStorage[static_cast<size_t>(pair * 2)][static_cast<size_t>(i)];
-            r += outStorage[static_cast<size_t>(pair * 2 + 1)][static_cast<size_t>(i)];
+            l += slot->scratchOut[static_cast<size_t>(pair * 2)][static_cast<size_t>(i)];
+            r += slot->scratchOut[static_cast<size_t>(pair * 2 + 1)][static_cast<size_t>(i)];
         }
         bufL[i] += l;
         bufR[i] += r;
+    }
+
+    /* Tail countdown: only relevant when in the "no active notes, tail still
+       ringing" state (the only way to reach here with activeNotes <= 0 is
+       with tailRemainingSamples > 0, per the gate above). */
+    if (slot->activeNotes <= 0 && slot->tailRemainingSamples > 0)
+    {
+        slot->tailRemainingSamples -= nsamples;
+        if (slot->tailRemainingSamples < 0)
+            slot->tailRemainingSamples = 0;
     }
 }
 
@@ -1018,6 +1227,8 @@ void ft2_ostirus_render(float *bufL, float *bufR, int nsamples, int add)
         std::memset(bufR, 0, sizeof(float) * static_cast<size_t>(nsamples));
     }
 
+    OSTIRUS_LOCK_GUARD();
+
     for (const auto &slot : g_slots)
     {
         if (slot.instrID > 0 && slot.device && instr[slot.instrID] && instr[slot.instrID]->useOsTirus)
@@ -1027,6 +1238,8 @@ void ft2_ostirus_render(float *bufL, float *bufR, int nsamples, int add)
 
 void ft2_ostirus_send_midi_to_instrument(int instrID, uint8_t status, uint8_t data1, uint8_t data2)
 {
+    OSTIRUS_LOCK_GUARD();
+
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     if (!slot || !slot->device)
         return;
@@ -1041,7 +1254,17 @@ void ft2_ostirus_send_midi_to_instrument(int instrID, uint8_t status, uint8_t da
     else if (type == 0x80 || (type == 0x90 && data2 == 0))
     {
         if (slot->activeNotes > 0)
+        {
             slot->activeNotes--;
+
+            /* Arm the tail-hold countdown exactly on the transition to zero
+               active notes, so release/reverb/delay tails aren't cut short. */
+            if (slot->activeNotes == 0)
+            {
+                slot->tailRemainingSamples =
+                    static_cast<int>(k_ostirus_tail_hold_seconds * static_cast<double>(g_sampleRate));
+            }
+        }
     }
 
     process_slot_events(slot, events, response);
@@ -1049,6 +1272,8 @@ void ft2_ostirus_send_midi_to_instrument(int instrID, uint8_t status, uint8_t da
 
 void ft2_ostirus_panic(void)
 {
+    OSTIRUS_LOCK_GUARD();
+
     for (auto &slot : g_slots)
     {
         if (!slot.device || slot.instrID <= 0)
@@ -1057,17 +1282,20 @@ void ft2_ostirus_panic(void)
         ft2_ostirus_send_midi_to_instrument(slot.instrID, static_cast<uint8_t>(0xB0 | slot.midiChannel), 123, 0);
         ft2_ostirus_send_midi_to_instrument(slot.instrID, static_cast<uint8_t>(0xB0 | slot.midiChannel), 120, 0);
         slot.activeNotes = 0;
+        slot.tailRemainingSamples = 0; /* force immediate render-gate silence */
     }
 }
 
 int ft2_ostirus_get_factory_preset_count(void)
 {
+    OSTIRUS_LOCK_GUARD();
     scan_presets_if_needed();
     return static_cast<int>(g_presetEntries.size());
 }
 
 const char *ft2_ostirus_get_factory_preset_name(int index)
 {
+    OSTIRUS_LOCK_GUARD();
     scan_presets_if_needed();
     if (index < 0 || index >= static_cast<int>(g_presetEntries.size()))
         return nullptr;
@@ -1076,6 +1304,7 @@ const char *ft2_ostirus_get_factory_preset_name(int index)
 
 const char *ft2_ostirus_get_factory_preset_plain_name(int index)
 {
+    OSTIRUS_LOCK_GUARD();
     scan_presets_if_needed();
     if (index < 0 || index >= static_cast<int>(g_presetEntries.size()))
         return nullptr;
@@ -1084,24 +1313,28 @@ const char *ft2_ostirus_get_factory_preset_plain_name(int index)
 
 int ft2_ostirus_get_factory_preset_bank(int index)
 {
+    OSTIRUS_LOCK_GUARD();
     const OsTirusPresetEntry *entry = preset_entry_for_index(index);
     return entry ? entry->bank : -1;
 }
 
 int ft2_ostirus_get_factory_preset_program(int index)
 {
+    OSTIRUS_LOCK_GUARD();
     const OsTirusPresetEntry *entry = preset_entry_for_index(index);
     return entry ? entry->program : -1;
 }
 
 int ft2_ostirus_get_factory_preset_category1(int index)
 {
+    OSTIRUS_LOCK_GUARD();
     const OsTirusPresetEntry *entry = preset_entry_for_index(index);
     return entry ? entry->category1 : 0;
 }
 
 int ft2_ostirus_get_factory_preset_category2(int index)
 {
+    OSTIRUS_LOCK_GUARD();
     const OsTirusPresetEntry *entry = preset_entry_for_index(index);
     return entry ? entry->category2 : 0;
 }
@@ -1115,6 +1348,7 @@ const char *ft2_ostirus_get_category_name(int categoryIndex)
 
 const char *ft2_ostirus_get_rom_model_name(void)
 {
+    OSTIRUS_LOCK_GUARD();
     static std::string modelName;
     modelName = virusLib::getModelName(g_romModel);
     if (modelName.empty())
@@ -1124,6 +1358,7 @@ const char *ft2_ostirus_get_rom_model_name(void)
 
 int ft2_ostirus_find_factory_preset(int bank, int program)
 {
+    OSTIRUS_LOCK_GUARD();
     scan_presets_if_needed();
 
     for (size_t i = 0; i < g_presetEntries.size(); ++i)
@@ -1138,11 +1373,13 @@ int ft2_ostirus_find_factory_preset(int bank, int program)
 
 int ft2_ostirus_get_default_factory_preset_index(void)
 {
+    OSTIRUS_LOCK_GUARD();
     return default_preset_index();
 }
 
 int ft2_ostirus_load_factory_preset_for_instrument(int instrID, int index)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     if (!slot || !slot->device)
         return 0;
@@ -1151,17 +1388,20 @@ int ft2_ostirus_load_factory_preset_for_instrument(int instrID, int index)
 
 int ft2_ostirus_get_current_preset_for_instrument(int instrID)
 {
+    OSTIRUS_LOCK_GUARD();
     return current_preset_index_for_instr(instrID);
 }
 
 const char *ft2_ostirus_get_current_preset_name_for_instrument(int instrID)
 {
+    OSTIRUS_LOCK_GUARD();
     const OsTirusPresetEntry *entry = preset_entry_for_index(current_preset_index_for_instr(instrID));
     return entry ? entry->displayName.c_str() : nullptr;
 }
 
 void ft2_ostirus_set_param_for_instrument(int instrID, int paramId, float value)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     if (!slot || !slot->device)
         return;
@@ -1195,6 +1435,7 @@ void ft2_ostirus_set_param_for_instrument(int instrID, int paramId, float value)
 
 float ft2_ostirus_get_param_for_instrument(int instrID, int paramId)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     if (!slot || !slot->device)
         return 0.5f;
@@ -1207,18 +1448,207 @@ float ft2_ostirus_get_param_for_instrument(int instrID, int paramId)
 
 int ft2_ostirus_get_active_voice_count(int instrID)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, false);
     return slot ? slot->activeNotes : 0;
 }
 
+namespace
+{
+    struct OstirusParamName
+    {
+        int paramId;
+        const char *name;
+    };
+
+    /* Transcribed from the editor's own control schema
+       (ft2_ostirus_complete_layout_schema.c) so the macro-map parameter picker shows
+       the same names the OsTIrus editor screen itself uses. A handful of CC numbers
+       below 128 are reused by the real Virus TI hardware for two mutually-exclusive
+       purposes depending on which front-panel page is active (Arpeggiator vs.
+       Chorus/Delay effects) - those are labelled with both meanings rather than
+       silently picking one. */
+    const OstirusParamName k_ostirusParamNames[] = {
+        { 7,   "Channel Volume" },
+        { 8,   "Balance" },
+        { 10,  "Panorama" },
+        { 11,  "Expression" },
+        { 17,  "Osc1 Shape" },
+        { 18,  "Osc1 Pulse Width" },
+        { 19,  "Osc1 Wavetable" },
+        { 20,  "Osc1 Semitone" },
+        { 21,  "Osc1 Key Follow" },
+        { 22,  "Osc2 Shape" },
+        { 23,  "Osc2 Pulse Width" },
+        { 24,  "Osc2 Wave Select" },
+        { 26,  "Osc2 Detune" },
+        { 27,  "Osc2 FM Amount" },
+        { 28,  "Osc2 Sync" },
+        { 31,  "Osc2 Key Follow" },
+        { 32,  "Bank Select" },
+        { 33,  "Osc Balance" },
+        { 34,  "SubOsc Volume" },
+        { 35,  "SubOsc Shape" },
+        { 36,  "Osc Main Volume" },
+        { 37,  "Noise Volume" },
+        { 39,  "Noise Color" },
+        { 40,  "Cutoff" },
+        { 41,  "Cutoff 2" },
+        { 42,  "Filter1 Resonance" },
+        { 43,  "Filter2 Resonance" },
+        { 44,  "Filter1 Env Amount" },
+        { 45,  "Filter2 Env Amount" },
+        { 46,  "Filter1 Key Follow" },
+        { 47,  "Filter2 Key Follow" },
+        { 48,  "Filter Balance" },
+        { 49,  "Saturation Curve" },
+        { 50,  "Ringmod Volume" },
+        { 51,  "Filter1 Mode" },
+        { 52,  "Filter2 Mode" },
+        { 53,  "Filter Routing" },
+        { 54,  "Filter Env Attack" },
+        { 55,  "Filter Env Decay" },
+        { 56,  "Filter Env Sustain" },
+        { 57,  "Filter Env Sustain Time" },
+        { 58,  "Filter Env Release" },
+        { 59,  "Amp Env Attack" },
+        { 60,  "Amp Env Decay" },
+        { 61,  "Amp Env Sustain" },
+        { 62,  "Amp Env Sustain Time" },
+        { 63,  "Amp Env Release" },
+        { 64,  "Hold (Sustain)" },
+        { 65,  "Portamento" },
+        { 66,  "Sostenuto" },
+        { 67,  "LFO1 Rate" },
+        { 68,  "LFO1 Shape" },
+        { 69,  "LFO1 Env Mode" },
+        { 70,  "LFO1 Mode" },
+        { 71,  "LFO1 Symmetry" },
+        { 72,  "LFO1 Key Follow" },
+        { 73,  "LFO1 Key Trigger" },
+        { 74,  "LFO1 -> Osc1 Amount" },
+        { 75,  "LFO1 -> Osc2 Amount" },
+        { 78,  "LFO1 -> Filter Gain Amount" },
+        { 79,  "LFO2 Rate" },
+        { 80,  "LFO2 Shape" },
+        { 81,  "LFO2 Env Mode" },
+        { 82,  "LFO2 Mode" },
+        { 83,  "LFO2 Symmetry" },
+        { 84,  "LFO2 Key Follow" },
+        { 85,  "LFO2 Key Trigger" },
+        { 86,  "LFO2 Shape Amount" },
+        { 87,  "LFO2 -> FM Amount" },
+        { 88,  "LFO2 -> Cutoff1 Amount" },
+        { 89,  "LFO2 -> Cutoff2 Amount" },
+        { 90,  "LFO2 -> Pan Amount" },
+        { 91,  "Patch Volume" },
+        { 93,  "Transpose" },
+        { 94,  "Key Mode" },
+        { 102, "Arp Mode" },
+        { 103, "Arp Range / Chorus Type" },
+        { 104, "Arp Clock / Chorus Mix 2" },
+        { 105, "Arp Tempo / Chorus Mix" },
+        { 106, "Arp Direction / Chorus Rate" },
+        { 107, "Arp Pattern / Chorus Depth" },
+        { 108, "Arp Note Order / Chorus Delay" },
+        { 109, "Arp Velocity / Chorus Feedback" },
+        { 110, "Chorus LFO Shape" },
+        { 111, "Arp User Pattern Length" },
+        { 112, "Delay Mode" },
+        { 113, "Delay Send" },
+        { 114, "Delay Time" },
+        { 115, "Delay Feedback" },
+        { 116, "Delay Decay" },
+        { 117, "Delay Depth" },
+        { 118, "Delay LFO Shape" },
+        { 119, "Delay Color" },
+        { 192, "Mod Slot 1 Source" },
+        { 193, "Mod Slot 1 Amount" },
+        { 194, "Mod Slot 1 Destination" },
+        { 195, "Mod Slot 2 Source" },
+        { 196, "Mod Slot 2 Amount" },
+        { 197, "Mod Slot 2 Destination" },
+        { 198, "Mod Slot 3 Source" },
+        { 199, "Mod Slot 3 Amount" },
+        { 200, "Mod Slot 3 Destination" },
+        { 201, "Mod Slot 4 Source" },
+        { 202, "Mod Slot 4 Amount" },
+        { 203, "Mod Slot 4 Destination" },
+        { 204, "Mod Slot 5 Source" },
+        { 205, "Mod Slot 5 Amount" },
+        { 206, "Mod Slot 5 Destination" },
+        { 207, "Mod Slot 6 Source" },
+        { 208, "Mod Slot 6 Amount" },
+        { 209, "Mod Slot 6 Destination" },
+        { 210, "Mod Slot 7 Source" },
+        { 211, "Mod Slot 7 Amount" },
+        { 212, "Mod Slot 7 Destination" },
+        { 213, "Mod Slot 8 Source" },
+        { 214, "Mod Slot 8 Amount" },
+        { 215, "Mod Slot 8 Destination" },
+        { 216, "Mod Slot 9 Source" },
+        { 217, "Mod Slot 9 Amount" },
+        { 218, "Mod Slot 9 Destination" },
+        { 219, "Mod Slot 10 Source" },
+        { 220, "Mod Slot 10 Amount" },
+        { 221, "Mod Slot 10 Destination" },
+        { 222, "Mod Slot 11 Source" },
+        { 223, "Mod Slot 11 Amount" },
+        { 224, "Mod Slot 11 Destination" },
+        { 225, "Mod Slot 12 Source" },
+        { 226, "Mod Slot 12 Amount" },
+        { 227, "Mod Slot 12 Destination" },
+        { 228, "Mod Slot 13 Source" },
+        { 229, "Mod Slot 13 Amount" },
+        { 230, "Mod Slot 13 Destination" },
+        { 231, "Mod Slot 14 Source" },
+        { 232, "Mod Slot 14 Amount" },
+        { 233, "Mod Slot 14 Destination" },
+        { 234, "Mod Slot 15 Source" },
+        { 235, "Mod Slot 15 Amount" },
+        { 236, "Mod Slot 15 Destination" },
+        { 237, "Mod Slot 16 Source" },
+        { 238, "Mod Slot 16 Amount" },
+        { 239, "Mod Slot 16 Destination" },
+    };
+
+    constexpr int k_ostirusParamNameCount = static_cast<int>(sizeof(k_ostirusParamNames) / sizeof(k_ostirusParamNames[0]));
+} // namespace
+
+int ft2_ostirus_get_param_count(void)
+{
+    /* Matches OsTirusSlot::paramCache's addressable range (0..127 = raw MIDI CC,
+       128..255 = extended sysex-addressed parameters such as mod-matrix slots). */
+    return 256;
+}
+
+const char *ft2_ostirus_get_param_name(int paramId)
+{
+    for (int i = 0; i < k_ostirusParamNameCount; ++i)
+    {
+        if (k_ostirusParamNames[i].paramId == paramId)
+            return k_ostirusParamNames[i].name;
+    }
+    return nullptr;
+}
+
+bool ft2_ostirus_has_pending_audio(int instrID)
+{
+    OSTIRUS_LOCK_GUARD();
+    OsTirusSlot *slot = slot_for_instr(instrID, false);
+    return slot && (slot->activeNotes > 0 || slot->tailRemainingSamples > 0);
+}
+
 int ft2_ostirus_assign_slot_for_instrument(int instrID)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     return slot ? slot->midiChannel : -1;
 }
 
 int ft2_ostirus_get_slot_for_instrument(int instrID)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, false);
     if (slot)
         return slot->midiChannel;
@@ -1231,6 +1661,7 @@ int ft2_ostirus_get_slot_for_instrument(int instrID)
 
 void ft2_ostirus_release_instrument(int instrID)
 {
+    OSTIRUS_LOCK_GUARD();
     const int idx = instr_index(instrID);
     if (idx < 0)
         return;
@@ -1257,6 +1688,7 @@ void ft2_ostirus_release_instrument(int instrID)
 
 size_t ft2_ostirus_serialize_state(int instrID, uint8_t *outBuf, size_t bufSize)
 {
+    OSTIRUS_LOCK_GUARD();
     OsTirusSlot *slot = slot_for_instr(instrID, true);
     if (!slot)
         return 0;
@@ -1291,6 +1723,7 @@ size_t ft2_ostirus_serialize_state(int instrID, uint8_t *outBuf, size_t bufSize)
 
 int ft2_ostirus_deserialize_state(int instrID, const uint8_t *data, size_t size)
 {
+    OSTIRUS_LOCK_GUARD();
     if (!data || size < ((sizeof(uint32_t) * 3) + (sizeof(float) * 256) + sizeof(int32_t)))
         return 0;
 

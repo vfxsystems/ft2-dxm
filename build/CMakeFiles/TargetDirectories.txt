@@ -1,7 +1,0 @@
-/home/user/ft2-dxm/build/CMakeFiles/ft2-dxm.dir
-/home/user/ft2-dxm/build/CMakeFiles/edit_cache.dir
-/home/user/ft2-dxm/build/CMakeFiles/rebuild_cache.dir
-/home/user/ft2-dxm/build/CMakeFiles/list_install_components.dir
-/home/user/ft2-dxm/build/CMakeFiles/install.dir
-/home/user/ft2-dxm/build/CMakeFiles/install/local.dir
-/home/user/ft2-dxm/build/CMakeFiles/install/strip.dir

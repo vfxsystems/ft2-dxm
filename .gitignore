@@ -1,4 +1,14 @@
 
+.vs/
+.vscode/
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
 vs2019_project/.vs/ft2-dxm/v16/.suo
 vs2019_project/enc_temp_folder/*
 vs2019_project/ft2-dxm/Release/ft2-dxm.vcxproj.FileListAbsolute.txt
@@ -6,6 +16,7 @@ vs2019_project/ft2-dxm/x64/Debug/ft2-dxm.vcxproj.FileListAbsolute.txt
 vs2019_project/ft2-dxm/Debug/ft2-dxm.vcxproj.FileListAbsolute.txt
 .DS_Store
 *.exe
+*.o
 *.db
 *.ilk
 *.pdb
@@ -23,4 +34,12 @@ vs2019_project/ft2-dxm/Debug/ft2-dxm.vcxproj.FileListAbsolute.txt
 *.recipe
 *.iobj
 *.enc
+release/other/ft2-dxm
+release/other/Dexed/
+release/other/OsTIrus/
+release/other/Release/
+release/other/*.dll
+release/other/*.exe
+release/other/*.log
+release/other/*.bin
 release/macos/ft2-dxm-macos.app/Contents/MacOS/ft2-dxm-macos

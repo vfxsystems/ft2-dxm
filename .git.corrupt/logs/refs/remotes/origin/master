@@ -1,6 +1,0 @@
-084da4c51f7128554081d36a98084be7b9419b1d e059babcfb266e63b90c7fd46a2d49c38e759732 user <user@pc.(none)> 1751714267 +0930	fetch --append --no-auto-gc --no-write-commit-graph origin: fast-forward
-e059babcfb266e63b90c7fd46a2d49c38e759732 dfe8cdf92b7cc86a207c532574eb4beca1677415 user <user@pc.(none)> 1752869295 +0930	fetch --append --no-auto-gc --no-write-commit-graph origin: fast-forward
-dfe8cdf92b7cc86a207c532574eb4beca1677415 44f8390da59c187fff6334fec7d8f9dd096e7647 user <user@pc.(none)> 1752921935 +0930	fetch --append --no-auto-gc --no-write-commit-graph origin: fast-forward
-44f8390da59c187fff6334fec7d8f9dd096e7647 6c8e39b0a28b7617df5bf434c363b27254b68a3c user <user@pc.(none)> 1753237197 +0930	fetch --append --no-auto-gc --no-write-commit-graph origin: fast-forward
-6c8e39b0a28b7617df5bf434c363b27254b68a3c f0cc39bf0859cec692fbad1431b2c176fb14b4fb user <user@pc.(none)> 1757319777 +0930	fetch --append --no-auto-gc --no-write-commit-graph origin: fast-forward
-f0cc39bf0859cec692fbad1431b2c176fb14b4fb 976362f41e576978e9f17d38759acb2f11b96360 user <user@pc.(none)> 1758353995 +0930	fetch --append --no-auto-gc --no-write-commit-graph origin: fast-forward

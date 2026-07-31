@@ -24,6 +24,8 @@
 #include "dexed/dx_complete_layout.h"
 #include "ft2_tunefish_complete_layout.h"
 #include "ft2_v2_complete_layout.h"
+#include "ft2_ostirus_complete_layout.h"
+#include "ft2_popup_list.h"
 
 #define NUM_CURSORS 6
 
@@ -619,6 +621,14 @@ void mouseButtonUpHandler(uint8_t mouseButton)
 					return;
 				}
 			}
+			if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
+			{
+				if (osti_handle_layout_mouse_event(g_active_ostirus_layout, mouse.x, mouse.y, false))
+				{
+					// Event was handled by OsTIrus editor
+					return;
+				}
+			}
 			if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
 			{
 				// Handle Dexed editor mouse events
@@ -715,6 +725,14 @@ void mouseButtonUpHandler(uint8_t mouseButton)
 
 void mouseButtonDownHandler(uint8_t mouseButton)
 {
+	// Popup list navigation (takes priority over everything else while open)
+	if (popupListIsVisible())
+	{
+		if (mouseButton == SDL_BUTTON_LEFT)
+			popupListHandleMouse(mouse.x, mouse.y, true);
+		return;
+	}
+
 	// Check if synth editor is active and handle mouse events
 	if (ui.synthEditorShown)
 	{
@@ -739,6 +757,14 @@ void mouseButtonDownHandler(uint8_t mouseButton)
 				// Handle V2 editor mouse events
 				v2_handle_layout_mouse_event(g_active_v2_layout, mouse.x, mouse.y, true);
 				return;
+			}
+			if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
+			{
+				if (osti_handle_layout_mouse_event(g_active_ostirus_layout, mouse.x, mouse.y, true))
+				{
+					// Handle OsTIrus editor mouse events
+					return;
+				}
 			}
 			if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
 			{

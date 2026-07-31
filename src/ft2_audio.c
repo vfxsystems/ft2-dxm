@@ -6,6 +6,7 @@
  #include <stdio.h>
 #include <stdint.h>
 #include <math.h> // for fabsf in peak calculation
+#include <string.h>
 #include "ft2_header.h"
 #include "ft2_config.h"
 #include "scopes/ft2_scopes.h"
@@ -24,10 +25,13 @@
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
 #include "ft2_v2.h"
+#include "ft2_ostirus.h"
 #include "ft2_unified_synth.h"
 
 static void sendSamples16BitStereo(void *stream, uint32_t sampleBlockLength);
 static void sendSamples32BitFloatStereo(void *stream, uint32_t sampleBlockLength);
+void lockAudio(void);
+void unlockAudio(void);
 
 // hide POSIX warnings
 #ifdef _MSC_VER
@@ -65,6 +69,8 @@ static float *synthMixBufL = NULL;
 static float *synthMixBufR = NULL;
 static uint32_t synthMixBufSize = 0;
 static bool synthRoutingDebug = false;
+static float outputMonitorMono[AUDIO_OUTPUT_MONITOR_LEN];
+static uint32_t outputMonitorSamples = 0;
 
 /* Buffer sent to GUI scopes for synth-inclusive waveform (per stereo pair) */
 #define SYNTH_SCOPE_LEN 512
@@ -76,6 +82,27 @@ static int tf4CurrentChn = 0;
 // Global live-meter values (shared with GUI)
 volatile float g_audioOutPeak = 0.0f; // 0.0-1.0 normalized peak level
 volatile float g_audioCPULoad = 0.0f; // 0.0-1.0 normalized CPU load
+
+// Bumped every time the output monitor buffer is refreshed, so UI consumers (e.g. the
+// synth editor spectrum/scope widget) can skip expensive recomputation on frames where
+// no new audio has arrived.
+static volatile uint32_t g_audioOutputMonitorGeneration = 0;
+
+static void updateOutputMonitor(uint32_t sampleBlockLength)
+{
+    uint32_t i, samplesToCopy, srcOffset;
+
+    samplesToCopy = sampleBlockLength;
+    if (samplesToCopy > AUDIO_OUTPUT_MONITOR_LEN)
+        samplesToCopy = AUDIO_OUTPUT_MONITOR_LEN;
+
+    srcOffset = sampleBlockLength - samplesToCopy;
+    for (i = 0; i < samplesToCopy; ++i)
+        outputMonitorMono[i] = 0.5f * (audio.fMixBufferL[srcOffset + i] + audio.fMixBufferR[srcOffset + i]);
+
+    outputMonitorSamples = samplesToCopy;
+    g_audioOutputMonitorGeneration++;
+}
 
 void stopVoice(int32_t i)
 {
@@ -670,6 +697,9 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
                             break;
                         case SYNTH_TYPE_TUNEFISH4:
                             mixNow = (ft2_synth_get_active_voice_count(instrID) > 0);
+                            break;
+                        case SYNTH_TYPE_OSTIRUS:
+                            mixNow = ft2_ostirus_has_pending_audio(instrID);
                             break;
                         default:
                             break;
@@ -1550,6 +1580,7 @@ void closeAudio(void)
 
 	// Shutdown unified synth system
 	ft2_unified_synth_shutdown();
+	mixerShutdownDSPEffects();
 }
 
 void audioRequestMixerUpdate(int32_t ch)
@@ -1557,6 +1588,31 @@ void audioRequestMixerUpdate(int32_t ch)
 	if (ch < 0 || ch >= MAX_CHANNELS)
 		return;
 	mixerUpdateMask |= (1u << ch);
+}
+
+uint32_t audioGetOutputMonitor(float *dstMono, uint32_t maxSamples)
+{
+    uint32_t count;
+
+    if (dstMono == NULL || maxSamples == 0)
+        return 0;
+
+    lockAudio();
+
+    count = outputMonitorSamples;
+    if (count > maxSamples)
+        count = maxSamples;
+
+    if (count > 0)
+        memcpy(dstMono, outputMonitorMono, count * sizeof (float));
+
+    unlockAudio();
+    return count;
+}
+
+uint32_t audioGetOutputMonitorGeneration(void)
+{
+    return g_audioOutputMonitorGeneration;
 }
 
 /* Dummy to keep ABI if any */
@@ -1570,6 +1626,7 @@ static void sendSamples16BitStereo(void *stream, uint32_t sampleBlockLength)
         audio.fMixBufferL[i] = tanhf(audio.fMixBufferL[i]);
         audio.fMixBufferR[i] = tanhf(audio.fMixBufferR[i]);
     }
+    updateOutputMonitor(sampleBlockLength);
     int16_t *out = (int16_t *)stream;
     for (uint32_t i = 0; i < sampleBlockLength; i++)
     {
@@ -1587,6 +1644,7 @@ static void sendSamples32BitFloatStereo(void *stream, uint32_t sampleBlockLength
         audio.fMixBufferL[i] = tanhf(audio.fMixBufferL[i]);
         audio.fMixBufferR[i] = tanhf(audio.fMixBufferR[i]);
     }
+    updateOutputMonitor(sampleBlockLength);
     float *out = (float *)stream;
     for (uint32_t i = 0; i < sampleBlockLength; i++)
     {

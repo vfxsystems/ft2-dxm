@@ -39,6 +39,7 @@
 #include "ft2_video.h"
 #include "ft2_inst_ed.h"
 #include "ft2_structs.h"
+#include "ft2_dxi.h"
 
 // hide POSIX warnings for chdir()
 #ifdef _MSC_VER
@@ -73,12 +74,12 @@ typedef struct DirRec
 } DirRec;
 
 static char FReq_SysReqText[256], *FReq_FileName, *FReq_NameTemp;
-static char *modTmpFName, *insTmpFName, *smpTmpFName, *patTmpFName, *trkTmpFName;
+static char *modTmpFName, *insTmpFName, *smpTmpFName, *patTmpFName, *trkTmpFName, *dxiTmpFName;
 static char *modTmpFNameUTF8; // for window title
 static uint8_t FReq_Item;
-static bool FReq_ShowAllFiles, insPathSet, smpPathSet, patPathSet, trkPathSet, firstTimeOpeningDiskOp = true;
+static bool FReq_ShowAllFiles, insPathSet, smpPathSet, patPathSet, trkPathSet, dxiPathSet, firstTimeOpeningDiskOp = true;
 static int32_t FReq_EntrySelected = -1, FReq_FileCount, FReq_DirPos, lastMouseY;
-static UNICHAR *FReq_CurPathU, *FReq_ModCurPathU, *FReq_InsCurPathU, *FReq_SmpCurPathU, *FReq_PatCurPathU, *FReq_TrkCurPathU;
+static UNICHAR *FReq_CurPathU, *FReq_ModCurPathU, *FReq_InsCurPathU, *FReq_SmpCurPathU, *FReq_PatCurPathU, *FReq_TrkCurPathU, *FReq_DxiCurPathU;
 static DirRec *FReq_Buffer;
 static SDL_Thread *thread;
 
@@ -293,12 +294,14 @@ void freeDiskOp(void)
 	if (smpTmpFName != NULL) { free(smpTmpFName); smpTmpFName = NULL; }
 	if (patTmpFName != NULL) { free(patTmpFName); patTmpFName = NULL; }
 	if (trkTmpFName != NULL) { free(trkTmpFName); trkTmpFName = NULL; }
+	if (dxiTmpFName != NULL) { free(dxiTmpFName); dxiTmpFName = NULL; }
 	if (FReq_NameTemp != NULL) { free(FReq_NameTemp); FReq_NameTemp = NULL; }
 	if (FReq_ModCurPathU != NULL) { free(FReq_ModCurPathU); FReq_ModCurPathU = NULL; }
 	if (FReq_InsCurPathU != NULL) { free(FReq_InsCurPathU); FReq_InsCurPathU = NULL; }
 	if (FReq_SmpCurPathU != NULL) { free(FReq_SmpCurPathU); FReq_SmpCurPathU = NULL; }
 	if (FReq_PatCurPathU != NULL) { free(FReq_PatCurPathU); FReq_PatCurPathU = NULL; }
 	if (FReq_TrkCurPathU != NULL) { free(FReq_TrkCurPathU); FReq_TrkCurPathU = NULL; }
+	if (FReq_DxiCurPathU != NULL) { free(FReq_DxiCurPathU); FReq_DxiCurPathU = NULL; }
 	if (modTmpFNameUTF8 != NULL) { free(modTmpFNameUTF8); modTmpFNameUTF8 = NULL; }
 
 	freeDirRecBuffer();
@@ -311,6 +314,7 @@ bool setupDiskOp(void)
 	smpTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
 	patTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
 	trkTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
+	dxiTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
 	FReq_NameTemp = (char *)malloc((PATH_MAX + 1) * sizeof (char));
 
 	FReq_ModCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
@@ -318,11 +322,13 @@ bool setupDiskOp(void)
 	FReq_SmpCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
 	FReq_PatCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
 	FReq_TrkCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
+	FReq_DxiCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
 
 	if (modTmpFName      == NULL || insTmpFName      == NULL || smpTmpFName      == NULL ||
 		patTmpFName      == NULL || trkTmpFName      == NULL || FReq_NameTemp    == NULL ||
 		FReq_ModCurPathU == NULL || FReq_InsCurPathU == NULL || FReq_SmpCurPathU == NULL ||
-		FReq_PatCurPathU == NULL || FReq_TrkCurPathU == NULL)
+		FReq_PatCurPathU == NULL || FReq_TrkCurPathU == NULL || dxiTmpFName      == NULL ||
+		FReq_DxiCurPathU == NULL)
 	{
 		// allocated memory is free'd lateron
 		showErrorMsgBox("Not enough memory!");
@@ -335,18 +341,21 @@ bool setupDiskOp(void)
 	smpTmpFName[0] = '\0';
 	patTmpFName[0] = '\0';
 	trkTmpFName[0] = '\0';
+	dxiTmpFName[0] = '\0';
 	FReq_NameTemp[0] = '\0';
 	FReq_ModCurPathU[0] = 0;
 	FReq_InsCurPathU[0] = 0;
 	FReq_SmpCurPathU[0] = 0;
 	FReq_PatCurPathU[0] = 0;
 	FReq_TrkCurPathU[0] = 0;
+	FReq_DxiCurPathU[0] = 0;
 
 	strcpy(modTmpFName, "untitled.xm");
 	strcpy(insTmpFName, "untitled.xi");
 	strcpy(smpTmpFName, "untitled.wav");
 	strcpy(patTmpFName, "untitled.xp");
 	strcpy(trkTmpFName, "untitled.xt");
+	strcpy(dxiTmpFName, "untitled.dxi");
 
 	setupInitialPaths();
 	setDiskOpItem(0);
@@ -694,6 +703,10 @@ void diskOpSetFilename(uint8_t type, UNICHAR *pathU)
 		case DISKOP_ITEM_TRACK:
 			strcpy(trkTmpFName, filename);
 		break;
+
+		case DISKOP_ITEM_DXIPATCH:
+			strcpy(dxiTmpFName, filename);
+		break;
 	}
 
 	free(ansiPath);
@@ -761,6 +774,10 @@ static void openFile(UNICHAR *filenameU, bool songModifiedCheck)
 
 		case DISKOP_ITEM_TRACK:
 			loadTrack(filenameU);
+		break;
+
+		case DISKOP_ITEM_DXIPATCH:
+			ft2_dxi_load_instrument(filenameU, editor.curInstr);
 		break;
 	}
 }
@@ -1017,6 +1034,30 @@ static void diskOpSave(bool checkOverwrite)
 			}
 
 			editor.diskOpReadDir = saveTrack(fileNameU);
+			free(fileNameU);
+		}
+		break;
+
+		case DISKOP_ITEM_DXIPATCH:
+		{
+			diskOpChangeFilenameExt(".dxi");
+
+			if (checkOverwrite && fileExistsAnsi(FReq_FileName))
+			{
+				createFileOverwriteText(FReq_FileName, FReq_SysReqText);
+				if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+					return;
+			}
+
+			fileNameU = cp850ToUnichar(FReq_FileName);
+			if (fileNameU == NULL)
+			{
+				okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
+				return;
+			}
+
+			if (ft2_dxi_save_instrument(fileNameU, editor.curInstr))
+				editor.diskOpReadDir = true;
 			free(fileNameU);
 		}
 		break;
@@ -1344,6 +1385,15 @@ static uint8_t handleEntrySkip(UNICHAR *nameU, bool isDir)
 			case DISKOP_ITEM_TRACK:
 			{
 				if (!_stricmp("xt", extPtr))
+					break;
+
+				goto skipEntry;
+			}
+			break;
+
+			case DISKOP_ITEM_DXIPATCH:
+			{
+				if (!_stricmp("dxi", extPtr))
 					break;
 
 				goto skipEntry;
@@ -2017,6 +2067,10 @@ static void drawSaveAsElements(void)
 		case DISKOP_ITEM_TRACK:
 			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XT");
 		break;
+
+		case DISKOP_ITEM_DXIPATCH:
+			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "DXI");
+		break;
 	}
 }
 
@@ -2056,6 +2110,7 @@ static void setDiskOpItemRadioButtons(void)
 			         case DISKOP_ITEM_SAMPLE:  showRadioButtonGroup(RB_GROUP_DISKOP_SMP_SAVEAS); break;
 			         case DISKOP_ITEM_PATTERN: showRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS); break;
 			         case DISKOP_ITEM_TRACK:   showRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS); break;
+			         case DISKOP_ITEM_DXIPATCH: break; // single fixed format, no save-as group
 		}
 	}
 }
@@ -2068,8 +2123,8 @@ static void setDiskOpItem(uint8_t item)
 	hideRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS);
 	hideRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS);
 
-	if (item > 4)
-		item = 4;
+	if (item > 6)
+		item = 6;
 
 	FReq_Item = item;
 	switch (FReq_Item)
@@ -2150,6 +2205,22 @@ static void setDiskOpItem(uint8_t item)
 				UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
+
+		case DISKOP_ITEM_DXIPATCH:
+		{
+			FReq_FileName = dxiTmpFName;
+
+			if (!dxiPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+			{
+				UNICHAR_STRCPY(FReq_DxiCurPathU, FReq_CurPathU);
+				dxiPathSet = true;
+			}
+
+			FReq_CurPathU = FReq_DxiCurPathU;
+			if (FReq_CurPathU != NULL)
+				UNICHAR_CHDIR(FReq_CurPathU);
+		}
+		break;
 	}
 
 	if (FReq_CurPathU != NULL && FReq_ModCurPathU != NULL)
@@ -2210,11 +2281,12 @@ static void drawDiskOpScreen(void)
 
 	textBoxes[TB_DISKOP_FILENAME].textPtr = FReq_FileName;
 
-	if (FReq_Item > 4)
-		FReq_Item = 4;
-
 	uncheckRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
-	radioButtons[RB_DISKOP_MODULE + FReq_Item].state = RADIOBUTTON_CHECKED;
+	// Items beyond TRACK (e.g. DXIPATCH) have no dedicated radio button in this
+	// group - leave the group fully unchecked for those rather than indexing
+	// past it (which would corrupt whatever radio button follows the group).
+	if (FReq_Item <= DISKOP_ITEM_TRACK)
+		radioButtons[RB_DISKOP_MODULE + FReq_Item].state = RADIOBUTTON_CHECKED;
 	showRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
 
 	// item selector
@@ -2470,6 +2542,14 @@ void rbDiskOpTrack(void)
 {
 	checkRadioButton(RB_DISKOP_TRACK);
 	setDiskOpItem(DISKOP_ITEM_TRACK);
+}
+
+// No dedicated item-selector radio button (unlike the item types above); entered
+// directly from the instrument editor's "DXI Patch" button instead.
+void diskOpSetDxiPatchItem(void)
+{
+	uncheckRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
+	setDiskOpItem(DISKOP_ITEM_DXIPATCH);
 }
 
 void rbDiskOpModSaveDxm(void)

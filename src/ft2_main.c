@@ -40,8 +40,12 @@
 #include "ft2_smpfx.h"
 #include "ft2_mixer.h"
 #include "ft2_macro_map.h"
+#include "mixer/ft2_quadratic_spline.h"
+#include "mixer/ft2_cubic_spline.h"
+#include "mixer/ft2_windowed_sinc.h"
 
 static void initializeVars(void);
+static bool runSelfTest(void);
 static void cleanUpAndExit(void); // never call this inside the main loop
 #ifdef __APPLE__
 static void osxSetDirToProgramDirFromArgs(char **argv);
@@ -66,6 +70,16 @@ int main(int argc, char *argv[])
 
 	for (int i = 1; i < argc; i++)
 	{
+		if (strcmp(argv[i], "--version") == 0)
+		{
+			printf("ft2-dxm %s\n", PROG_VER_STR);
+			return 0;
+		}
+		else if (strcmp(argv[i], "--self-test") == 0)
+		{
+			return runSelfTest() ? 0 : 1;
+		}
+		else
 		if (strcmp(argv[i], "--debug") == 0)
 		{
 			debugConsole = true;
@@ -380,6 +394,39 @@ static void initializeVars(void)
 
 	/* initialize per-channel mixer defaults */
 	mixerInit();
+}
+
+static bool runSelfTest(void)
+{
+	initializeVars();
+
+	if (!setupQuadraticSplineTable())
+	{
+		fprintf(stderr, "self-test: setupQuadraticSplineTable() failed\n");
+		return false;
+	}
+
+	if (!setupCubicSplineTable())
+	{
+		fprintf(stderr, "self-test: setupCubicSplineTable() failed\n");
+		freeQuadraticSplineTable();
+		return false;
+	}
+
+	if (!setupWindowedSincTables())
+	{
+		fprintf(stderr, "self-test: setupWindowedSincTables() failed\n");
+		freeCubicSplineTable();
+		freeQuadraticSplineTable();
+		return false;
+	}
+
+	freeWindowedSincTables();
+	freeCubicSplineTable();
+	freeQuadraticSplineTable();
+
+	printf("ft2-dxm self-test passed\n");
+	return true;
 }
 
 static void cleanUpAndExit(void) // never call this inside the main loop!

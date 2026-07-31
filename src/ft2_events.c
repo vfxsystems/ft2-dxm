@@ -35,6 +35,7 @@
 #include "dexed/dx_complete_layout.h"
 #include "ft2_tunefish_complete_layout.h"
 #include "ft2_v2_complete_layout.h"
+#include "ft2_ostirus_complete_layout.h"
 
 #define CRASH_TEXT "Oh no! The Fasttracker II clone has crashed...\nA backup of the song was hopefully " \
                    "saved to the current module directory.\n\nPlease report this bug if you can.\n" \
@@ -536,12 +537,17 @@ static void handleSDLEvents(void)
 					const int32_t sx = (int32_t)floor(mx * video.dMouseXMul);
 					const int32_t sy = (int32_t)floor(my * video.dMouseYMul);
 
-					if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
-						v2_handle_layout_mouse_drag(g_active_v2_layout, sx, sy);
-					else if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
-						dx_handle_layout_mouse_drag(g_dexed_layout_singleton, sx, sy);
-					else if (ins->useTF4 && g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
-						tf_handle_layout_mouse_drag(g_active_tunefish_layout, sx, sy);
+					if (mouse.leftButtonPressed || mouse.rightButtonPressed)
+					{
+						if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
+							v2_handle_layout_mouse_drag(g_active_v2_layout, sx, sy);
+						else if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
+							osti_handle_layout_mouse_drag(g_active_ostirus_layout, sx, sy);
+						else if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
+							dx_handle_layout_mouse_drag(g_dexed_layout_singleton, sx, sy);
+						else if (ins->useTF4 && g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
+							tf_handle_layout_mouse_drag(g_active_tunefish_layout, sx, sy);
+					}
 				}
 			}
 		}
