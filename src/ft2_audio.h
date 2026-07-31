@@ -17,6 +17,7 @@ enum
 #define MAX_AUDIO_FREQ 96000
 
 #define MAX_AUDIO_DEVICES 99
+#define AUDIO_OUTPUT_MONITOR_LEN 1024
 
 // more bits makes little sense here
 
@@ -151,6 +152,8 @@ void unlockMixerCallback(void);
 void resetRampVolumes(void);
 void updateVoices(void);
 void mixReplayerTickToBuffer(uint32_t samplesToMix, void *stream, uint8_t bitDepth);
+uint32_t audioGetOutputMonitor(float *dstMono, uint32_t maxSamples);
+uint32_t audioGetOutputMonitorGeneration(void);
 
 // in ft2_audio.c
 extern audio_t audio;

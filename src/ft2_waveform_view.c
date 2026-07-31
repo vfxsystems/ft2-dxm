@@ -3,7 +3,6 @@
 #include "ft2_gui.h"
 #include "ft2_video.h"
 #include "ft2_palette.h"
-#include <SDL.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,13 +12,6 @@
 #endif
 
 #define WAVEFORM_BAR_COUNT 32
-
-/* This widget is redrawn from the main video loop (up to ~60Hz) on every one of the
-   TF4/V2/OsTIrus synth editor screens that embed it, doing real per-pixel blitting
-   (spectrum bars + oscilloscope line) every call. A spectrum/scope analyzer doesn't
-   need to update anywhere near that fast to look smooth - cap it to a much more
-   modest, fixed rate instead of tracking the host screen's full frame rate. */
-#define WAVEFORM_REDRAW_INTERVAL_MS 50 /* ~20Hz */
 
 static float clampf01(float x)
 {
@@ -241,40 +233,24 @@ void ft2_waveform_view_draw(int x, int y, int width, int height)
     static float s_cachedSamples[AUDIO_OUTPUT_MONITOR_LEN];
     static uint32_t s_cachedSampleCount = 0;
     static uint32_t s_lastGeneration = 0xFFFFFFFFu;
-    static uint32_t s_lastDrawTicks = 0;
-    static bool s_everDrawn = false;
 
-    uint32_t nowTicks;
-    bool refreshAnalyzer;
+    uint32_t generation;
     int topH, bottomH;
 
     if (width < 16 || height < 16)
         return;
 
-    /* Refresh analyzer data at a fixed, modest rate, but always repaint the
-       widget. Parent pages may redraw/clear behind us every frame; returning
-       early here makes the view appear to flicker blank between analyzer ticks. */
-    nowTicks = SDL_GetTicks();
-    refreshAnalyzer = !s_everDrawn || (nowTicks - s_lastDrawTicks) >= WAVEFORM_REDRAW_INTERVAL_MS;
+    s_cachedSampleCount = audioGetOutputMonitor(s_cachedSamples, AUDIO_OUTPUT_MONITOR_LEN);
+    if (s_cachedSampleCount == 0)
+        memset(s_cachedSamples, 0, sizeof (s_cachedSamples));
 
-    if (refreshAnalyzer)
+    /* Keep the oscilloscope repainting at the video-loop rate, but only run the
+       heavier spectrum analysis when the audio callback publishes a fresh block. */
+    generation = audioGetOutputMonitorGeneration();
+    if (generation != s_lastGeneration)
     {
-        s_cachedSampleCount = audioGetOutputMonitor(s_cachedSamples, AUDIO_OUTPUT_MONITOR_LEN);
-        if (s_cachedSampleCount == 0)
-            memset(s_cachedSamples, 0, sizeof (s_cachedSamples));
-
-        /* The audio thread only refreshes the monitor buffer once per audio
-           callback block, which can be less frequent than the UI redraw rate.
-           Recompute spectrum only when a newly captured monitor block arrived. */
-        const uint32_t generation = audioGetOutputMonitorGeneration();
-        if (generation != s_lastGeneration)
-        {
-            computeSpectrumBars(s_cachedSamples, s_cachedSampleCount, s_cachedBars, WAVEFORM_BAR_COUNT);
-            s_lastGeneration = generation;
-        }
-
-        s_lastDrawTicks = nowTicks;
-        s_everDrawn = true;
+        computeSpectrumBars(s_cachedSamples, s_cachedSampleCount, s_cachedBars, WAVEFORM_BAR_COUNT);
+        s_lastGeneration = generation;
     }
 
     drawFramework((uint16_t)(x - 1), (uint16_t)(y - 1), (uint16_t)(width + 2), (uint16_t)(height + 2), FRAMEWORK_TYPE2);
