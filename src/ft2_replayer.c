@@ -23,6 +23,7 @@
 #include "ft2_diskop.h"
 #include "ft2_midi.h"
 #include "scopes/ft2_scopes.h"
+#include "ft2_macro_map.h"
 #include "ft2_macromap.h"
 #include "ft2_mouse.h"
 #include "ft2_sample_loader.h"
@@ -716,6 +717,34 @@ static void setSmoothMacroValue8(channel_t *ch, uint8_t param)
 	}
 }
 
+static bool applySynthMacroTarget(instr_t *ins, int instrNum, uint8_t targetType, uint16_t paramID, float normValue)
+{
+    SynthEngineType engineType;
+
+    if (!ft2_macro_map_target_to_engine(targetType, &engineType))
+        return false;
+    if (!ft2_macro_map_target_matches_instrument(targetType, ins))
+        return false;
+
+    const int count = ft2_macro_map_target_param_count(targetType);
+    if (count <= 0 || paramID >= (uint16_t)count)
+        return false;
+
+    const UnifiedSynthInterface *engine = ft2_unified_synth_get_engine(engineType);
+    if (engine == NULL || engine->set_param == NULL)
+        return false;
+
+    if (engine->get_param_range != NULL)
+    {
+        const ParameterRange *range = engine->get_param_range(paramID);
+        if (range != NULL)
+            normValue = range->min + normValue * (range->max - range->min);
+    }
+
+    engine->set_param(instrNum, paramID, normValue);
+    return true;
+}
+
 // Apply per-channel macros each tick (synth/DSP modulation)
 static void applyChannelMacros(channel_t *ch)
 {
@@ -783,37 +812,14 @@ static void applyChannelMacros(channel_t *ch)
             }
             
             // Apply to target
-            if (targetType == MACRO_TARGET_TF4 && ins->useTF4)
+            if (ft2_macro_map_target_to_engine(targetType, NULL))
             {
-                // Scale normalized macro (0..1) to parameter-specific range
-                typedef struct { float min, max; } tf4_param_range_t;
-                extern const tf4_param_range_t tf4_param_ranges[];
-                extern const int tf4_param_ranges_count;
-
-                if (paramID < tf4_param_ranges_count) {
-                    const float minVal = tf4_param_ranges[paramID].min;
-                    const float maxVal = tf4_param_ranges[paramID].max;
-                    scaled = minVal + scaled * (maxVal - minVal);
-                }
-
-                // ch->instrNum holds actual instrument number used for this channel
-                ft2_synth_set_param(ch->instrNum, paramID, scaled);
-
-                // Request UI sync from main thread
-                extern void requestMacroUiSync(void);
-                requestMacroUiSync();
-            }
-            else if (targetType == MACRO_TARGET_DEXED && ins->useDexed)
-            {
-                const UnifiedSynthInterface *eng = ft2_unified_synth_get_engine(SYNTH_TYPE_DEXED);
-                if (eng && eng->get_param_range)
+                if (applySynthMacroTarget(ins, ch->instrNum, targetType, paramID, scaled))
                 {
-                    const ParameterRange *range = eng->get_param_range(paramID);
-                    if (range)
-                        scaled = range->min + scaled * (range->max - range->min);
+                    // Request UI sync from main thread
+                    extern void requestMacroUiSync(void);
+                    requestMacroUiSync();
                 }
-
-                ft2_dx_set_param_for_instrument(ch->instrNum, paramID, scaled);
             }
             else if (targetType == MACRO_TARGET_DSP)
             {

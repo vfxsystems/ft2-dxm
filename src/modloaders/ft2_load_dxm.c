@@ -25,6 +25,7 @@
 #include "../ft2_header.h"
 #include "../ft2_mixer.h"
 #include "../ft2_replayer.h"
+#include "../ft2_macro_map.h"
 #include <math.h>
 #include "../ft2_scrollbars.h"
 #define GAIN_SLIDER_END 200
@@ -683,6 +684,8 @@ static void restoreMacroMapDXM(FILE *f, uint32_t chunkLen)
             fread(&s, sizeof(uint8_t), 1, f);
             if (ins) ins->macroScale[i] = s;
         }
+        if (ins)
+            ft2_macro_map_sanitize_instrument(ins);
     }
     // Skip any extra bytes beyond expected
     if (chunkLen > expectedLen) skip_bytes(f, chunkLen - expectedLen);
@@ -724,23 +727,23 @@ static void restoreMacroPatternDXM(FILE *f, uint32_t chunkLen)
         if (rows > MAX_PATT_LEN)
             rows = MAX_PATT_LEN;
 
-        if (macroPattern[p] == NULL)
+        if (macroPatternTmp[p] == NULL)
         {
-            macroPattern[p] = (macroNote_t *)malloc(MAX_PATT_LEN * MAX_STEREO_PAIRS * sizeof (macroNote_t));
-            if (macroPattern[p] == NULL)
+            macroPatternTmp[p] = (macroNote_t *)malloc(MAX_PATT_LEN * MAX_STEREO_PAIRS * sizeof (macroNote_t));
+            if (macroPatternTmp[p] == NULL)
             {
                 // skip remaining data if allocation failed
                 skip_bytes(f, (chunkLen - sizeof(uint16_t) * 3) - sizeof(uint16_t));
                 return;
             }
-            memset(macroPattern[p], 0xFF, MAX_PATT_LEN * MAX_STEREO_PAIRS * sizeof (macroNote_t));
+            memset(macroPatternTmp[p], 0xFF, MAX_PATT_LEN * MAX_STEREO_PAIRS * sizeof (macroNote_t));
         }
 
         for (uint16_t r = 0; r < rows; r++)
         {
             for (uint16_t ch = 0; ch < MAX_STEREO_PAIRS; ch++)
             {
-                macroNote_t *mn = &macroPattern[p][(r * MAX_STEREO_PAIRS) + ch];
+                macroNote_t *mn = &macroPatternTmp[p][(r * MAX_STEREO_PAIRS) + ch];
                 fread(&mn->slot, 1, 1, f);
                 fread(&mn->mode, 1, 1, f);
                 fread(&mn->value, 1, 1, f);

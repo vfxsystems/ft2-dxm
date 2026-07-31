@@ -405,7 +405,15 @@ static void initializeVars(void)
 
 static bool runSelfTest(void)
 {
+	char macroErr[128];
+
 	initializeVars();
+
+	if (!ft2_macro_map_self_test(macroErr, sizeof (macroErr)))
+	{
+		fprintf(stderr, "self-test: %s\n", macroErr);
+		return false;
+	}
 
 	if (!setupQuadraticSplineTable())
 	{

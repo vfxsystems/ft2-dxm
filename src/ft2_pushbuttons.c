@@ -32,6 +32,7 @@
 #include "ft2_structs.h"
 #include "ft2_bmp.h"
 #include "ft2_mixer_gui.h"
+#include "ft2_macro_map.h"
 
 void pbShowDexedEditor(void);
 void pbShowTunefishEditor(void);
@@ -640,8 +641,8 @@ bool testPushButtonMouseDown(void)
 	if (ui.macroMapEditorShown)
 	{
 		/* Macro Map Editor is modal – only allow its own pushbuttons */
-		start = NUM_PUSHBUTTONS - 146; // MM_PB_BASE (Macro Map Editor buttons)
-		end   = NUM_PUSHBUTTONS;       // last 146 IDs are reserved for Macro Map Editor
+		start = NUM_PUSHBUTTONS - FT2_MACRO_MAP_PUSHBUTTON_COUNT;
+		end   = NUM_PUSHBUTTONS;
 	}
 	else if (ui.sysReqShown && ui.wavRendererShown)
 	{

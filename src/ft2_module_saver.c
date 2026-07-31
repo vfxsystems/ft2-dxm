@@ -24,6 +24,7 @@
 #include "ft2_dexed.h"
 #include "ft2_v2.h"
 #include "ft2_ostirus.h"
+#include "ft2_macro_map.h"
 // Tunefish4 synth helper
 extern void* createInstrumentInstance(int instrID);
 
@@ -1060,6 +1061,7 @@ bool saveDXM(UNICHAR *filenameU)
             uint8_t zerosS[16] = {0};
             fwrite(zerosS, sizeof(uint8_t), 16, f);
         } else {
+            ft2_macro_map_sanitize_instrument(ins);
             fwrite(ins->macroTargetType, sizeof(uint8_t), 16, f);
             fwrite(ins->macroParamID,     sizeof(uint16_t),16, f);
             fwrite(ins->macroScale,       sizeof(uint8_t), 16, f);
