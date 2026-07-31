@@ -42,6 +42,7 @@
 #include "ft2_smpfx.h"
 #include "ft2_mixer.h"
 #include "ft2_macro_map.h"
+#include "ft2_ui_render.h"
 #include "mixer/ft2_quadratic_spline.h"
 #include "mixer/ft2_cubic_spline.h"
 #include "mixer/ft2_windowed_sinc.h"
@@ -410,6 +411,12 @@ static bool runSelfTest(void)
 	initializeVars();
 
 	if (!ft2_macro_map_self_test(macroErr, sizeof (macroErr)))
+	{
+		fprintf(stderr, "self-test: %s\n", macroErr);
+		return false;
+	}
+
+	if (!ft2_ui_render_self_test(macroErr, sizeof (macroErr)))
 	{
 		fprintf(stderr, "self-test: %s\n", macroErr);
 		return false;

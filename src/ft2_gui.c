@@ -19,6 +19,7 @@
 #include "ft2_wav_renderer.h"
 #include "ft2_trim.h"
 #include "ft2_video.h"
+#include "ft2_ui_render.h"
 #include "ft2_tables.h"
 #include "ft2_bmp.h"
 #include "ft2_structs.h"
@@ -731,28 +732,13 @@ void hexOutShadow(uint16_t xPos, uint16_t yPos, uint8_t paletteIndex, uint8_t sh
 void clearRect(uint16_t xPos, uint16_t yPos, uint16_t w, uint16_t h)
 {
 	assert(xPos < SCREEN_W && yPos < SCREEN_H && (xPos + w) <= SCREEN_W && (yPos + h) <= SCREEN_H);
-
-	const uint32_t pitch = w * sizeof (int32_t);
-
-	uint32_t *dstPtr = &video.frameBuffer[(yPos * SCREEN_W) + xPos];
-	for (int32_t y = 0; y < h; y++, dstPtr += SCREEN_W)
-		memset(dstPtr, 0, pitch);
+	ft2_ui_render_clear_rect(xPos, yPos, w, h);
 }
 
 void fillRect(uint16_t xPos, uint16_t yPos, uint16_t w, uint16_t h, uint8_t paletteIndex)
 {
 	assert(xPos < SCREEN_W && yPos < SCREEN_H && (xPos + w) <= SCREEN_W && (yPos + h) <= SCREEN_H);
-
-	const uint32_t pixVal = video.palette[paletteIndex];
-	uint32_t *dstPtr = &video.frameBuffer[(yPos * SCREEN_W) + xPos];
-
-	for (int32_t y = 0; y < h; y++)
-	{
-		for (int32_t x = 0; x < w; x++)
-			dstPtr[x] = pixVal;
-
-		dstPtr += SCREEN_W;
-	}
+	ft2_ui_render_fill_rect(xPos, yPos, w, h, paletteIndex);
 }
 
 void blit32(uint16_t xPos, uint16_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h)
@@ -852,26 +838,13 @@ void blitFastClipX(uint16_t xPos, uint16_t yPos, const uint8_t *srcPtr, uint16_t
 void hLine(uint16_t x, uint16_t y, uint16_t w, uint8_t paletteIndex)
 {
 	assert(x < SCREEN_W && y < SCREEN_H && (x + w) <= SCREEN_W);
-
-	const uint32_t pixVal = video.palette[paletteIndex];
-
-	uint32_t *dstPtr = &video.frameBuffer[(y * SCREEN_W) + x];
-	for (int32_t i = 0; i < w; i++)
-		dstPtr[i] = pixVal;
+	ft2_ui_render_hline(x, y, w, paletteIndex);
 }
 
 void vLine(uint16_t x, uint16_t y, uint16_t h, uint8_t paletteIndex)
 {
-	assert(x < SCREEN_W && y < SCREEN_H && (y + h) <= SCREEN_W);
-
-	const uint32_t pixVal = video.palette[paletteIndex];
-
-	uint32_t *dstPtr = &video.frameBuffer[(y * SCREEN_W) + x];
-	for (int32_t i = 0; i < h; i++)
-	{
-		*dstPtr = pixVal;
-		 dstPtr += SCREEN_W;
-	}
+	assert(x < SCREEN_W && y < SCREEN_H && (y + h) <= SCREEN_H);
+	ft2_ui_render_vline(x, y, h, paletteIndex);
 }
 
 void hLineDouble(uint16_t x, uint16_t y, uint16_t w, uint8_t paletteIndex)
@@ -888,95 +861,13 @@ void vLineDouble(uint16_t x, uint16_t y, uint16_t h, uint8_t paletteIndex)
 
 void line(int16_t x1, int16_t x2, int16_t y1, int16_t y2, uint8_t paletteIndex)
 {
-	const int16_t dx = x2 - x1;
-	const uint16_t ax = ABS(dx) * 2;
-	const int16_t sx = SGN(dx);
-	const int16_t dy = y2 - y1;
-	const uint16_t ay = ABS(dy) * 2;
-	const int16_t sy = SGN(dy);
-	int16_t x = x1;
-	int16_t y  = y1;
-
-	uint32_t pixVal = video.palette[paletteIndex];
-	const int32_t pitch  = sy * SCREEN_W;
-	uint32_t *dst32  = &video.frameBuffer[(y * SCREEN_W) + x];
-
-	// draw line
-	if (ax > ay)
-	{
-		int16_t d = ay - (ax >> 1);
-		while (true)
-		{
-			*dst32 = pixVal;
-			if (x == x2)
-				break;
-
-			if (d >= 0)
-			{
-				d -= ax;
-				dst32 += pitch;
-			}
-
-			x += sx;
-			d += ay;
-			dst32 += sx;
-		}
-	}
-	else
-	{
-		int16_t d = ax - (ay >> 1);
-		while (true)
-		{
-			*dst32 = pixVal;
-			if (y == y2)
-				break;
-
-			if (d >= 0)
-			{
-				d -= ay;
-				dst32 += sx;
-			}
-
-			y += sy;
-			d += ax;
-			dst32 += pitch;
-		}
-	}
+	ft2_ui_render_line(x1, x2, y1, y2, paletteIndex);
 }
 
 void drawFramework(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t type)
 {
-	assert(x < SCREEN_W && y < SCREEN_H && w >= 2 && h >= h);
-
-	h--;
-	w--;
-
-	if (type == FRAMEWORK_TYPE1)
-	{
-		// top left corner
-		hLine(x, y,     w,     PAL_DSKTOP1);
-		vLine(x, y + 1, h - 1, PAL_DSKTOP1);
-
-		// bottom right corner
-		hLine(x,     y + h, w,     PAL_DSKTOP2);
-		vLine(x + w, y,     h + 1, PAL_DSKTOP2);
-
-		// fill background
-		fillRect(x + 1, y + 1, w - 1, h - 1, PAL_DESKTOP);
-	}
-	else
-	{
-		// top left corner
-		hLine(x, y,     w + 1, PAL_DSKTOP2);
-		vLine(x, y + 1, h,     PAL_DSKTOP2);
-
-		// bottom right corner
-		hLine(x + 1, y + h, w,     PAL_DSKTOP1);
-		vLine(x + w, y + 1, h - 1, PAL_DSKTOP1);
-
-		// clear background
-		clearRect(x + 1, y + 1, w - 1, h - 1);
-	}
+	assert(x < SCREEN_W && y < SCREEN_H && w >= 2 && h >= 2 && (x + w) <= SCREEN_W && (y + h) <= SCREEN_H);
+	ft2_ui_render_framework(x, y, w, h, type);
 }
 
 // GUI FUNCTIONS

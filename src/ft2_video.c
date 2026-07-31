@@ -39,6 +39,7 @@
 #include "ft2_structs.h"
 #include "ft2_mixer_gui.h"
 #include "ft2_dsp_editor.h"
+#include "ft2_ui_render.h"
 #include "ft2_v2_complete_layout.h"
 #include "ft2_ostirus_complete_layout.h"
 
@@ -344,6 +345,8 @@ static void updateRenderSizeVars(void)
 
 	// "hardware mouse" calculations
 	video.mouseCursorUpscaleFactor = MIN(video.renderW / SCREEN_W, video.renderH / SCREEN_H);
+	ft2_ui_render_set_metrics((double)video.renderW / SCREEN_W, (double)video.renderH / SCREEN_H,
+		video.dDpiZoomFactorX, video.dDpiZoomFactorY);
 	createMouseCursors();
 }
 
@@ -775,6 +778,8 @@ void renderLoopPins(void)
 
 void closeVideo(void)
 {
+	ft2_ui_render_shutdown();
+
 	if (video.texture != NULL)
 	{
 		SDL_DestroyTexture(video.texture);
@@ -1005,6 +1010,7 @@ bool setupRenderer(void)
 	if (!setupSprites())
 		return false;
 
+	ft2_ui_render_reset();
 	updateRenderSizeVars();
 	updateMouseScaling();
 
