@@ -36,14 +36,14 @@
 void pbShowDexedEditor(void);
 void pbShowTunefishEditor(void);
 void pbShowV2Editor(void);
+void pbShowOsTirusEditor(void);
 
 #define BUTTON_GFX_BMP_WIDTH 90
 
 pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 {
 	// ------ RESERVED PUSHBUTTONS ------
-	{ 537, 276, 22, 16, 0, 0, "V2",               NULL,    NULL,           pbShowV2Editor },
-	{ 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 },
+	{ 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, { 0 },
 
 	/*
 	** -- STRUCT INFO: --
@@ -287,8 +287,10 @@ pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 	{ 268, 262, 24, 12, 0, 0, SMALL_4_STRING,     NULL,    NULL,           panPreDef4 },
 	{ 291, 262, 24, 12, 0, 0, SMALL_5_STRING,     NULL,    NULL,           panPreDef5 },
 	{ 314, 262, 24, 12, 0, 0, SMALL_6_STRING,     NULL,    NULL,           panPreDef6 },
-	{ 607, 276, 22, 16, 0, 0, "TF",               NULL,    NULL,           pbShowTunefishEditor },
-	{ 572, 276, 22, 16, 0, 0, "DX",               NULL,    NULL,           pbShowDexedEditor },
+	{ 547, 312, 22, 16, 0, 0, "V2",               NULL,    NULL,           pbShowV2Editor },
+	{ 588, 329, 22, 16, 0, 0, "TI",               NULL,    NULL,           pbShowOsTirusEditor },
+	{ 588, 312, 22, 16, 0, 0, "TF",               NULL,    NULL,           pbShowTunefishEditor },
+	{ 547, 329, 22, 16, 0, 0, "DX",               NULL,    NULL,           pbShowDexedEditor },
 	{ 341, 175, 47, 16, 1, 4, "Add",              NULL,    volEnvAdd,      NULL },
 	{ 389, 175, 46, 16, 1, 4, "Del",              NULL,    volEnvDel,      NULL },
 	{ 398, 204, 19, 13, 1, 4, ARROW_UP_STRING,    NULL,    volEnvSusUp,    NULL },
@@ -319,10 +321,10 @@ pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 	{ 606, 248, 23, 13, 1, 4, ARROW_RIGHT_STRING, NULL,    vibDepthUp,     NULL },
 	{ 521, 262, 23, 13, 1, 4, ARROW_LEFT_STRING,  NULL,    vibSweepDown,   NULL },
 	{ 606, 262, 23, 13, 1, 4, ARROW_RIGHT_STRING, NULL,    vibSweepUp,     NULL },
-	{ 441, 312, 94, 16, 1, 4, "Octave up",        NULL,    relativeNoteOctUp,   NULL },
-	{ 536, 312, 93, 16, 1, 4, "Halftone up",      NULL,    relativeNoteUp,      NULL },
-	{ 441, 329, 94, 16, 1, 4, "Octave down",      NULL,    relativeNoteOctDown, NULL },
-	{ 536, 329, 93, 16, 1, 4, "Halftone down",    NULL,    relativeNoteDown,    NULL },
+	{ 470, 312, 19, 13, 1, 4, ARROW_UP_STRING,    NULL,    relativeNoteOctUp,   NULL },
+	{ 489, 312, 19, 13, 1, 4, ARROW_DOWN_STRING,  NULL,    relativeNoteOctDown, NULL },
+	{ 470, 329, 19, 13, 1, 4, ARROW_UP_STRING,    NULL,    relativeNoteUp,      NULL },
+	{ 489, 329, 19, 13, 1, 4, ARROW_DOWN_STRING,  NULL,    relativeNoteDown,    NULL },
 
 	// ------ INSTRUMENT EDITOR EXTENSION PUSHBUTTONS ------
 	//x,   y,   w,  h,  p, d, text #1,            text #2, funcOnDown,   funcOnUp

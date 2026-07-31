@@ -38,7 +38,6 @@ void pbShowDexedEditor(void);
 void pbShowV2Editor(void);
 void pbShowTunefishEditor(void);
 void pbShowOsTirusEditor(void);
-void pbInstDxiPatch(void);
 void cbInstUseOsTirus(void);
 void initOsTirusInstrument(int instrIdx);
 
@@ -508,17 +507,6 @@ void pbShowOsTirusEditor(void)
 
     ui.synthEditorShown = true;
     printf("[OSTI_UI] OsTIrus editor shown with direct rendering\n");
-}
-
-// Opens the Disk Op. screen pre-set to browse/save standalone .dxi synth patch files
-// for the current instrument (save an active engine's patch, or load one into it).
-void pbInstDxiPatch(void)
-{
-    if (editor.curInstr == 0)
-        return;
-
-    diskOpSetDxiPatchItem();
-    showDiskOpScreen();
 }
 
 #ifdef _MSC_VER
@@ -2668,7 +2656,6 @@ void hideInstEditor(void)
 	hidePushButton(PB_INST_TF4);
 	hidePushButton(PB_INST_DEXED);
 	hidePushButton(PB_INST_OSTIRUS);
-	hidePushButton(PB_INST_DXI_PATCH);
 	hidePushButton(PB_INST_OCT_UP);
 	hidePushButton(PB_INST_HALFTONE_UP);
 	hidePushButton(PB_INST_OCT_DOWN);
@@ -2904,20 +2891,6 @@ void showInstEditor(void)
 	showPushButton(PB_INST_TF4);
 	showPushButton(PB_INST_DEXED);
 	showPushButton(PB_INST_OSTIRUS);
-
-	// PB_INST_DXI_PATCH is appended after the static pushButtons[] literal's covered
-	// range (see ft2_pushbuttons.h), so its fields are set here at runtime instead of
-	// via that array literal, matching the pattern already used for PB_SWAP_BANK etc.
-	// in ft2_pattern_ed.c. Idempotent - safe to re-run every time this screen is shown.
-	pushButtons[PB_INST_DXI_PATCH].x = 547;
-	pushButtons[PB_INST_DXI_PATCH].y = 346;
-	pushButtons[PB_INST_DXI_PATCH].w = 63;
-	pushButtons[PB_INST_DXI_PATCH].h = 16;
-	pushButtons[PB_INST_DXI_PATCH].caption = "DXI Patch";
-	pushButtons[PB_INST_DXI_PATCH].caption2 = NULL;
-	pushButtons[PB_INST_DXI_PATCH].callbackFuncOnDown = NULL;
-	pushButtons[PB_INST_DXI_PATCH].callbackFuncOnUp = pbInstDxiPatch;
-	showPushButton(PB_INST_DXI_PATCH);
 	showPushButton(PB_INST_OCT_UP);
 	showPushButton(PB_INST_HALFTONE_UP);
 	showPushButton(PB_INST_OCT_DOWN);

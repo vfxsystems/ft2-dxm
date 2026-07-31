@@ -254,6 +254,8 @@ enum // PUSHBUTTONS
 	PB_INST_VIBDEPTH_UP,
 	PB_INST_VIBSWEEP_DOWN,
 	PB_INST_VIBSWEEP_UP,
+	PB_INST_V2,
+	PB_INST_OSTIRUS,
 	PB_INST_TF4,
 	PB_INST_DEXED,
 	PB_INST_OCT_UP,
@@ -570,11 +572,13 @@ enum // PUSHBUTTONS
 	PB_SYNTH_PAGE_TOGGLE,
 	PB_SYNTH_EXIT,
 
+	// Appended (not interspersed with existing IDs - see note above PB_TF_BASE).
+	// Fields are set dynamically in ft2_inst_ed.c rather than via the static
+	// pushButtons[] literal, since that literal's positional coverage ends at the
+	// WAV RENDERER section.
+
 	NUM_PUSHBUTTONS
 };
-
-// Reserved instrument-editor slot reused for the V2 synth button.
-#define PB_INST_V2 PB_RES_1
 
 // Append-only ID ranges for designer-driven layouts (do not reorder existing IDs).
 #define PB_TF_BASE NUM_PUSHBUTTONS

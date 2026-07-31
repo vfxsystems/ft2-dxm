@@ -13,6 +13,7 @@ enum
 	DISKOP_ITEM_PATTERN = 3,
 	DISKOP_ITEM_TRACK = 4,
 	DISKOP_ITEM_RESAMPLE = 5, // render selection to sample slot
+	DISKOP_ITEM_DXIPATCH = 6, // standalone synth patch (.dxi), exposed under Disk Op. Instr. save-as
 
 	MOD_SAVE_MODE_DXM = 0,
 	MOD_SAVE_MODE_XM = 1,
@@ -77,6 +78,8 @@ void rbDiskOpInstr(void);
 void rbDiskOpSample(void);
 void rbDiskOpPattern(void);
 void rbDiskOpTrack(void);
+void rbDiskOpInsSaveXi(void);
+void rbDiskOpInsSaveDxi(void);
 void rbDiskOpModSaveDxm(void);
 void rbDiskOpModSaveMod(void);
 void rbDiskOpModSaveWav(void);

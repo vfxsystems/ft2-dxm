@@ -33,10 +33,17 @@ If these don't work for you, you'll have to compile the code manually.
 ![Example #2](https://16-bits.org/ft2-dxm-4.png)
 
 # Compiling the code
-Build instructions can be found in the repository (HOW-TO-COMPILE.txt).
+Current build instructions are in [docs/build.md](docs/build.md).
 
-Keep in mind that the program may fail to compile on Linux, depending on your distribution and GCC version. \
-Please don't nag me about it, and try to use the Linux packages linked to from [16-bits.org](https://16-bits.org/ft2.php) instead.
+The maintained build entry points are:
+
+```sh
+./build-linux.sh --fresh --test
+./scripts/test-linux.sh --fresh
+./scripts/test-target-builds.sh --fresh
+```
+
+Target-specific wrappers are available for Windows MinGW, macOS, and Raspberry Pi Linux ALSA builds under `scripts/`.
 
 PS: The source code is quite hackish and hardcoded. \
 My first priority is to make an accurate clone, and not to make flexible and easily modifiable code.
