@@ -1040,22 +1040,22 @@ void handleRedrawing(void)
 		{
 			instr_t *ins = instr[editor.curInstr];
 			
-			if (ins->useV2 && g_active_v2_layout != NULL)
+			if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
 			{
 				// Render V2 editor
 				v2_render_complete_layout(g_active_v2_layout);
 			}
-			else if (ins->useOsTirus && g_active_ostirus_layout != NULL)
+			else if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
 			{
 				// Render OsTIrus editor
 				osti_render_complete_layout(g_active_ostirus_layout);
 			}
-			else if (ins->useDexed && g_dexed_layout_singleton != NULL)
+			else if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
 			{
 				// Render Dexed editor
 				dx_render_complete_layout(g_dexed_layout_singleton);
 			}
-			else if (ins->useTF4 && g_active_tunefish_layout != NULL)
+			else if (ins->useTF4 && g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
 			{
 				// Render Tunefish editor
 				tf_render_complete_layout(g_active_tunefish_layout);
@@ -1063,14 +1063,14 @@ void handleRedrawing(void)
 			else
 			{
 				// No synth editor active, fall back to normal rendering
-				ui.synthEditorShown = false;
+				ft2_close_synth_editor();
 				return;
 			}
 		}
 		else
 		{
 			// Invalid instrument, fall back to normal rendering
-			ui.synthEditorShown = false;
+			ft2_close_synth_editor();
 			return;
 		}
 		

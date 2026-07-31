@@ -36,6 +36,47 @@ static int16_t mouseShape;
 static int32_t mouseModeGfxOffs, mouseBusyGfxFrame;
 static SDL_Cursor *cursors[NUM_CURSORS];
 
+static bool handleSynthEditorMouseEvent(bool pressed)
+{
+	if (!ui.synthEditorShown)
+		return false;
+
+	if (editor.curInstr < 1 || editor.curInstr > MAX_INST || instr[editor.curInstr] == NULL)
+	{
+		ft2_close_synth_editor();
+		return true;
+	}
+
+	instr_t *ins = instr[editor.curInstr];
+
+	if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
+	{
+		(void)v2_handle_layout_mouse_event(g_active_v2_layout, mouse.x, mouse.y, pressed);
+		return true;
+	}
+
+	if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
+	{
+		(void)osti_handle_layout_mouse_event(g_active_ostirus_layout, mouse.x, mouse.y, pressed);
+		return true;
+	}
+
+	if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
+	{
+		(void)dx_handle_layout_mouse_event(g_dexed_layout_singleton, mouse.x, mouse.y, pressed);
+		return true;
+	}
+
+	if (ins->useTF4 && g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
+	{
+		(void)tf_handle_layout_mouse_event(g_active_tunefish_layout, mouse.x, mouse.y, pressed);
+		return true;
+	}
+
+	ft2_close_synth_editor();
+	return true;
+}
+
 #if defined __APPLE__ && defined __aarch64__
 void armMacGhostMouseCursorFix(void)
 {
@@ -605,56 +646,29 @@ static bool testPatternDataMouseDown(void)
 
 void mouseButtonUpHandler(uint8_t mouseButton)
 {
-	// Check if synth editor is active and handle mouse events
-	if (ui.synthEditorShown)
-	{
-		extern struct editor_t editor;
-		if (editor.curInstr >= 1 && editor.curInstr <= MAX_INST && instr[editor.curInstr] != NULL)
-		{
-			instr_t *ins = instr[editor.curInstr];
-			
-			if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
-			{
-				if (v2_handle_layout_mouse_event(g_active_v2_layout, mouse.x, mouse.y, false))
-				{
-					// Event was handled by V2 editor
-					return;
-				}
-			}
-			if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
-			{
-				if (osti_handle_layout_mouse_event(g_active_ostirus_layout, mouse.x, mouse.y, false))
-				{
-					// Event was handled by OsTIrus editor
-					return;
-				}
-			}
-			if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
-			{
-				// Handle Dexed editor mouse events
-				if (dx_handle_layout_mouse_event(g_dexed_layout_singleton, mouse.x, mouse.y, false))
-				{
-					// Event was handled by Dexed editor
-					return;
-				}
-			}
-			else if (ins->useTF4 && g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
-			{
-				// Handle Tunefish editor mouse events
-				if (tf_handle_layout_mouse_event(g_active_tunefish_layout, mouse.x, mouse.y, false))
-				{
-					// Event was handled by Tunefish editor
-					return;
-				}
-			}
-		}
-	}
-
 	if (mouseButton == SDL_BUTTON_LEFT)
 	{
 		mouse.leftButtonPressed = false;
 		mouse.leftButtonReleased = true;
+	}
+	else if (mouseButton == SDL_BUTTON_RIGHT)
+	{
+		mouse.rightButtonPressed = false;
+		mouse.rightButtonReleased = true;
+	}
 
+	if (handleSynthEditorMouseEvent(false))
+	{
+		mouse.firstTimePressingButton = false;
+		mouse.buttonCounter = 0;
+		editor.textCursorBlinkCounter = 0;
+		mouse.lastUsedObjectID = OBJECT_ID_NONE;
+		mouse.lastUsedObjectType = OBJECT_NONE;
+		return;
+	}
+
+	if (mouseButton == SDL_BUTTON_LEFT)
+	{
 		if (ui.leftLoopPinMoving)
 		{
 			setLeftLoopPinState(false);
@@ -669,9 +683,6 @@ void mouseButtonUpHandler(uint8_t mouseButton)
 	}
 	else if (mouseButton == SDL_BUTTON_RIGHT)
 	{
-		mouse.rightButtonPressed = false;
-		mouse.rightButtonReleased = true;
-
 		if (editor.editSampleFlag)
 		{
 			// right mouse button released after hand-editing sample data
@@ -736,49 +747,20 @@ void mouseButtonDownHandler(uint8_t mouseButton)
 	// Check if synth editor is active and handle mouse events
 	if (ui.synthEditorShown)
 	{
-		extern struct editor_t editor;
-		if (editor.curInstr >= 1 && editor.curInstr <= MAX_INST && instr[editor.curInstr] != NULL)
+		if (mouseButton == SDL_BUTTON_LEFT)
 		{
-			instr_t *ins = instr[editor.curInstr];
-
-			if (mouseButton == SDL_BUTTON_LEFT)
-			{
-				mouse.leftButtonPressed = true;
-				mouse.leftButtonReleased = false;
-			}
-			else if (mouseButton == SDL_BUTTON_RIGHT)
-			{
-				mouse.rightButtonPressed = true;
-				mouse.rightButtonReleased = false;
-			}
-			
-			if (ins->useV2 && g_active_v2_layout != NULL && g_active_v2_layout->visible)
-			{
-				// Handle V2 editor mouse events
-				v2_handle_layout_mouse_event(g_active_v2_layout, mouse.x, mouse.y, true);
-				return;
-			}
-			if (ins->useOsTirus && g_active_ostirus_layout != NULL && g_active_ostirus_layout->visible)
-			{
-				if (osti_handle_layout_mouse_event(g_active_ostirus_layout, mouse.x, mouse.y, true))
-				{
-					// Handle OsTIrus editor mouse events
-					return;
-				}
-			}
-			if (ins->useDexed && g_dexed_layout_singleton != NULL && g_dexed_layout_singleton->visible)
-			{
-				// Handle Dexed editor mouse events
-				dx_handle_layout_mouse_event(g_dexed_layout_singleton, mouse.x, mouse.y, true);
-				return;
-			}
-			else if (ins->useTF4 && g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
-			{
-				// Handle Tunefish editor mouse events
-				tf_handle_layout_mouse_event(g_active_tunefish_layout, mouse.x, mouse.y, true);
-				return;
-			}
+			mouse.leftButtonPressed = true;
+			mouse.leftButtonReleased = false;
 		}
+		else if (mouseButton == SDL_BUTTON_RIGHT)
+		{
+			mouse.rightButtonPressed = true;
+			mouse.rightButtonReleased = false;
+		}
+
+		if (handleSynthEditorMouseEvent(true))
+			return;
+
 		return;
 	}
 
