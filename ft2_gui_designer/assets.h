@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "shared/ft2_ui_assets.h"
 
 #define DESIGNER_MAX_BITMAPS 256
 #define DESIGNER_BITMAP_NAME_MAX 64
@@ -11,6 +12,8 @@ typedef struct {
     uint16_t w;
     uint16_t h;
     uint8_t *pixels;
+    uint32_t *pixels32;
+    ft2_ui_bmp_format_t format;
     uint8_t transparent_index;
     char name[DESIGNER_BITMAP_NAME_MAX];
 } designer_bitmap_t;
@@ -36,3 +39,4 @@ bool designer_import_bitmap(const char *path, int *out_id);
 int designer_bitmap_transparent_index(int id);
 bool designer_set_bitmap_transparent_index(int id, int index);
 uint32_t designer_custom_palette_color(int index);
+bool designer_bitmap_has_truecolor(int id);

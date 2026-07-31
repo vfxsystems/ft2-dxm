@@ -7,10 +7,12 @@
 #include "ft2_header.h"
 #include "ft2_gui.h"
 #include "ft2_video.h"
+#include "ft2_bmp.h"
 #include "ft2_inst_ed.h"
 #include "ft2_structs.h"
 #include "ft2_ostirus_complete_layout.h"
 #include "ft2_ostirus_complete_layout_schema.h"
+#include "shared/ft2_ui_assets.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1462,9 +1464,53 @@ static TunefishWidget *osti_create_wave_from_desc(const ft2_ui_waveform_view_des
     return tf_create_waveform_view(d->name ? d->name : "waveform_view", d->x, d->y, d->w, d->h);
 }
 
+static const ft2_ui_bitmap_asset_t *osti_find_bitmap_asset(uint16_t id)
+{
+    for (uint16_t i = 0; i < ft2_ui_assets.bitmap_count; i++)
+    {
+        if (ft2_ui_assets.bitmaps[i].id == id)
+            return &ft2_ui_assets.bitmaps[i];
+    }
+    return NULL;
+}
+
+static TunefishWidget *osti_create_bitmap_from_desc(const ft2_ui_bitmap_desc_t *d)
+{
+    if (!d) return NULL;
+
+    const ft2_ui_bitmap_asset_t *asset = osti_find_bitmap_asset(d->bitmap_id);
+    if (!asset || !asset->bmp)
+        return NULL;
+
+    int32_t bmp_w = 0;
+    int32_t bmp_h = 0;
+    TunefishWidget *w = NULL;
+
+    if (asset->fmt == FT2_UI_BMP_FMT_RLE4)
+    {
+        uint8_t *pixels = ft2_bmp_decode_rle4_to_pal(asset->bmp, &bmp_w, &bmp_h);
+        if (!pixels) return NULL;
+        w = tf_create_bitmap("osti_bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
+    }
+    else if (asset->fmt == FT2_UI_BMP_FMT_RGB)
+    {
+        uint32_t *pixels = ft2_bmp_decode_to_rgb32(asset->bmp, &bmp_w, &bmp_h);
+        if (!pixels) return NULL;
+        w = tf_create_bitmap32("osti_bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
+    }
+
+    if (w)
+    {
+        w->bitmapLayer = d->layer;
+        w->bitmapSkinPart = d->skin_part;
+    }
+
+    return w;
+}
+
 static OsTirusCompleteLayout *osti_create_complete_layout_from_schema(const ft2_ui_layout_desc_t *desc)
 {
-    if (!desc) return NULL;
+    if (!desc || desc->version != FT2_UI_SCHEMA_VERSION) return NULL;
 
     OsTirusCompleteLayout *layout = (OsTirusCompleteLayout *)calloc(1, sizeof(OsTirusCompleteLayout));
     if (!layout) return NULL;
@@ -1480,6 +1526,17 @@ static OsTirusCompleteLayout *osti_create_complete_layout_from_schema(const ft2_
     layout->arp_drag_step_index = -1;
     for (int i = 0; i < OSTI_ARP_STEP_COUNT; ++i)
         layout->arp_step_widgets[i] = NULL;
+
+    if (desc->bitmaps.count > 0 && desc->bitmap_desc)
+    {
+        for (uint16_t i = 0; i < desc->bitmaps.count; ++i)
+        {
+            const ft2_ui_bitmap_desc_t *d = &desc->bitmap_desc[i];
+            TunefishWidget *w = osti_create_bitmap_from_desc(d);
+            if (!w) continue;
+            osti_schema_register_widget(layout, w, d->page);
+        }
+    }
 
     if (desc->waveform_views.count > 0 && desc->waveform_view_desc)
     {

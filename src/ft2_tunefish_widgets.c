@@ -23,6 +23,23 @@ static void tf_draw_waveform_view_ft2(const TunefishWidget* widget);
 
 // Helper Functions for Tunefish-style Drawing
 
+static bool tf_is_arp_step_widget(const TunefishWidget *widget)
+{
+    return widget && strncmp(widget->name, "arp_step_", 9) == 0;
+}
+
+static int tf_parse_arp_step_index(const TunefishWidget *widget)
+{
+    if (!tf_is_arp_step_widget(widget))
+        return -1;
+
+    int idx = -1;
+    if (sscanf(widget->name, "arp_step_%d", &idx) != 1)
+        return -1;
+
+    return idx - 1;
+}
+
 // Convert Tunefish colors to FT2 palette indices
 static uint8_t tf_color_to_ft2_palette(uint32_t tfColor) {
     // Map Tunefish colors to closest FT2 palette colors
@@ -482,13 +499,19 @@ static void tf_draw_group_box_ft2(const TunefishWidget* widget) {
 
 static void tf_draw_bitmap_ft2(const TunefishWidget* widget)
 {
-    if (!widget || !widget->visible || !widget->bitmapPixels) return;
+    if (!widget || !widget->visible) return;
 
     const int w = (widget->bitmapW > 0) ? widget->bitmapW : widget->w;
     const int h = (widget->bitmapH > 0) ? widget->bitmapH : widget->h;
     if (w <= 0 || h <= 0) return;
 
-    blit((uint16_t)widget->x, (uint16_t)widget->y, widget->bitmapPixels, (uint16_t)w, (uint16_t)h);
+    if (widget->bitmap32) {
+        if (!widget->bitmapPixels32) return;
+        blit32((uint16_t)widget->x, (uint16_t)widget->y, widget->bitmapPixels32, (uint16_t)w, (uint16_t)h);
+    } else {
+        if (!widget->bitmapPixels) return;
+        blit((uint16_t)widget->x, (uint16_t)widget->y, widget->bitmapPixels, (uint16_t)w, (uint16_t)h);
+    }
 }
 
 // Label Drawing
@@ -579,39 +602,104 @@ static void tf_draw_parameter_control_ft2(const TunefishWidget* widget) {
 static void tf_draw_linear_slider_ft2(const TunefishWidget* widget) {
     if (!widget || !widget->visible) return;
 
+    if (tf_is_arp_step_widget(widget)) {
+        const int stepIndex = tf_parse_arp_step_index(widget);
+        const bool active = widget->pressed || widget->value > 0.001f || widget->modValue > 0.001f;
+        const uint8_t bgColor = active ? PAL_BUTTON2 : PAL_DSKTOP2;
+        const uint8_t barColor = active ? PAL_PATTEXT : PAL_BUTTON1;
+        const uint8_t frameColor = active ? PAL_FORGRND : PAL_BCKGRND;
+
+        fillRect(widget->x, widget->y, widget->w, widget->h, PAL_BUTTONS);
+        hLine(widget->x, widget->y, widget->w, frameColor);
+        hLine(widget->x, widget->y + widget->h - 1, widget->w, frameColor);
+        vLine(widget->x, widget->y, widget->h, frameColor);
+        vLine(widget->x + widget->w - 1, widget->y, widget->h, frameColor);
+
+        const int innerX = widget->x + 1;
+        const int innerY = widget->y + 1;
+        const int innerW = widget->w - 2;
+        const int innerH = widget->h - 2;
+        if (innerW <= 0 || innerH <= 0)
+            return;
+
+        int barW = 2 + (int)lroundf(widget->modValue * (float)(innerW - 2));
+        int barH = 2 + (int)lroundf(widget->value * (float)(innerH - 2));
+        if (barW < 2) barW = 2;
+        if (barH < 2) barH = 2;
+        if (barW > innerW) barW = innerW;
+        if (barH > innerH) barH = innerH;
+
+        const int barX = innerX + (innerW - barW) / 2;
+        const int barY = innerY + innerH - barH;
+        fillRect(barX, barY, barW, barH, bgColor);
+        hLine(barX, barY, barW, barColor);
+        hLine(barX, barY + barH - 1, barW, barColor);
+        vLine(barX, barY, barH, barColor);
+        vLine(barX + barW - 1, barY, barH, barColor);
+
+        if (stepIndex >= 0) {
+            char stepText[4];
+            snprintf(stepText, sizeof(stepText), "%d", stepIndex + 1);
+            const uint32_t tinyTextColor = video.palette[PAL_FORGRND];
+            textOutTiny(widget->x + 1, widget->y + 1, stepText, tinyTextColor);
+        }
+        return;
+    }
+
     // Determine orientation based on dimensions – assume vertical if height > width
     bool vertical = (widget->h > widget->w);
-    if (!vertical) return; // only implement vertical for now
 
     // Draw framework using FT2's drawFramework function
     // Use FRAMEWORK_TYPE1 for the slider border (raised appearance)
     drawFramework(widget->x, widget->y, widget->w, widget->h, FRAMEWORK_TYPE1);
 
-    // Track rectangle (leave 2px border)
-    int trackX = widget->x + widget->w/2 - 2;
-    int trackY = widget->y + 2;
-    int trackH = widget->h - 4;
-    fillRect(trackX, trackY, 3, trackH, PAL_DSKTOP2);
+    if (vertical) {
+        // Track rectangle (leave 2px border)
+        int trackX = widget->x + widget->w/2 - 2;
+        int trackY = widget->y + 2;
+        int trackH = widget->h - 4;
+        fillRect(trackX, trackY, 3, trackH, PAL_DSKTOP2);
 
-    // Handle position
-    int handleH = 6;
-    int range   = trackH - handleH;
-    int handleOffset = (int)((1.0f - widget->value) * range);
-    int handleY = trackY + handleOffset;
-    
-    // Draw handle using FT2 button style
-    fillRect(trackX - 3 + 1, handleY + 1, 9 - 2, handleH - 2, PAL_BUTTONS);
-    hLine(trackX - 3, handleY, 9, PAL_BUTTON2);
-    hLine(trackX - 3, handleY + handleH - 1, 9, PAL_BUTTON2);
-    vLine(trackX - 3, handleY, handleH, PAL_BUTTON2);
-    vLine(trackX + 5, handleY, handleH, PAL_BUTTON2);
-    hLine(trackX - 3 + 1, handleY + 1, 9 - 3, PAL_BUTTON1);
-    vLine(trackX - 3 + 1, handleY + 2, handleH - 4, PAL_BUTTON1);
+        // Handle position
+        int handleH = 6;
+        int range   = trackH - handleH;
+        int handleOffset = (int)((1.0f - widget->value) * range);
+        int handleY = trackY + handleOffset;
 
-    // Label under slider if present
-    if (widget->text[0] != '\0') {
-        int textW = textWidth(widget->text);
-        textOut(widget->x + (widget->w - textW)/2, widget->y + widget->h + 2, PAL_FORGRND, widget->text);
+        // Draw handle using FT2 button style
+        fillRect(trackX - 3 + 1, handleY + 1, 9 - 2, handleH - 2, PAL_BUTTONS);
+        hLine(trackX - 3, handleY, 9, PAL_BUTTON2);
+        hLine(trackX - 3, handleY + handleH - 1, 9, PAL_BUTTON2);
+        vLine(trackX - 3, handleY, handleH, PAL_BUTTON2);
+        vLine(trackX + 5, handleY, handleH, PAL_BUTTON2);
+        hLine(trackX - 3 + 1, handleY + 1, 9 - 3, PAL_BUTTON1);
+        vLine(trackX - 3 + 1, handleY + 2, handleH - 4, PAL_BUTTON1);
+
+        // Label under slider if present
+        if (widget->text[0] != '\0') {
+            int textW = textWidth(widget->text);
+            textOut(widget->x + (widget->w - textW)/2, widget->y + widget->h + 2, PAL_FORGRND, widget->text);
+        }
+    } else {
+        int trackX = widget->x + 2;
+        int trackY = widget->y + widget->h/2 - 1;
+        int trackW = widget->w - 4;
+        int handleW = 8;
+        int range = trackW - handleW;
+        int handleOffset = (int)(widget->value * range);
+        int handleX = trackX + handleOffset;
+
+        fillRect(trackX, trackY, trackW, 3, PAL_DSKTOP2);
+        fillRect(handleX + 1, trackY - 2, handleW - 2, 7, PAL_BUTTONS);
+        hLine(handleX, trackY - 3, handleW, PAL_BUTTON2);
+        hLine(handleX, trackY + 5, handleW, PAL_BUTTON2);
+        vLine(handleX, trackY - 3, 9, PAL_BUTTON2);
+        vLine(handleX + handleW - 1, trackY - 3, 9, PAL_BUTTON2);
+        hLine(handleX + 1, trackY - 2, handleW - 3, PAL_BUTTON1);
+        vLine(handleX + 1, trackY - 1, 5, PAL_BUTTON1);
+
+        if (widget->text[0] != '\0')
+            textOut(widget->x, widget->y - 10, PAL_FORGRND, widget->text);
     }
 }
 
@@ -789,6 +877,7 @@ TunefishWidget* tf_create_linear_slider(const char* name, int x, int y, int w, i
     widget->value = 0.5f;
     widget->minValue = 0.0f;
     widget->maxValue = 1.0f;
+    widget->modValue = 0.0f;
 
     tf_apply_tunefish_styling(widget);
     return widget;
@@ -886,6 +975,20 @@ void tf_widget_set_label(TunefishWidget* widget, const char* label) {
     }
 }
 
+void tf_widget_set_position(TunefishWidget* widget, int x, int y) {
+    if (widget) {
+        widget->x = x;
+        widget->y = y;
+    }
+}
+
+void tf_widget_set_size(TunefishWidget* widget, int w, int h) {
+    if (widget) {
+        widget->w = w;
+        widget->h = h;
+    }
+}
+
 void tf_widget_set_mod_value(TunefishWidget* widget, float modValue) {
     if (widget) {
         widget->modValue = modValue;
@@ -897,17 +1000,10 @@ void tf_widget_set_mod_value(TunefishWidget* widget, float modValue) {
 bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY, bool pressed) {
     if (!widget || !widget->visible || !widget->enabled) return false;
     
-    printf("[TF_DEBUG] Checking widget: %s (type=%d) at (%d,%d,%d,%d) for mouse at (%d,%d)\n", 
-           widget->name ? widget->name : "unnamed", widget->type, 
-           widget->x, widget->y, widget->w, widget->h, mouseX, mouseY);
-
     // Check if point is inside widget
     if (!tf_widget_is_point_inside(widget, mouseX, mouseY)) {
-        printf("[TF_DEBUG] Mouse point outside widget\n");
         return false;
     }
-    
-    printf("[TF_DEBUG] Mouse point inside widget, handling event\n");
 
     switch (widget->type) {
         case TF_WIDGET_BUTTON:
@@ -983,7 +1079,6 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                 if (normalizedAngle < 0.0f) normalizedAngle = 0.0f;
                 if (normalizedAngle > 1.0f) normalizedAngle = 1.0f;
 
-                float oldValue = widget->value;
                 widget->value = normalizedAngle;
 
                 // Call value change callback
@@ -995,25 +1090,16 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
 
         case TF_WIDGET_COMBO_BOX:
             if (pressed) {
-                printf("[TF_DEBUG] Combo box clicked: %s at (%d,%d) size (%d,%d)\n", 
-                       widget->name, widget->x, widget->y, widget->w, widget->h);
-                printf("[TF_DEBUG] Mouse: (%d,%d) Items: %d Selected: %d\n", 
-                       mouseX, mouseY, widget->comboItemCount, widget->selectedIndex);
-                
                 // Check if up/down button was clicked
                 int buttonX = widget->x + widget->w - 11;
                 int buttonW = 10;
                 int buttonH = (widget->h - 2) / 2;
 
-                printf("[TF_DEBUG] Button area: x=%d-%d, y=%d-%d\n", buttonX, buttonX + buttonW, widget->y + 1, widget->y + 1 + buttonH);
-
                 if (mouseX >= buttonX && mouseX < buttonX + buttonW) {
-                    printf("[TF_DEBUG] Clicked inside button area\n");
                     // Inside button area - check which button
                     if (mouseY >= widget->y + 1 && mouseY < widget->y + 1 + buttonH) {
                         // Up button clicked - go to previous preset
                         if (widget->comboItems && widget->comboItemCount > 0) {
-                            int oldIndex = widget->selectedIndex;
                             widget->selectedIndex--;
                             if (widget->selectedIndex < 0) {
                                 widget->selectedIndex = widget->comboItemCount - 1;
@@ -1029,10 +1115,6 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                                 widget->onValueChange(widget, widget->value);
                             }
 
-                            printf("⬆️ [COMBO] %s: '%s' → '%s' (UP)\n",
-                                   widget->name,
-                                   widget->comboItems[oldIndex],
-                                   widget->comboItems[widget->selectedIndex]);
                             // Call combo change callback
                             if (widget->onComboSelect) {
                                 widget->onComboSelect(widget, widget->selectedIndex);
@@ -1042,7 +1124,6 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                                mouseY < widget->y + widget->h - 1) {
                         // Down button clicked - go to next preset
                         if (widget->comboItems && widget->comboItemCount > 0) {
-                            int oldIndex = widget->selectedIndex;
                             widget->selectedIndex = (widget->selectedIndex + 1) % widget->comboItemCount;
                             if (widget->comboItemCount > 1) {
                                 widget->value = (float)widget->selectedIndex / (float)(widget->comboItemCount - 1);
@@ -1054,10 +1135,6 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                                 widget->onValueChange(widget, widget->value);
                             }
 
-                            printf("⬇️ [COMBO] %s: '%s' → '%s' (DOWN)\n",
-                                   widget->name,
-                                   widget->comboItems[oldIndex],
-                                   widget->comboItems[widget->selectedIndex]);
                             // Call combo change callback
                             if (widget->onComboSelect) {
                                 widget->onComboSelect(widget, widget->selectedIndex);
@@ -1066,9 +1143,7 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                     }
                 } else {
                     // Main combo box area clicked - could open dropdown or cycle through items
-                    printf("[TF_DEBUG] Clicked main combo area - cycling to next item\n");
                     if (widget->comboItems && widget->comboItemCount > 0) {
-                        int oldIndex = widget->selectedIndex;
                         widget->selectedIndex = (widget->selectedIndex + 1) % widget->comboItemCount;
                         if (widget->comboItemCount > 1) {
                             widget->value = (float)widget->selectedIndex / (float)(widget->comboItemCount - 1);
@@ -1080,10 +1155,6 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                             widget->onValueChange(widget, widget->value);
                         }
 
-                        printf("⬌ [COMBO] %s: '%s' → '%s' (CYCLE)\n",
-                               widget->name,
-                               widget->comboItems[oldIndex],
-                               widget->comboItems[widget->selectedIndex]);
                         // Call combo change callback
                         if (widget->onComboSelect) {
                             widget->onComboSelect(widget, widget->selectedIndex);
@@ -1102,18 +1173,11 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
                 if (relativeX < buttonW) {
                     // Up button clicked
                     float step = 1.0f / (widget->maxValue - widget->minValue);
-                    float oldValue = widget->value;
                     widget->value = fminf(widget->value + step, 1.0f);
-                    printf("⬆️ [PARAM] %s: %.2f → %.2f (UP)\n", widget->name, oldValue, widget->value);
                 } else if (relativeX > widget->w - buttonW) {
                     // Down button clicked
                     float step = 1.0f / (widget->maxValue - widget->minValue);
-                    float oldValue = widget->value;
                     widget->value = fmaxf(widget->value - step, 0.0f);
-                    printf("⬇️ [PARAM] %s: %.2f → %.2f (DOWN)\n", widget->name, oldValue, widget->value);
-                } else {
-                    // Value display clicked - could implement direct editing
-                    printf("📊 [PARAM] %s: Value display clicked\n", widget->name);
                 }
 
                 // Call value change callback
@@ -1126,22 +1190,27 @@ bool tf_widget_handle_mouse_event(TunefishWidget* widget, int mouseX, int mouseY
         case TF_WIDGET_LINEAR_SLIDER: {
             if (!pressed) return true;
 
-            // Assume vertical orientation (height > width)
-            if (widget->h <= 0) return true;
-            float norm = 1.0f - (float)(mouseY - widget->y) / (float)widget->h;
+            bool vertical = (widget->h > widget->w);
+            float norm;
+
+            if (vertical) {
+                if (widget->h <= 0) return true;
+                norm = 1.0f - (float)(mouseY - widget->y) / (float)widget->h;
+            } else {
+                if (widget->w <= 0) return true;
+                norm = (float)(mouseX - widget->x) / (float)widget->w;
+            }
+
             if (norm < 0.0f) norm = 0.0f;
             if (norm > 1.0f) norm = 1.0f;
 
-            float oldVal = widget->value;
             widget->value = norm;
-            printf("🎚️  [SLIDER] %s: %.2f → %.2f\n", widget->name, oldVal, widget->value);
 
             if (widget->onValueChange) widget->onValueChange(widget, widget->value);
             return true;
         }
 
         default:
-            printf("❓ [WIDGET] %s: Unhandled widget type %d\n", widget->name, widget->type);
             return false;
     }
 }
@@ -1168,6 +1237,10 @@ void tf_widget_destroy(TunefishWidget* widget) {
     if (widget->bitmapOwned && widget->bitmapPixels) {
         free(widget->bitmapPixels);
         widget->bitmapPixels = NULL;
+    }
+    if (widget->bitmapOwned && widget->bitmapPixels32) {
+        free(widget->bitmapPixels32);
+        widget->bitmapPixels32 = NULL;
     }
 
     free(widget);
@@ -1228,7 +1301,6 @@ static void tf_draw_waveform_view_ft2(const TunefishWidget* widget) {
 
 
 TunefishWidget* tf_create_waveform_view(const char* name, int x, int y, int w, int h) {
-    printf("🌊 [WIDGET] Creating waveform view widget '%s' at (%d,%d) %dx%d\n", name, x, y, w, h);
     TunefishWidget* widget = (TunefishWidget*)calloc(1, sizeof(TunefishWidget));
     if (!widget) return NULL;
     
@@ -1270,6 +1342,28 @@ TunefishWidget* tf_create_bitmap(const char* name, int x, int y, int w, int h, u
     widget->bitmapW = bmp_w;
     widget->bitmapH = bmp_h;
     widget->bitmapOwned = take_ownership;
+
+    return widget;
+}
+
+TunefishWidget* tf_create_bitmap32(const char* name, int x, int y, int w, int h, uint32_t *pixels, int bmp_w, int bmp_h, bool take_ownership)
+{
+    TunefishWidget* widget = (TunefishWidget*)calloc(1, sizeof(TunefishWidget));
+    if (!widget) return NULL;
+
+    strncpy(widget->name, name ? name : "bitmap", sizeof(widget->name) - 1);
+    widget->x = x;
+    widget->y = y;
+    widget->w = (w > 0) ? w : bmp_w;
+    widget->h = (h > 0) ? h : bmp_h;
+    widget->type = TF_WIDGET_BITMAP;
+    widget->visible = true;
+    widget->enabled = false;
+    widget->bitmapPixels32 = pixels;
+    widget->bitmapW = bmp_w;
+    widget->bitmapH = bmp_h;
+    widget->bitmapOwned = take_ownership;
+    widget->bitmap32 = true;
 
     return widget;
 }

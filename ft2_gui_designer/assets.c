@@ -5,8 +5,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include <ctype.h>
 #include "third_party/stb_image.h"
+
+#ifdef _WIN32
+static int designer_strcasecmp(const char *a, const char *b)
+{
+    unsigned char ca, cb;
+
+    if (a == NULL || b == NULL)
+        return (a == b) ? 0 : (a ? 1 : -1);
+
+    while (*a != '\0' && *b != '\0')
+    {
+        ca = (unsigned char)tolower((unsigned char)*a++);
+        cb = (unsigned char)tolower((unsigned char)*b++);
+        if (ca != cb)
+            return (int)ca - (int)cb;
+    }
+
+    return (int)(unsigned char)tolower((unsigned char)*a) -
+           (int)(unsigned char)tolower((unsigned char)*b);
+}
+#define strcasecmp designer_strcasecmp
+#else
+#include <strings.h>
+#endif
 
 enum
 {
@@ -540,6 +564,53 @@ static uint8_t *loadBMPToRGBPalMapped(const uint8_t *src, int *out_w, int *out_h
     return outData;
 }
 
+static uint32_t *loadBMPToRGB32(const uint8_t *src, int *out_w, int *out_h)
+{
+    if (!src)
+        return NULL;
+
+    const bmpHeader_t *hdr = (const bmpHeader_t *)&src[2];
+    if (hdr->biCompression != COMP_RGB)
+        return NULL;
+
+    int32_t width = hdr->biWidth;
+    int32_t height = hdr->biHeight;
+    bool top_down = false;
+
+    if (height < 0) {
+        height = -height;
+        top_down = true;
+    }
+
+    if (width <= 0 || height <= 0 || (hdr->biBitCount != 24 && hdr->biBitCount != 32))
+        return NULL;
+
+    int bytes_per_pixel = hdr->biBitCount / 8;
+    const uint8_t *pData = &src[hdr->bfOffBits];
+    int row_stride = (width * bytes_per_pixel + 3) & ~3;
+
+    uint32_t *outData = (uint32_t *)malloc((size_t)width * (size_t)height * sizeof(uint32_t));
+    if (!outData)
+        return NULL;
+
+    for (int y = 0; y < height; y++) {
+        int src_y = top_down ? y : (height - 1 - y);
+        const uint8_t *row = pData + src_y * row_stride;
+        for (int x = 0; x < width; x++) {
+            const uint8_t *pix = &row[x * bytes_per_pixel];
+            uint8_t b = pix[0];
+            uint8_t g = pix[1];
+            uint8_t r = pix[2];
+            uint8_t a = (bytes_per_pixel == 4) ? pix[3] : 255;
+            outData[y * width + x] = (a < 128) ? 0x00FF00 : (0xFF000000 | RGB32(r, g, b));
+        }
+    }
+
+    if (out_w) *out_w = width;
+    if (out_h) *out_h = height;
+    return outData;
+}
+
 static uint8_t *decode_bmp_to_pal(const uint8_t *src, int *out_w, int *out_h, bool use_custom_palette)
 {
     if (!src)
@@ -556,9 +627,9 @@ static uint8_t *decode_bmp_to_pal(const uint8_t *src, int *out_w, int *out_h, bo
     return NULL;
 }
 
-static bool add_bitmap_entry(int id, const char *name, uint8_t *pixels, int w, int h)
+static bool add_bitmap_entry(int id, const char *name, uint8_t *pixels, uint32_t *pixels32, int w, int h, ft2_ui_bmp_format_t format)
 {
-    if (g_bitmap_count >= DESIGNER_MAX_BITMAPS || !pixels)
+    if (g_bitmap_count >= DESIGNER_MAX_BITMAPS || (!pixels && !pixels32))
         return false;
 
     designer_bitmap_t *bmp = &g_bitmaps[g_bitmap_count++];
@@ -566,6 +637,8 @@ static bool add_bitmap_entry(int id, const char *name, uint8_t *pixels, int w, i
     bmp->w = (uint16_t)w;
     bmp->h = (uint16_t)h;
     bmp->pixels = pixels;
+    bmp->pixels32 = pixels32;
+    bmp->format = format;
     bmp->transparent_index = 0;
     if (name)
         snprintf(bmp->name, sizeof(bmp->name), "%s", name);
@@ -596,12 +669,19 @@ static void load_builtin_bitmaps(void)
         int h = 0;
         bool use_custom_palette = (asset->fmt != FT2_UI_BMP_FMT_RGB);
         uint8_t *pixels = decode_bmp_to_pal(asset->bmp, &w, &h, use_custom_palette);
-        if (!pixels)
+        uint32_t *pixels32 = NULL;
+        if (asset->fmt == FT2_UI_BMP_FMT_RGB)
+            pixels32 = loadBMPToRGB32(asset->bmp, &w, &h);
+
+        if (!pixels && !pixels32)
             continue;
 
         char name[DESIGNER_BITMAP_NAME_MAX];
         snprintf(name, sizeof(name), "builtin_%d", asset->id);
-        add_bitmap_entry(asset->id, name, pixels, w, h);
+        if (!add_bitmap_entry(asset->id, name, pixels, pixels32, w, h, asset->fmt)) {
+            free(pixels);
+            free(pixels32);
+        }
     }
 }
 
@@ -663,6 +743,26 @@ static uint8_t *decode_rgba_to_pal(const uint8_t *rgba, int w, int h)
     return outData;
 }
 
+static uint32_t *decode_rgba_to_rgb32(const uint8_t *rgba, int w, int h)
+{
+    if (!rgba || w <= 0 || h <= 0)
+        return NULL;
+
+    uint32_t *outData = (uint32_t *)malloc((size_t)w * (size_t)h * sizeof(uint32_t));
+    if (!outData)
+        return NULL;
+
+    for (int i = 0; i < w * h; i++) {
+        uint8_t r = rgba[i * 4 + 0];
+        uint8_t g = rgba[i * 4 + 1];
+        uint8_t b = rgba[i * 4 + 2];
+        uint8_t a = rgba[i * 4 + 3];
+        outData[i] = (a < 128) ? 0x00FF00 : (0xFF000000 | RGB32(r, g, b));
+    }
+
+    return outData;
+}
+
 bool init_designer_assets(void)
 {
     memset(&g_assets, 0, sizeof (g_assets));
@@ -699,7 +799,9 @@ void free_designer_assets(void)
     free(g_assets.radiobutton_gfx);
     for (int i = 0; i < g_bitmap_count; i++) {
         free(g_bitmaps[i].pixels);
+        free(g_bitmaps[i].pixels32);
         g_bitmaps[i].pixels = NULL;
+        g_bitmaps[i].pixels32 = NULL;
     }
     memset(&g_assets, 0, sizeof (g_assets));
     memset(g_bitmaps, 0, sizeof (g_bitmaps));
@@ -754,8 +856,10 @@ bool designer_import_bitmap(const char *path, int *out_id)
 
     const char *ext = strrchr(path, '.');
     uint8_t *pixels = NULL;
+    uint32_t *pixels32 = NULL;
     int w = 0;
     int h = 0;
+    ft2_ui_bmp_format_t format = FT2_UI_BMP_FMT_RLE4;
 
     if (ext && (strcasecmp(ext, ".bmp") == 0)) {
         size_t len = 0;
@@ -763,22 +867,29 @@ bool designer_import_bitmap(const char *path, int *out_id)
         if (!file_data)
             return false;
         pixels = decode_bmp_to_pal(file_data, &w, &h, false);
+        pixels32 = loadBMPToRGB32(file_data, &w, &h);
+        if (pixels32)
+            format = FT2_UI_BMP_FMT_RGB;
         free(file_data);
     } else {
         int comp = 0;
         stbi_uc *data = stbi_load(path, &w, &h, &comp, 4);
         if (data) {
             pixels = decode_rgba_to_pal(data, w, h);
+            pixels32 = decode_rgba_to_rgb32(data, w, h);
+            if (pixels32)
+                format = FT2_UI_BMP_FMT_RGB;
             stbi_image_free(data);
         }
     }
 
-    if (!pixels)
+    if (!pixels && !pixels32)
         return false;
 
     int id = g_next_custom_id++;
-    if (!add_bitmap_entry(id, path, pixels, w, h)) {
+    if (!add_bitmap_entry(id, path, pixels, pixels32, w, h, format)) {
         free(pixels);
+        free(pixels32);
         return false;
     }
 
@@ -810,6 +921,12 @@ bool designer_set_bitmap_transparent_index(int id, int index)
     if (index > 15) index = 15;
     bmp->transparent_index = (uint8_t)index;
     return true;
+}
+
+bool designer_bitmap_has_truecolor(int id)
+{
+    const designer_bitmap_t *bmp = designer_bitmap_by_id(id);
+    return bmp && bmp->pixels32 != NULL;
 }
 
 uint32_t designer_custom_palette_color(int index)

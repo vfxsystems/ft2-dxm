@@ -39,7 +39,7 @@ typedef struct bmpHeader_t
 	int32_t biClrImportant;
 } bmpHeader_t;
 
-static uint32_t *loadBMPTo32Bit(const uint8_t *src);
+static uint32_t *loadBMPTo32BitEx(const uint8_t *src, int32_t *out_w, int32_t *out_h);
 static uint8_t *loadBMPTo1Bit(const uint8_t *src);
 static uint8_t *loadBMPTo4BitPal(const uint8_t *src);
 
@@ -79,7 +79,7 @@ bool loadBMPs(void)
 	memset(&bmp, 0, sizeof (bmp));
 
 	bmp.ft2OldAboutLogo = loadBMPTo4BitPal(ft2OldAboutLogoBMP);
-	bmp.ft2AboutLogo = loadBMPTo32Bit(ft2AboutLogoBMP);
+	bmp.ft2AboutLogo = loadBMPTo32BitEx(ft2AboutLogoBMP, NULL, NULL);
 	bmp.buttonGfx = loadBMPTo1Bit(buttonGfxBMP);
 	bmp.font1 = loadBMPTo1Bit(font1BMP);
 	bmp.font2 = loadBMPTo1Bit(font2BMP);
@@ -171,16 +171,64 @@ void freeBMPs(void)
 #define CHECK_DST32_BOUNDARY_X
 #endif
 
-static uint32_t *loadBMPTo32Bit(const uint8_t *src)
+static uint32_t *loadBMPTo32BitEx(const uint8_t *src, int32_t *out_w, int32_t *out_h)
 {
 	int32_t len, byte, palIdx;
 	uint32_t *tmp32, color, color2, pal[256];
+
+	if (src == NULL)
+		return NULL;
 
 	bmpHeader_t *hdr = (bmpHeader_t *)&src[2];
 	const uint8_t *pData = &src[hdr->bfOffBits];
 	const int32_t colorsInBitmap = 1 << hdr->biBitCount;
 
-	if (hdr->biCompression == COMP_RGB || hdr->biClrUsed > 256 || colorsInBitmap > 256)
+	if (hdr->biCompression == COMP_RGB)
+	{
+		int32_t width = hdr->biWidth;
+		int32_t height = hdr->biHeight;
+		bool topDown = false;
+
+		if (height < 0)
+		{
+			height = -height;
+			topDown = true;
+		}
+
+		if (width <= 0 || height <= 0 || (hdr->biBitCount != 24 && hdr->biBitCount != 32))
+			return NULL;
+
+		const int32_t bytesPerPixel = hdr->biBitCount / 8;
+		const int32_t rowStride = (width * bytesPerPixel + 3) & ~3;
+		const uint8_t *srcPixels = &src[hdr->bfOffBits];
+
+		uint32_t *outData = (uint32_t *)malloc((size_t)width * (size_t)height * sizeof (uint32_t));
+		if (outData == NULL)
+			return NULL;
+
+		for (int32_t y = 0; y < height; y++)
+		{
+			const int32_t srcY = topDown ? y : (height - 1 - y);
+			const uint8_t *row = srcPixels + (srcY * rowStride);
+			uint32_t *dst = &outData[y * width];
+
+			for (int32_t x = 0; x < width; x++)
+			{
+				const uint8_t *pix = &row[x * bytesPerPixel];
+				const uint8_t b = pix[0];
+				const uint8_t g = pix[1];
+				const uint8_t r = pix[2];
+				const uint8_t a = (bytesPerPixel == 4) ? pix[3] : 255;
+				dst[x] = (a < 128) ? 0x00FF00 : RGB32(r, g, b);
+			}
+		}
+
+		if (out_w) *out_w = width;
+		if (out_h) *out_h = height;
+		return outData;
+	}
+
+	if (hdr->biClrUsed > 256 || colorsInBitmap > 256)
 		return NULL;
 
 	uint32_t *outData = (uint32_t *)malloc(hdr->biWidth * hdr->biHeight * sizeof (uint32_t));
@@ -312,7 +360,14 @@ static uint32_t *loadBMPTo32Bit(const uint8_t *src)
 		}
 	}
 
+	if (out_w) *out_w = hdr->biWidth;
+	if (out_h) *out_h = hdr->biHeight;
 	return outData;
+}
+
+uint32_t *ft2_bmp_decode_to_rgb32(const uint8_t *src, int32_t *out_w, int32_t *out_h)
+{
+	return loadBMPTo32BitEx(src, out_w, out_h);
 }
 
 static uint8_t *loadBMPTo1Bit(const uint8_t *src) // supports 4-bit RLE only

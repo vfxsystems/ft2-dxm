@@ -34,6 +34,7 @@ static void draw_tf_meter(widget_t *widget, uint32_t *framebuffer, int fb_width,
 static void draw_tf_parameter(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y);
 static void draw_tf_group(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y);
 static void draw_tf_envelope(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y);
+static void draw_tf_arp_step(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y);
 static void draw_waveform_view(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y);
 
 static void designer_put_pixel(uint32_t *framebuffer, int fb_width, int x, int y, uint32_t color);
@@ -82,6 +83,19 @@ int add_widget(widget_manager_t *manager, int type, int x, int y)
     
     // Generate default name
     generate_unique_widget_name(widget);
+    if (type == WIDGET_TF_ARP_STEP) {
+        int next_step = 1;
+        for (int i = 0; i < manager->widget_count; i++) {
+            const widget_t *existing = &manager->widgets[i];
+            if (existing->type != WIDGET_TF_ARP_STEP && strncmp(existing->name, "arp_step_", 9) != 0)
+                continue;
+
+            int idx = 0;
+            if (sscanf(existing->name, "arp_step_%d", &idx) == 1 && idx >= next_step)
+                next_step = idx + 1;
+        }
+        snprintf(widget->name, sizeof(widget->name), "arp_step_%02d", next_step);
+    }
     
     // Set default sizes based on widget type (from FT2)
     switch (type) {
@@ -132,6 +146,9 @@ int add_widget(widget_manager_t *manager, int type, int x, int y)
             strcpy(widget->caption, "Logo");
             widget->data.logo.scale = 1;
             widget->data.logo.bitmap_id = 0;
+            widget->data.logo.layer = FT2_UI_BITMAP_LAYER_WIDGET;
+            widget->data.logo.skin_part = FT2_UI_SKIN_PART_NONE;
+            widget->data.logo.flags = FT2_UI_BITMAP_FLAG_NONE;
             break;
             
         case WIDGET_CUSTOM_BUTTON:
@@ -250,6 +267,12 @@ int add_widget(widget_manager_t *manager, int type, int x, int y)
             widget->w = 120;
             widget->h = 80;
             strcpy(widget->caption, "Group");
+            break;
+
+        case WIDGET_TF_ARP_STEP:
+            widget->w = 18;
+            widget->h = 96;
+            widget->data.tf_linear.vertical = true;
             break;
 
         case WIDGET_MIXER_STRIP:
@@ -468,16 +491,24 @@ void drag_selected_widget(widget_manager_t *manager, int new_x, int new_y)
     }
 }
 
+static bool widget_is_background_bitmap(const widget_t *widget)
+{
+    return widget && widget->type == WIDGET_LOGO &&
+           widget->data.logo.layer != FT2_UI_BITMAP_LAYER_WIDGET;
+}
+
 void render_widgets(widget_manager_t *manager, uint32_t *framebuffer, int fb_width, int offset_x, int offset_y, ft2_ui_widget_page_t current_page)
 {
-    for (int i = 0; i < manager->widget_count; i++) {
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < manager->widget_count; i++) {
         widget_t *widget = &manager->widgets[i];
         if (widget->visible) {
             bool should_render = (current_page == FT2_UI_WIDGET_PAGE_BOTH) ||
                                  (widget->page == FT2_UI_WIDGET_PAGE_BOTH) ||
                                  (widget->page == current_page);
+            bool background_bitmap = widget_is_background_bitmap(widget);
 
-            if (should_render)
+            if (should_render && ((pass == 0) == background_bitmap))
             {
                 render_widget(widget, framebuffer, fb_width, offset_x, offset_y);
             
@@ -485,6 +516,7 @@ void render_widgets(widget_manager_t *manager, uint32_t *framebuffer, int fb_wid
                     draw_selection_handles(widget, framebuffer, fb_width, offset_x, offset_y);
                 }
             }
+        }
         }
     }
 }
@@ -566,6 +598,9 @@ void render_widget(widget_t *widget, uint32_t *framebuffer, int fb_width, int of
             break;
         case WIDGET_TF_GROUP:
             draw_tf_group(widget, framebuffer, fb_width, x, y);
+            break;
+        case WIDGET_TF_ARP_STEP:
+            draw_tf_arp_step(widget, framebuffer, fb_width, x, y);
             break;
         case WIDGET_MIXER_STRIP:
             draw_framebox(widget, framebuffer, fb_width, x, y);
@@ -960,6 +995,7 @@ void place_widget(widget_manager_t *manager, int widget_kind, int x, int y, int 
         case FT2_UI_WIDGET_TF_LABEL: widget_type = WIDGET_TF_LABEL; break;
         case FT2_UI_WIDGET_TF_ROTARY_SLIDER: widget_type = WIDGET_TF_ROTARY; break;
         case FT2_UI_WIDGET_TF_LINEAR_SLIDER: widget_type = WIDGET_TF_LINEAR; break;
+        case FT2_UI_WIDGET_TF_ARP_STEP: widget_type = WIDGET_TF_ARP_STEP; break;
         case FT2_UI_WIDGET_TF_COMBO_BOX: widget_type = WIDGET_TF_COMBO; break;
         case FT2_UI_WIDGET_TF_LEVEL_METER: widget_type = WIDGET_TF_METER; break;
         case FT2_UI_WIDGET_TF_PARAMETER_CONTROL: widget_type = WIDGET_TF_PARAMETER; break;
@@ -1054,7 +1090,8 @@ void draw_widget_properties(widget_manager_t *manager, uint32_t *framebuffer, in
         "DSP Window",     // WIDGET_DSP_WINDOW = 31
         "DSP Slot",       // WIDGET_DSP_SLOT = 32
         "DSP Menu",       // WIDGET_DSP_MENU = 33
-        "DSP Param"       // WIDGET_DSP_PARAM = 34
+        "DSP Param",      // WIDGET_DSP_PARAM = 34
+        "TF Arp Step"     // WIDGET_TF_ARP_STEP = 35
     };
     
     // Bounds check to prevent crashes
@@ -1168,6 +1205,19 @@ static bool parse_string_field(char **cursor, char *out, size_t out_len)
     return true;
 }
 
+static bool designer_strnicmp_prefix(const char *a, const char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        unsigned char ca = (unsigned char)a[i];
+        unsigned char cb = (unsigned char)b[i];
+        if (ca == '\0' || cb == '\0')
+            return ca == cb;
+        if (tolower(ca) != tolower(cb))
+            return false;
+    }
+    return true;
+}
+
 
 
 bool save_design(widget_manager_t *manager, const char *filename)
@@ -1176,7 +1226,7 @@ bool save_design(widget_manager_t *manager, const char *filename)
     if (!file) return false;
 
     // Write header
-    fprintf(file, "FT2GUI_V5\n");
+    fprintf(file, "FT2GUI_V7\n");
     fprintf(file, "%d\n", manager->widget_count);
 
     // Write widgets
@@ -1185,10 +1235,11 @@ bool save_design(widget_manager_t *manager, const char *filename)
         const char *caption = (w->caption[0] != '\0') ? w->caption : "";
         const char *caption2 = (w->caption2[0] != '\0') ? w->caption2 : "";
         const char *name = (w->name[0] != '\0') ? w->name : "";
-        fprintf(file, "%d %d %d %d %d %d %d %d %d %d %d ",
+        fprintf(file, "%d %d %d %d %d %d %d %d %d %d %d %d %d %d ",
                 w->type, w->x, w->y, w->w, w->h, w->state, w->visible ? 1 : 0,
                 (int)w->page, (int)w->font_type, w->data.logo.bitmap_id,
-                w->data.scrollbar.has_nudge_buttons ? 1 : 0);
+                w->data.scrollbar.has_nudge_buttons ? 1 : 0,
+                (int)w->data.logo.layer, (int)w->data.logo.flags, (int)w->data.logo.skin_part);
         write_quoted_string(file, caption);
         fputc(' ', file);
         write_quoted_string(file, caption2);
@@ -1665,6 +1716,49 @@ static void draw_tf_group(widget_t *widget, uint32_t *framebuffer, int fb_width,
     draw_framebox(widget, framebuffer, fb_width, x, y);
 }
 
+static void draw_tf_arp_step(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y)
+{
+    int w = widget->w;
+    int h = widget->h;
+    if (w < 6 || h < 12)
+        return;
+
+    fill_rect(framebuffer, fb_width, x + 1, y + 1, w - 2, h - 2, get_palette_color(PAL_BUTTONS));
+    h_line(framebuffer, fb_width, x, y, w, get_palette_color(PAL_BCKGRND));
+    h_line(framebuffer, fb_width, x, y + h - 1, w, get_palette_color(PAL_BCKGRND));
+    v_line(framebuffer, fb_width, x, y, h, get_palette_color(PAL_BCKGRND));
+    v_line(framebuffer, fb_width, x + w - 1, y, h, get_palette_color(PAL_BCKGRND));
+
+    int inner_x = x + 2;
+    int inner_y = y + 2;
+    int inner_w = w - 4;
+    int inner_h = h - 4;
+    int bar_w = inner_w >= 5 ? 5 : inner_w;
+    int bar_x = inner_x + (inner_w - bar_w) / 2;
+    int bar_h = inner_h - 10;
+    if (bar_h < 8)
+        bar_h = inner_h;
+    int bar_y = inner_y + inner_h - bar_h;
+
+    fill_rect(framebuffer, fb_width, bar_x, bar_y, bar_w, bar_h, get_palette_color(PAL_BUTTON1));
+    h_line(framebuffer, fb_width, bar_x, bar_y, bar_w, get_palette_color(PAL_FORGRND));
+    h_line(framebuffer, fb_width, bar_x, bar_y + bar_h - 1, bar_w, get_palette_color(PAL_FORGRND));
+    v_line(framebuffer, fb_width, bar_x, bar_y, bar_h, get_palette_color(PAL_FORGRND));
+    v_line(framebuffer, fb_width, bar_x + bar_w - 1, bar_y, bar_h, get_palette_color(PAL_FORGRND));
+
+    int cap = 0;
+    if (widget->name[0] != '\0' && sscanf(widget->name, "arp_step_%d", &cap) == 1 && cap > 0) {
+        char step_text[8];
+        snprintf(step_text, sizeof(step_text), "%d", cap);
+        ft2_ui_font_id_t font_type = widget->font_type;
+        if (font_type < 0 || font_type >= FT2_UI_FONT_COUNT)
+            font_type = FT2_UI_FONT_1;
+        int text_w = get_text_width_with_font(step_text, font_type);
+        draw_text_with_font(framebuffer, fb_width, x + (w - text_w) / 2, y + 1,
+                            step_text, get_palette_color(PAL_FORGRND), font_type);
+    }
+}
+
 static void draw_tf_envelope(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int y)
 {
     int w = widget->w;
@@ -1851,15 +1945,17 @@ void draw_logo(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int
 {
     int w = widget->w;
     int h = widget->h;
+    bool framed = widget->data.logo.layer == FT2_UI_BITMAP_LAYER_WIDGET;
 
-    // Draw bounding box only (no background fill)
-    h_line(framebuffer, fb_width, x, y, w, get_palette_color(PAL_DSKTOP1));
-    h_line(framebuffer, fb_width, x, y + h - 1, w, get_palette_color(PAL_DSKTOP2));
-    v_line(framebuffer, fb_width, x, y, h, get_palette_color(PAL_DSKTOP1));
-    v_line(framebuffer, fb_width, x + w - 1, y, h, get_palette_color(PAL_DSKTOP2));
+    if (framed) {
+        h_line(framebuffer, fb_width, x, y, w, get_palette_color(PAL_DSKTOP1));
+        h_line(framebuffer, fb_width, x, y + h - 1, w, get_palette_color(PAL_DSKTOP2));
+        v_line(framebuffer, fb_width, x, y, h, get_palette_color(PAL_DSKTOP1));
+        v_line(framebuffer, fb_width, x + w - 1, y, h, get_palette_color(PAL_DSKTOP2));
+    }
     
     const designer_bitmap_t *bmp = designer_bitmap_by_id(widget->data.logo.bitmap_id);
-    if (bmp && bmp->pixels && bmp->w > 0 && bmp->h > 0) {
+    if (bmp && (bmp->pixels || bmp->pixels32) && bmp->w > 0 && bmp->h > 0) {
         uint8_t trans_idx = PAL_TRANSPR;
         if (bmp->id >= FT2_UI_BITMAP_COUNT)
             trans_idx = (uint8_t)designer_bitmap_transparent_index(bmp->id);
@@ -1868,32 +1964,44 @@ void draw_logo(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int
         int draw_h = bmp->h * scale;
         int start_x = x + (w - draw_w) / 2;
         int start_y = y + (h - draw_h) / 2;
+        int clip_left = framed ? x + 1 : x;
+        int clip_top = framed ? y + 1 : y;
+        int clip_right = framed ? x + w - 1 : x + w;
+        int clip_bottom = framed ? y + h - 1 : y + h;
+        bool draw_truecolor = bmp->pixels32 && (widget->data.logo.layer != FT2_UI_BITMAP_LAYER_WIDGET || !bmp->pixels);
 
         if (draw_w > 0 && draw_h > 0) {
             for (int dy = 0; dy < draw_h; dy++) {
                 int dst_y = start_y + dy;
-                if (dst_y < y + 1 || dst_y >= y + h - 1)
+                if (dst_y < clip_top || dst_y >= clip_bottom)
                     continue;
 
                 int src_y = dy / scale;
-                const uint8_t *src_row = &bmp->pixels[src_y * bmp->w];
+                const uint8_t *src_row = bmp->pixels ? &bmp->pixels[src_y * bmp->w] : NULL;
+                const uint32_t *src32_row = bmp->pixels32 ? &bmp->pixels32[src_y * bmp->w] : NULL;
 
                 for (int dx = 0; dx < draw_w; dx++) {
                     int dst_x = start_x + dx;
-                    if (dst_x < x + 1 || dst_x >= x + w - 1)
+                    if (dst_x < clip_left || dst_x >= clip_right)
                         continue;
 
                     int src_x = dx / scale;
-                    uint8_t pix = src_row[src_x];
-                    if (pix != PAL_TRANSPR && pix != trans_idx)
-                        framebuffer[dst_y * fb_width + dst_x] = get_palette_color(pix);
+                    if (draw_truecolor) {
+                        uint32_t pix = src32_row[src_x];
+                        if ((pix & 0x00FFFFFF) != 0x00FF00)
+                            framebuffer[dst_y * fb_width + dst_x] = pix | 0xFF000000;
+                    } else if (src_row) {
+                        uint8_t pix = src_row[src_x];
+                        if (pix != PAL_TRANSPR && pix != trans_idx)
+                            framebuffer[dst_y * fb_width + dst_x] = get_palette_color(pix);
+                    }
                 }
             }
         }
     }
     
     // Draw caption below
-    if (widget->caption[0] != '\0') {
+    if (framed && widget->caption[0] != '\0') {
         int text_x = x + (w - get_text_width_with_font(widget->caption, widget->font_type)) / 2;
         int text_y = y + h - 12;
         draw_text_with_font(framebuffer, fb_width, text_x, text_y, widget->caption, get_palette_color(PAL_BTNTEXT), widget->font_type);
@@ -1956,25 +2064,31 @@ bool load_design(widget_manager_t *manager, const char *filename)
     FILE *file = fopen(filename, "rb");
     if (!file) return false;
 
-    char header[32];
-    if (!fgets(header, sizeof(header), file)) {
-        fclose(file);
-        return false;
-    }
-
-    bool is_v5 = strncmp(header, "FT2GUI_V5", 9) == 0;
-    bool is_v4 = strncmp(header, "FT2GUI_V4", 9) == 0;
-    bool is_v3 = strncmp(header, "FT2GUI_V3", 9) == 0;
-    bool is_v2 = strncmp(header, "FT2GUI_V2", 9) == 0;
-    if (!is_v5 && !is_v4 && !is_v3 && !is_v2) {
+    char first_line[32];
+    if (!fgets(first_line, sizeof(first_line), file)) {
         fclose(file);
         return false;
     }
 
     int count;
-    if (fscanf(file, "%d\n", &count) != 1) {
-        fclose(file);
-        return false;
+    bool is_v7 = designer_strnicmp_prefix(first_line, "FT2GUI_V7", 9);
+    bool is_v6 = designer_strnicmp_prefix(first_line, "FT2GUI_V6", 9);
+    bool is_v5 = designer_strnicmp_prefix(first_line, "FT2GUI_V5", 9);
+    bool is_v4 = designer_strnicmp_prefix(first_line, "FT2GUI_V4", 9);
+    bool is_v3 = designer_strnicmp_prefix(first_line, "FT2GUI_V3", 9);
+    bool is_v2 = designer_strnicmp_prefix(first_line, "FT2GUI_V2", 9);
+
+    if (is_v7 || is_v6 || is_v5 || is_v4 || is_v3 || is_v2) {
+        if (fscanf(file, "%d\n", &count) != 1) {
+            fclose(file);
+            return false;
+        }
+    } else {
+        char *cursor = first_line;
+        if (!parse_int_field(&cursor, &count)) {
+            fclose(file);
+            return false;
+        }
     }
 
     // Clear existing widgets
@@ -2001,6 +2115,9 @@ bool load_design(widget_manager_t *manager, const char *filename)
         int font_type = 0;
         int bitmap_id = 0;
         int nudge_buttons = 0;
+        int bitmap_layer = FT2_UI_BITMAP_LAYER_WIDGET;
+        int bitmap_flags = FT2_UI_BITMAP_FLAG_NONE;
+        int skin_part = FT2_UI_SKIN_PART_NONE;
         char caption[MAX_CAPTION_LEN];
         char caption2[MAX_CAPTION_LEN];
         char name[32];
@@ -2016,7 +2133,17 @@ bool load_design(widget_manager_t *manager, const char *filename)
             break;
         }
 
-        if (is_v5 || is_v4) {
+        if (is_v7) {
+            if (!parse_int_field(&cursor, &page) ||
+                !parse_int_field(&cursor, &font_type) ||
+                !parse_int_field(&cursor, &bitmap_id) ||
+                !parse_int_field(&cursor, &nudge_buttons) ||
+                !parse_int_field(&cursor, &bitmap_layer) ||
+                !parse_int_field(&cursor, &bitmap_flags) ||
+                !parse_int_field(&cursor, &skin_part)) {
+                break;
+            }
+        } else if (is_v6 || is_v5 || is_v4) {
             if (!parse_int_field(&cursor, &page) ||
                 !parse_int_field(&cursor, &font_type) ||
                 !parse_int_field(&cursor, &bitmap_id) ||
@@ -2030,11 +2157,32 @@ bool load_design(widget_manager_t *manager, const char *filename)
                 break;
             }
         } else {
-            if (!parse_int_field(&cursor, &font_type) ||
-                !parse_int_field(&cursor, &bitmap_id)) {
-                break;
+            char *probe = cursor;
+            int legacy_page = FT2_UI_WIDGET_PAGE_BOTH;
+            int legacy_font_type = 0;
+            int legacy_bitmap_id = 0;
+            int legacy_nudge_buttons = 0;
+
+            if (parse_int_field(&probe, &legacy_page) &&
+                parse_int_field(&probe, &legacy_font_type) &&
+                parse_int_field(&probe, &legacy_bitmap_id) &&
+                parse_int_field(&probe, &legacy_nudge_buttons)) {
+                cursor = probe;
+                page = legacy_page;
+                font_type = legacy_font_type;
+                bitmap_id = legacy_bitmap_id;
+                nudge_buttons = legacy_nudge_buttons;
+            } else {
+                probe = cursor;
+                if (!parse_int_field(&probe, &legacy_font_type) ||
+                    !parse_int_field(&probe, &legacy_bitmap_id)) {
+                    break;
+                }
+                cursor = probe;
+                page = FT2_UI_WIDGET_PAGE_BOTH;
+                font_type = legacy_font_type;
+                bitmap_id = legacy_bitmap_id;
             }
-            page = FT2_UI_WIDGET_PAGE_BOTH;
         }
 
         if (!parse_string_field(&cursor, caption, sizeof(caption)) ||
@@ -2055,13 +2203,20 @@ bool load_design(widget_manager_t *manager, const char *filename)
         widget->state = (WidgetState)state;
         widget->visible = visible != 0;
         if (page < 0) page = 0;
-        if (page > 2) page = 2;
+        if (page > 6) page = 6;
         widget->page = (ft2_ui_widget_page_t)page;
         widget->font_type = (font_type >= 0 && font_type < FT2_UI_FONT_COUNT)
             ? (ft2_ui_font_id_t)font_type
             : FT2_UI_FONT_1;
         widget->data.scrollbar.has_nudge_buttons = (nudge_buttons != 0);
         widget->data.logo.bitmap_id = bitmap_id;
+        if (bitmap_layer < FT2_UI_BITMAP_LAYER_WIDGET) bitmap_layer = FT2_UI_BITMAP_LAYER_WIDGET;
+        if (bitmap_layer > FT2_UI_BITMAP_LAYER_SKIN) bitmap_layer = FT2_UI_BITMAP_LAYER_SKIN;
+        if (skin_part < FT2_UI_SKIN_PART_NONE) skin_part = FT2_UI_SKIN_PART_NONE;
+        if (skin_part > FT2_UI_SKIN_PART_METER) skin_part = FT2_UI_SKIN_PART_METER;
+        widget->data.logo.layer = (ft2_ui_bitmap_layer_t)bitmap_layer;
+        widget->data.logo.flags = (uint8_t)(bitmap_flags & 0xFF);
+        widget->data.logo.skin_part = (ft2_ui_skin_part_t)skin_part;
 
         if (strcmp(caption, "-") == 0)
             widget->caption[0] = '\0';
@@ -2077,6 +2232,12 @@ bool load_design(widget_manager_t *manager, const char *filename)
             widget->name[0] = '\0';
         else
             snprintf(widget->name, sizeof(widget->name), "%s", name);
+
+        if (type == WIDGET_TF_LINEAR && strncmp(widget->name, "arp_step_", 9) == 0) {
+            widget->type = WIDGET_TF_ARP_STEP;
+            widget->data.tf_linear.vertical = true;
+        }
+
         sanitize_widget_name(widget->name);
     }
 
@@ -2127,7 +2288,8 @@ void generate_unique_widget_name(widget_t *widget) {
         "tf_toggle", "tf_label", "tf_knob", "tf_slider", "tf_combo",
         "tf_meter", "tf_param", "tf_env", "tf_group",
         "mix_strip", "mix_gain", "mix_pan", "mix_mute", "mix_scope",
-        "mix_master", "dsp_window", "dsp_slot", "dsp_menu", "dsp_param"
+        "mix_master", "dsp_window", "dsp_slot", "dsp_menu", "dsp_param",
+        "arp_step"
     };
     
     if (widget->type < sizeof(type_names)/sizeof(type_names[0])) {
@@ -2410,6 +2572,72 @@ static bool build_rle4_bmp(const designer_bitmap_t *bmp, uint8_t transparent_ind
     return true;
 }
 
+static bool build_rgb32_bmp(const designer_bitmap_t *bmp, uint8_t **out_data, size_t *out_len)
+{
+    if (!bmp || !bmp->pixels32 || bmp->w <= 0 || bmp->h <= 0 || !out_data || !out_len)
+        return false;
+
+    const uint32_t width = bmp->w;
+    const uint32_t height = bmp->h;
+    const uint32_t header_size = 14 + 40;
+    const uint32_t row_stride = width * 4;
+    const uint32_t image_size = row_stride * height;
+    const uint32_t file_size = header_size + image_size;
+
+    uint8_t *bmp_data = (uint8_t *)malloc(file_size);
+    if (!bmp_data)
+        return false;
+
+    memset(bmp_data, 0, file_size);
+    bmp_data[0] = 'B';
+    bmp_data[1] = 'M';
+    bmp_data[2] = (uint8_t)(file_size & 0xFF);
+    bmp_data[3] = (uint8_t)((file_size >> 8) & 0xFF);
+    bmp_data[4] = (uint8_t)((file_size >> 16) & 0xFF);
+    bmp_data[5] = (uint8_t)((file_size >> 24) & 0xFF);
+    bmp_data[10] = (uint8_t)(header_size & 0xFF);
+    bmp_data[14] = 40;
+    bmp_data[18] = (uint8_t)(width & 0xFF);
+    bmp_data[19] = (uint8_t)((width >> 8) & 0xFF);
+    bmp_data[20] = (uint8_t)((width >> 16) & 0xFF);
+    bmp_data[21] = (uint8_t)((width >> 24) & 0xFF);
+    bmp_data[22] = (uint8_t)(height & 0xFF);
+    bmp_data[23] = (uint8_t)((height >> 8) & 0xFF);
+    bmp_data[24] = (uint8_t)((height >> 16) & 0xFF);
+    bmp_data[25] = (uint8_t)((height >> 24) & 0xFF);
+    bmp_data[26] = 1;
+    bmp_data[28] = 32;
+    bmp_data[34] = (uint8_t)(image_size & 0xFF);
+    bmp_data[35] = (uint8_t)((image_size >> 8) & 0xFF);
+    bmp_data[36] = (uint8_t)((image_size >> 16) & 0xFF);
+    bmp_data[37] = (uint8_t)((image_size >> 24) & 0xFF);
+    bmp_data[38] = 0x12;
+    bmp_data[39] = 0x0B;
+    bmp_data[42] = 0x12;
+    bmp_data[43] = 0x0B;
+
+    uint8_t *dst = bmp_data + header_size;
+    for (int y = (int)height - 1; y >= 0; y--) {
+        const uint32_t *src_row = &bmp->pixels32[y * width];
+        for (uint32_t x = 0; x < width; x++) {
+            uint32_t pix = src_row[x];
+            bool transparent = ((pix & 0x00FFFFFF) == DESIGNER_TRANSPARENT_KEY_COLOR) ||
+                               ((pix >> 24) != 0 && (pix >> 24) < 128);
+            uint8_t r = transparent ? 0 : (uint8_t)RGB32_R(pix);
+            uint8_t g = transparent ? 255 : (uint8_t)RGB32_G(pix);
+            uint8_t b = transparent ? 0 : (uint8_t)RGB32_B(pix);
+            *dst++ = b;
+            *dst++ = g;
+            *dst++ = r;
+            *dst++ = transparent ? 0 : 255;
+        }
+    }
+
+    *out_data = bmp_data;
+    *out_len = file_size;
+    return true;
+}
+
 static bool write_c_array_file(FILE *file, const char *array_name, const uint8_t *data, size_t len)
 {
     if (fprintf(file, "const uint8_t %s[%zu] =\n{\n", array_name, len) < 0)
@@ -2589,7 +2817,7 @@ static bool update_ui_assets_enum(const char *path, const char *enum_name)
     return insert_before_marker(path, "    FT2_UI_BITMAP_COUNT", line);
 }
 
-static bool update_ui_assets_registry(const char *path, const char *enum_name, const char *array_name)
+static bool update_ui_assets_registry(const char *path, const char *enum_name, const char *array_name, ft2_ui_bmp_format_t fmt)
 {
     size_t len = 0;
     char *data = read_text_file(path, &len);
@@ -2603,7 +2831,8 @@ static bool update_ui_assets_registry(const char *path, const char *enum_name, c
     free(data);
 
     char line[768];
-    snprintf(line, sizeof(line), "    { %s, %s, sizeof(%s), FT2_UI_BMP_FMT_RLE4 },\n", enum_name, array_name, array_name);
+    const char *fmt_name = (fmt == FT2_UI_BMP_FMT_RGB) ? "FT2_UI_BMP_FMT_RGB" : "FT2_UI_BMP_FMT_RLE4";
+    snprintf(line, sizeof(line), "    { %s, %s, sizeof(%s), %s },\n", enum_name, array_name, array_name, fmt_name);
     return insert_before_marker(path, "};\n\nconst ft2_ui_asset_registry_t ft2_ui_assets", line);
 }
 
@@ -2656,9 +2885,15 @@ static bool export_custom_bitmaps(const char *layout_prefix, const char *macro_p
         uint8_t *bmp_data = NULL;
         size_t bmp_len = 0;
         uint8_t transparent_index = (uint8_t)designer_bitmap_transparent_index(bmp->id);
+        ft2_ui_bmp_format_t export_fmt = bmp->pixels32 ? FT2_UI_BMP_FMT_RGB : FT2_UI_BMP_FMT_RLE4;
 
-        if (!build_rle4_bmp(bmp, transparent_index, &bmp_data, &bmp_len, NULL, NULL))
-            return false;
+        if (export_fmt == FT2_UI_BMP_FMT_RGB) {
+            if (!build_rgb32_bmp(bmp, &bmp_data, &bmp_len))
+                return false;
+        } else {
+            if (!build_rle4_bmp(bmp, transparent_index, &bmp_data, &bmp_len, NULL, NULL))
+                return false;
+        }
 
         if (!write_bitmap_c_h(gfxdata_dir, base_name, array_name, bmp_data, bmp_len)) {
             free(bmp_data);
@@ -2670,7 +2905,7 @@ static bool export_custom_bitmaps(const char *layout_prefix, const char *macro_p
             return false;
         if (!update_ui_assets_enum(assets_header, enum_name))
             return false;
-        if (!update_ui_assets_registry(assets_source, enum_name, array_name))
+        if (!update_ui_assets_registry(assets_source, enum_name, array_name, export_fmt))
             return false;
     }
 
@@ -2683,6 +2918,19 @@ static void write_optional_c_string(FILE *file, const char *text)
         fputs("NULL", file);
     else
         write_c_string(file, text);
+}
+
+static const char *schema_text_or_name(const widget_t *widget, bool use_caption2)
+{
+    if (!widget)
+        return NULL;
+
+    const char *text = use_caption2 ? widget->caption2 : widget->caption;
+    if (text && text[0] != '\0')
+        return text;
+    if (widget->name[0] != '\0')
+        return widget->name;
+    return NULL;
 }
 
 static void make_action_base(const widget_t *widget, char *out, size_t out_len)
@@ -2835,6 +3083,7 @@ static void collect_widget_lists(widget_manager_t *manager,
                 tf_rotaries->indices[tf_rotaries->count++] = i;
                 break;
             case WIDGET_TF_LINEAR:
+            case WIDGET_TF_ARP_STEP:
                 tf_linears->indices[tf_linears->count++] = i;
                 break;
             case WIDGET_TF_COMBO:
@@ -3120,9 +3369,9 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, 0, 0, ",
                     w->x, w->y, w->w, w->h);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, ", ");
-            write_optional_c_string(file, w->caption2);
+            write_optional_c_string(file, schema_text_or_name(w, true));
 
             char action_base[96];
             make_action_base(w, action_base, sizeof(action_base));
@@ -3198,7 +3447,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
                     macro_prefix, i, w->x, w->y, w->w, w->h,
                     w->data.framebox.border_type,
                     w->data.framebox.filled ? "true" : "false");
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, " },\n");
         }
         fprintf(file, "};\n\n");
@@ -3208,8 +3457,14 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
         fprintf(file, "static const ft2_ui_bitmap_desc_t %s_bitmaps[%s_BMP_COUNT] = {\n", symbol_name, macro_prefix);
         for (int i = 0; i < bitmaps.count; i++) {
             widget_t *w = &manager->widgets[bitmaps.indices[i]];
-            fprintf(file, "    { %s_BMP_BASE + %d, %d, %d, %d, %d, %d, %d },\n",
-                    macro_prefix, i, w->x, w->y, w->w, w->h, (int)w->page, w->data.logo.bitmap_id);
+            uint8_t flags = w->data.logo.flags;
+            if (designer_bitmap_has_truecolor(w->data.logo.bitmap_id))
+                flags |= FT2_UI_BITMAP_FLAG_TRUECOLOR;
+            if (w->data.logo.layer != FT2_UI_BITMAP_LAYER_WIDGET)
+                flags |= FT2_UI_BITMAP_FLAG_CLICK_THROUGH;
+            fprintf(file, "    { %s_BMP_BASE + %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, 255 },\n",
+                    macro_prefix, i, w->x, w->y, w->w, w->h, (int)w->page, w->data.logo.bitmap_id,
+                    (int)w->data.logo.layer, (int)flags, (int)w->data.logo.skin_part);
         }
         fprintf(file, "};\n\n");
     }
@@ -3236,7 +3491,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %d, ",
                     w->x, w->y, w->w, w->h, (int)w->page);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, " },\n");
         }
         fprintf(file, "};\n\n");
@@ -3252,7 +3507,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %d, ",
                     w->x, w->y, w->w, w->h, (int)w->page);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, ", %s },\n", pressed);
         }
         fprintf(file, "};\n\n");
@@ -3267,7 +3522,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %d, ",
                     w->x, w->y, w->w, w->h, (int)w->page);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, " },\n");
         }
         fprintf(file, "};\n\n");
@@ -3289,7 +3544,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %.3ff, %.3ff, ",
                     w->x, w->y, radius, (int)w->page, start_angle, end_angle);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, " },\n");
         }
         fprintf(file, "};\n\n");
@@ -3379,7 +3634,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %d, ",
                     w->x, w->y, w->w, w->h, (int)w->page);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, " },\n");
         }
         fprintf(file, "};\n\n");
@@ -3407,7 +3662,7 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %d, ",
                     w->x, w->y, w->w, w->h, (int)w->page);
-            write_optional_c_string(file, w->caption);
+            write_optional_c_string(file, schema_text_or_name(w, false));
             fprintf(file, " },\n");
         }
         fprintf(file, "};\n\n");
