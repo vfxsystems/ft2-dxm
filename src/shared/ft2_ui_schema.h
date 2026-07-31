@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 // Schema versioning for layout exporters/importers.
-#define FT2_UI_SCHEMA_VERSION 8
+#define FT2_UI_SCHEMA_VERSION 9
 
 // Common invalid ID sentinel.
 #define FT2_UI_INVALID_ID (-1)
@@ -232,6 +232,22 @@ typedef struct
 
 typedef struct
 {
+    uint8_t mode;
+    int16_t matrix_slot;
+    int16_t target_param;
+    float amount_scale;
+} ft2_ui_mod_ring_desc_t;
+
+typedef enum
+{
+    FT2_UI_MOD_RING_NONE = 0,
+    FT2_UI_MOD_RING_AUTO_BY_NAME = 1,
+    FT2_UI_MOD_RING_MATRIX_AMOUNT = 2,
+    FT2_UI_MOD_RING_AUTOMATION = 3
+} ft2_ui_mod_ring_mode_t;
+
+typedef struct
+{
     uint16_t id;
     const char *name;
     uint16_t x, y;
@@ -240,6 +256,7 @@ typedef struct
     float start_angle;
     float end_angle;
     const char *label;
+    ft2_ui_mod_ring_desc_t mod_ring;
 } ft2_ui_tf_rotary_slider_desc_t;
 
 typedef struct

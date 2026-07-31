@@ -340,6 +340,12 @@ static DexedCompleteLayout* dx_create_complete_layout_from_schema(const ft2_ui_l
             if (w && d->label) {
                 tf_widget_set_label(w, d->label);
             }
+            if (w) {
+                w->modRingMode = d->mod_ring.mode ? d->mod_ring.mode : FT2_UI_MOD_RING_AUTO_BY_NAME;
+                w->modMatrixSlot = d->mod_ring.matrix_slot;
+                w->modTargetParam = d->mod_ring.target_param;
+                w->modAmountScale = d->mod_ring.amount_scale > 0.0f ? d->mod_ring.amount_scale : 1.0f;
+            }
             dx_schema_register_widget(layout, w, d->page);
         }
     }

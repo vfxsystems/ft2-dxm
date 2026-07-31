@@ -1,4 +1,5 @@
 #include "palette.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -255,6 +256,33 @@ void designer_vector_line(uint32_t *framebuffer, int fb_width, float x1, float y
             err += dx;
             iy1 += sy;
         }
+    }
+}
+
+void designer_vector_arc(uint32_t *framebuffer, int fb_width, float cx, float cy, float radius, float start_angle, float end_angle, float thickness, uint32_t color)
+{
+    if (radius <= 0.0f || thickness <= 0.0f || start_angle == end_angle)
+        return;
+
+    const float sweep = end_angle - start_angle;
+    int steps = (int)ceilf(fabsf(sweep) * radius * 0.75f);
+    if (steps < 4)
+        steps = 4;
+    else if (steps > 192)
+        steps = 192;
+
+    float px = cx + cosf(start_angle) * radius;
+    float py = cy + sinf(start_angle) * radius;
+
+    for (int i = 1; i <= steps; i++) {
+        const float t = (float)i / (float)steps;
+        const float angle = start_angle + sweep * t;
+        const float nx = cx + cosf(angle) * radius;
+        const float ny = cy + sinf(angle) * radius;
+
+        designer_vector_line(framebuffer, fb_width, px, py, nx, ny, thickness, color);
+        px = nx;
+        py = ny;
     }
 }
 

@@ -7,6 +7,7 @@
 #include "ft2_bmp.h"
 #include "ft2_checkboxes.h"
 #include "ft2_pushbuttons.h"
+#include "ft2_ui_render.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,8 +118,17 @@ static void tf_draw_rotary_slider_ft2(const TunefishWidget* widget) {
     // Calculate angles
     float startAngle = widget->rotaryStartAngle;
     float endAngle = widget->rotaryEndAngle;
-    float valueAngle = startAngle + widget->value * (endAngle - startAngle);
-    float modAngle = startAngle + (widget->value * widget->modValue) * (endAngle - startAngle);
+    float value = widget->value;
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+    float modValue = widget->modValue;
+    if (modValue < -1.0f) modValue = -1.0f;
+    if (modValue > 1.0f) modValue = 1.0f;
+    float modTarget = value + modValue;
+    if (modTarget < 0.0f) modTarget = 0.0f;
+    if (modTarget > 1.0f) modTarget = 1.0f;
+    float valueAngle = startAngle + value * (endAngle - startAngle);
+    float modAngle = startAngle + modTarget * (endAngle - startAngle);
 
     const uint32_t tinyTextColor = video.palette[PAL_FORGRND];
 
@@ -129,30 +139,16 @@ static void tf_draw_rotary_slider_ft2(const TunefishWidget* widget) {
         tf_draw_circle(centerX, centerY, radius, PAL_BUTTON2, true);
         tf_draw_circle(centerX, centerY, radius - 3.5, PAL_BUTTONS, true);
 
-        // Draw value arc (simplified pie segment)
-        int arcSteps = 1024;
-        for (int i = 0; i <= arcSteps; i++) {
-            float angle = startAngle + (float)i / arcSteps * (valueAngle - startAngle);
-            int x1 = centerX + (radius - 4) * cos(angle);
-            int y1 = centerY + (radius - 4) * sin(angle);
-            int x2 = centerX + (radius + 0.5) * cos(angle);
-            int y2 = centerY + (radius + 0.5) * sin(angle);
-            tf_draw_line(x1, y1, x2, y2, PAL_PATTEXT);
-        }
+        const ft2_ui_pointf_t center = { (float)centerX, (float)centerY };
+        ft2_ui_render_arc_f(center, (float)radius - 2.0f, startAngle, valueAngle, 4.0f, PAL_PATTEXT);
 
-        // Draw modulation arc if present
-        if (widget->modValue > 0.0f) {
-            for (int i = 0; i <= arcSteps; i++) {
-                float angle = startAngle + (float)i / arcSteps * (modAngle - startAngle);
-                int x1 = centerX + (radius - 4) * cos(angle);
-                int y1 = centerY + (radius - 4) * sin(angle);
-                tf_draw_pixel(x1, y1, PAL_TEXTMRK);
-            }
-        }
+        if (fabsf(modTarget - value) > 0.001f)
+            ft2_ui_render_arc_f(center, (float)radius + 1.0f, valueAngle, modAngle, 2.0f,
+                                modTarget >= value ? PAL_TEXTMRK : PAL_DSKTOP2);
 
         // Draw value text in center
         char valueText[16];
-        snprintf(valueText, sizeof(valueText), "%d", (int)(widget->value * 99.0f));
+        snprintf(valueText, sizeof(valueText), "%d", (int)(value * 99.0f));
         int textW = textWidth(valueText);
         textOutTiny(centerX - textW/4, centerY - 4, valueText, tinyTextColor);
 
@@ -752,6 +748,10 @@ TunefishWidget* tf_create_rotary_slider(const char* name, int x, int y, int radi
     widget->rotaryStartAngle = startAngle;
     widget->rotaryEndAngle = endAngle;
     widget->modValue = 0.0f;
+    widget->modRingMode = 1;
+    widget->modMatrixSlot = -1;
+    widget->modTargetParam = -1;
+    widget->modAmountScale = 1.0f;
 
     tf_apply_tunefish_styling(widget);
     return widget;
@@ -991,6 +991,8 @@ void tf_widget_set_size(TunefishWidget* widget, int w, int h) {
 
 void tf_widget_set_mod_value(TunefishWidget* widget, float modValue) {
     if (widget) {
+        if (modValue < -1.0f) modValue = -1.0f;
+        if (modValue > 1.0f) modValue = 1.0f;
         widget->modValue = modValue;
     }
 }
