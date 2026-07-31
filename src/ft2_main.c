@@ -367,7 +367,7 @@ static void initializeVars(void)
 
 	// set non-zero values
 
-	editor.moduleSaveMode = MOD_SAVE_MODE_XM;
+	editor.moduleSaveMode = MOD_SAVE_MODE_DXM;
 	editor.sampleSaveMode = SMP_SAVE_MODE_WAV;
 
 	ui.sampleDataOrLoopDrag = -1;
@@ -409,6 +409,12 @@ static bool runSelfTest(void)
 	char macroErr[128];
 
 	initializeVars();
+
+	if (editor.moduleSaveMode != MOD_SAVE_MODE_DXM)
+	{
+		fprintf(stderr, "self-test: module save mode must default to DXM\n");
+		return false;
+	}
 
 	if (!ft2_macro_map_self_test(macroErr, sizeof (macroErr)))
 	{

@@ -2106,8 +2106,11 @@ static void setDiskOpItemRadioButtons(void)
 	hideRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS);
 	hideRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS);
 
-	if (editor.moduleSaveMode > MOD_SAVE_MODE_WAV)
+	if (editor.moduleSaveMode != MOD_SAVE_MODE_DXM &&
+		editor.moduleSaveMode != MOD_SAVE_MODE_WAV)
+	{
 		editor.moduleSaveMode = MOD_SAVE_MODE_DXM;
+	}
 
 	if (editor.sampleSaveMode > SMP_SAVE_MODE_SLOT)
 		editor.sampleSaveMode = SMP_SAVE_MODE_WAV;
