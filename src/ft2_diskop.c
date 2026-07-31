@@ -2049,7 +2049,11 @@ static void drawSaveAsElements(void)
 		break;
 
 		case DISKOP_ITEM_INSTR:
+		case DISKOP_ITEM_DXIPATCH:
+		{
 			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XI");
+			textOutShadow(19, 115, PAL_FORGRND, PAL_DSKTOP2, "DXI");
+		}
 		break;
 
 		case DISKOP_ITEM_SAMPLE:
@@ -2068,9 +2072,23 @@ static void drawSaveAsElements(void)
 			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XT");
 		break;
 
-		case DISKOP_ITEM_DXIPATCH:
-			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "DXI");
-		break;
+	}
+}
+
+static uint16_t getModuleSaveAsRadioButton(void)
+{
+	return editor.moduleSaveMode == MOD_SAVE_MODE_WAV
+		? RB_DISKOP_MOD_SAVEAS_WAV
+		: RB_DISKOP_MOD_SAVEAS_DXM;
+}
+
+static uint16_t getSampleSaveAsRadioButton(void)
+{
+	switch (editor.sampleSaveMode)
+	{
+		case SMP_SAVE_MODE_RAW: return RB_DISKOP_SMP_SAVEAS_RAW;
+		case SMP_SAVE_MODE_IFF: return RB_DISKOP_SMP_SAVEAS_IFF;
+		default:                return RB_DISKOP_SMP_SAVEAS_WAV;
 	}
 }
 
@@ -2088,16 +2106,17 @@ static void setDiskOpItemRadioButtons(void)
 	hideRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS);
 	hideRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS);
 
-	if (editor.moduleSaveMode > 3)
-		editor.moduleSaveMode = 3;
+	if (editor.moduleSaveMode > MOD_SAVE_MODE_WAV)
+		editor.moduleSaveMode = MOD_SAVE_MODE_DXM;
 
-	if (editor.sampleSaveMode > 3)
-		editor.sampleSaveMode = 3;
+	if (editor.sampleSaveMode > SMP_SAVE_MODE_SLOT)
+		editor.sampleSaveMode = SMP_SAVE_MODE_WAV;
 
-	radioButtons[RB_DISKOP_MOD_SAVEAS_DXM + editor.moduleSaveMode].state = RADIOBUTTON_CHECKED;
-	radioButtons[RB_DISKOP_SMP_SAVEAS_RAW + editor.sampleSaveMode].state = RADIOBUTTON_CHECKED;
+	radioButtons[getModuleSaveAsRadioButton()].state = RADIOBUTTON_CHECKED;
+	radioButtons[getSampleSaveAsRadioButton()].state = RADIOBUTTON_CHECKED;
 
-	if (FReq_Item == DISKOP_ITEM_INSTR)   radioButtons[RB_DISKOP_INS_SAVEAS_XI].state = RADIOBUTTON_CHECKED;
+	if (FReq_Item == DISKOP_ITEM_INSTR)    radioButtons[RB_DISKOP_INS_SAVEAS_XI].state = RADIOBUTTON_CHECKED;
+	if (FReq_Item == DISKOP_ITEM_DXIPATCH) radioButtons[RB_DISKOP_INS_SAVEAS_DXI].state = RADIOBUTTON_CHECKED;
 	if (FReq_Item == DISKOP_ITEM_PATTERN) radioButtons[RB_DISKOP_PAT_SAVEAS_XP].state = RADIOBUTTON_CHECKED;
 	if (FReq_Item == DISKOP_ITEM_TRACK)   radioButtons[RB_DISKOP_TRK_SAVEAS_XT].state = RADIOBUTTON_CHECKED;
 
@@ -2106,11 +2125,12 @@ static void setDiskOpItemRadioButtons(void)
 		switch (FReq_Item)
 		{
 			default: case DISKOP_ITEM_MODULE:  showRadioButtonGroup(RB_GROUP_DISKOP_MOD_SAVEAS); break;
-			         case DISKOP_ITEM_INSTR:   showRadioButtonGroup(RB_GROUP_DISKOP_INS_SAVEAS); break;
+			         case DISKOP_ITEM_INSTR:
+			         case DISKOP_ITEM_DXIPATCH:
+			                                      showRadioButtonGroup(RB_GROUP_DISKOP_INS_SAVEAS); break;
 			         case DISKOP_ITEM_SAMPLE:  showRadioButtonGroup(RB_GROUP_DISKOP_SMP_SAVEAS); break;
 			         case DISKOP_ITEM_PATTERN: showRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS); break;
 			         case DISKOP_ITEM_TRACK:   showRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS); break;
-			         case DISKOP_ITEM_DXIPATCH: break; // single fixed format, no save-as group
 		}
 	}
 }
@@ -2282,11 +2302,10 @@ static void drawDiskOpScreen(void)
 	textBoxes[TB_DISKOP_FILENAME].textPtr = FReq_FileName;
 
 	uncheckRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
-	// Items beyond TRACK (e.g. DXIPATCH) have no dedicated radio button in this
-	// group - leave the group fully unchecked for those rather than indexing
-	// past it (which would corrupt whatever radio button follows the group).
 	if (FReq_Item <= DISKOP_ITEM_TRACK)
 		radioButtons[RB_DISKOP_MODULE + FReq_Item].state = RADIOBUTTON_CHECKED;
+	else if (FReq_Item == DISKOP_ITEM_DXIPATCH)
+		radioButtons[RB_DISKOP_INSTR].state = RADIOBUTTON_CHECKED;
 	showRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
 
 	// item selector
@@ -2544,12 +2563,18 @@ void rbDiskOpTrack(void)
 	setDiskOpItem(DISKOP_ITEM_TRACK);
 }
 
-// No dedicated item-selector radio button (unlike the item types above); entered
-// directly from the instrument editor's "DXI Patch" button instead.
-void diskOpSetDxiPatchItem(void)
+void rbDiskOpInsSaveXi(void)
 {
-	uncheckRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
+	checkRadioButton(RB_DISKOP_INS_SAVEAS_XI);
+	setDiskOpItem(DISKOP_ITEM_INSTR);
+	diskOpChangeFilenameExt(".xi");
+}
+
+void rbDiskOpInsSaveDxi(void)
+{
+	checkRadioButton(RB_DISKOP_INS_SAVEAS_DXI);
 	setDiskOpItem(DISKOP_ITEM_DXIPATCH);
+	diskOpChangeFilenameExt(".dxi");
 }
 
 void rbDiskOpModSaveDxm(void)

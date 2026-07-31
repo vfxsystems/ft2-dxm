@@ -206,7 +206,8 @@ radioButton_t radioButtons[NUM_RADIOBUTTONS] =
 
 	// INSTRUMENT SAVE AS FORMATS
 	//x, y,   w,  group,                      funcOnUp
-	{ 4, 100, 29, RB_GROUP_DISKOP_INS_SAVEAS, NULL },
+	{ 4, 100, 29, RB_GROUP_DISKOP_INS_SAVEAS, rbDiskOpInsSaveXi  },
+	{ 4, 114, 40, RB_GROUP_DISKOP_INS_SAVEAS, rbDiskOpInsSaveDxi },
 
 	// SAMPLE SAVE AS FORMATS
 	//x, y,   w,  group,                      funcOnUp
