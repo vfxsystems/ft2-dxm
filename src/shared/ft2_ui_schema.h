@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 // Schema versioning for layout exporters/importers.
-#define FT2_UI_SCHEMA_VERSION 7
+#define FT2_UI_SCHEMA_VERSION 8
 
 // Common invalid ID sentinel.
 #define FT2_UI_INVALID_ID (-1)
@@ -39,6 +39,7 @@ typedef enum
     FT2_UI_WIDGET_TF_PARAMETER_CONTROL,
     FT2_UI_WIDGET_TF_ENVELOPE_DISPLAY,
     FT2_UI_WIDGET_TF_GROUP_BOX,
+    FT2_UI_WIDGET_TF_ARP_STEP,
     FT2_UI_WIDGET_MIXER_STRIP,
     FT2_UI_WIDGET_MIXER_GAIN,
     FT2_UI_WIDGET_MIXER_PAN,
@@ -73,7 +74,11 @@ typedef enum
 {
     FT2_UI_WIDGET_PAGE_BOTH = 0,
     FT2_UI_WIDGET_PAGE_1 = 1,
-    FT2_UI_WIDGET_PAGE_2 = 2
+    FT2_UI_WIDGET_PAGE_2 = 2,
+    FT2_UI_WIDGET_PAGE_3 = 3,
+    FT2_UI_WIDGET_PAGE_4 = 4,
+    FT2_UI_WIDGET_PAGE_5 = 5,
+    FT2_UI_WIDGET_PAGE_6 = 6
 } ft2_ui_widget_page_t;
 
 typedef struct
@@ -143,12 +148,41 @@ typedef struct
     uint16_t text_binding_id;
 } ft2_ui_textbox_desc_t;
 
+typedef enum
+{
+    FT2_UI_BITMAP_LAYER_WIDGET = 0,
+    FT2_UI_BITMAP_LAYER_BACKGROUND = 1,
+    FT2_UI_BITMAP_LAYER_SKIN = 2
+} ft2_ui_bitmap_layer_t;
+
+typedef enum
+{
+    FT2_UI_BITMAP_FLAG_NONE = 0,
+    FT2_UI_BITMAP_FLAG_CLICK_THROUGH = 1u << 0,
+    FT2_UI_BITMAP_FLAG_TRUECOLOR = 1u << 1
+} ft2_ui_bitmap_flags_t;
+
+typedef enum
+{
+    FT2_UI_SKIN_PART_NONE = 0,
+    FT2_UI_SKIN_PART_BACKGROUND,
+    FT2_UI_SKIN_PART_PANEL,
+    FT2_UI_SKIN_PART_BUTTON,
+    FT2_UI_SKIN_PART_KNOB,
+    FT2_UI_SKIN_PART_SLIDER,
+    FT2_UI_SKIN_PART_METER
+} ft2_ui_skin_part_t;
+
 typedef struct
 {
     uint16_t id;
     uint16_t x, y, w, h;
     ft2_ui_widget_page_t page;
     uint16_t bitmap_id;
+    uint8_t layer;
+    uint8_t flags;
+    uint8_t skin_part;
+    uint8_t opacity;
 } ft2_ui_bitmap_desc_t;
 
 typedef struct

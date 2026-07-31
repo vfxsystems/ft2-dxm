@@ -1,7 +1,21 @@
 // FT2 GUI Designer v0.3a
 #include <SDL2/SDL.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 #include <GL/gl.h>
 #include <GL/glu.h>
+
+#ifndef GL_MULTISAMPLE
+#define GL_MULTISAMPLE 0x809D
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +52,9 @@ typedef enum {
     PROP_FONT,
     PROP_BITMAP,
     PROP_BITMAP_TRANSP,
+    PROP_BITMAP_LAYER,
+    PROP_BITMAP_FLAGS,
+    PROP_SKIN_PART,
     PROP_PAGE,
     PROP_SCROLLBAR_NUDGE
 } PropField;
@@ -52,7 +69,9 @@ typedef enum {
     LAYOUT_UNKNOWN,
     LAYOUT_TUNEFISH,
     LAYOUT_DEXED,
-    LAYOUT_MIXER
+    LAYOUT_MIXER,
+    LAYOUT_V2,
+    LAYOUT_OSTIRUS
 } LayoutKind;
 
 // Application state
@@ -105,6 +124,7 @@ typedef struct {
     char last_export_base[512];
     LayoutKind active_layout;
     ft2_ui_widget_page_t active_page;
+    int page_view_number;
 
     // 3D cube animation
     float cube_rotation_x;
@@ -162,6 +182,7 @@ static int widget_type_from_kind(ft2_ui_widget_kind_t kind)
         case FT2_UI_WIDGET_TF_LABEL: return WIDGET_TF_LABEL;
         case FT2_UI_WIDGET_TF_ROTARY_SLIDER: return WIDGET_TF_ROTARY;
         case FT2_UI_WIDGET_TF_LINEAR_SLIDER: return WIDGET_TF_LINEAR;
+        case FT2_UI_WIDGET_TF_ARP_STEP: return WIDGET_TF_ARP_STEP;
         case FT2_UI_WIDGET_TF_COMBO_BOX: return WIDGET_TF_COMBO;
         case FT2_UI_WIDGET_TF_LEVEL_METER: return WIDGET_TF_METER;
         case FT2_UI_WIDGET_TF_PARAMETER_CONTROL: return WIDGET_TF_PARAMETER;
@@ -178,6 +199,42 @@ static int widget_type_from_kind(ft2_ui_widget_kind_t kind)
         case FT2_UI_WIDGET_DSP_MENU: return WIDGET_DSP_MENU;
         case FT2_UI_WIDGET_DSP_PARAM: return WIDGET_DSP_PARAM;
         default: return WIDGET_NONE;
+    }
+}
+
+static int clamp_page_view_number(int page)
+{
+    if (page < (int)FT2_UI_WIDGET_PAGE_1)
+        return (int)FT2_UI_WIDGET_PAGE_1;
+    if (page > (int)FT2_UI_WIDGET_PAGE_6)
+        return (int)FT2_UI_WIDGET_PAGE_6;
+    return page;
+}
+
+static bool is_view_all_mode(void)
+{
+    return app.active_page == FT2_UI_WIDGET_PAGE_BOTH;
+}
+
+static ft2_ui_widget_page_t effective_page_view(void)
+{
+    if (is_view_all_mode())
+        return FT2_UI_WIDGET_PAGE_BOTH;
+    return (ft2_ui_widget_page_t)clamp_page_view_number(app.page_view_number);
+}
+
+static void set_page_view_number(int page)
+{
+    app.page_view_number = clamp_page_view_number(page);
+    app.active_page = (ft2_ui_widget_page_t)app.page_view_number;
+}
+
+static void set_view_all_mode(bool enabled)
+{
+    if (enabled) {
+        app.active_page = FT2_UI_WIDGET_PAGE_BOTH;
+    } else {
+        set_page_view_number(app.page_view_number);
     }
 }
 
@@ -239,6 +296,7 @@ static bool widget_uses_font(const widget_t *widget)
         case WIDGET_TF_LABEL:
         case WIDGET_TF_ROTARY:
         case WIDGET_TF_LINEAR:
+        case WIDGET_TF_ARP_STEP:
         case WIDGET_TF_COMBO:
         case WIDGET_TF_METER:
         case WIDGET_TF_PARAMETER:
@@ -283,6 +341,7 @@ static bool widget_uses_page(const widget_t *widget)
         case WIDGET_TF_LABEL:
         case WIDGET_TF_ROTARY:
         case WIDGET_TF_LINEAR:
+        case WIDGET_TF_ARP_STEP:
         case WIDGET_TF_COMBO:
         case WIDGET_TF_METER:
         case WIDGET_TF_PARAMETER:
@@ -336,6 +395,7 @@ static void init_tools_from_schema(void)
             case FT2_UI_WIDGET_TF_LABEL:
             case FT2_UI_WIDGET_TF_ROTARY_SLIDER:
             case FT2_UI_WIDGET_TF_LINEAR_SLIDER:
+            case FT2_UI_WIDGET_TF_ARP_STEP:
             case FT2_UI_WIDGET_TF_COMBO_BOX:
             case FT2_UI_WIDGET_TF_LEVEL_METER:
             case FT2_UI_WIDGET_TF_PARAMETER_CONTROL:
@@ -590,10 +650,20 @@ void draw_drag_preview(void) {
         preview_widget.visible = true;
         preview_widget.state = WIDGET_UNPRESSED;
         strcpy(preview_widget.caption, "Preview");
+        if (preview_widget.type == WIDGET_TF_ARP_STEP) {
+            strcpy(preview_widget.name, "arp_step_01");
+            preview_widget.data.tf_linear.vertical = true;
+            preview_widget.caption[0] = '\0';
+        }
 
         // Set default sizes
         preview_widget.w = entry->default_w;
         preview_widget.h = entry->default_h;
+        if (entry->widget_type == WIDGET_TF_ARP_STEP) {
+            preview_widget.w = 18;
+            preview_widget.h = 96;
+            preview_widget.data.tf_linear.vertical = true;
+        }
         if (entry->widget_type == WIDGET_SCROLLBAR && entry->scrollbar_orientation >= 0)
             preview_widget.data.scrollbar.orientation = (ScrollbarOrientation)entry->scrollbar_orientation;
         if (entry->kind == FT2_UI_WIDGET_MIXER_GAIN || entry->kind == FT2_UI_WIDGET_MIXER_MASTER)
@@ -680,6 +750,15 @@ void start_property_edit(PropField field_type) {
             snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", trans_idx);
             break;
         }
+        case PROP_BITMAP_LAYER:
+            snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->data.logo.layer);
+            break;
+        case PROP_BITMAP_FLAGS:
+            snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->data.logo.flags);
+            break;
+        case PROP_SKIN_PART:
+            snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->data.logo.skin_part);
+            break;
         case PROP_PAGE:
             snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->page);
             break;
@@ -746,10 +825,31 @@ void finish_property_edit(bool apply_changes) {
                     designer_set_bitmap_transparent_index(widget->data.logo.bitmap_id, trans_idx);
                     break;
                 }
+                case PROP_BITMAP_LAYER: {
+                    int layer = atoi(app.edit_buffer);
+                    if (layer < FT2_UI_BITMAP_LAYER_WIDGET) layer = FT2_UI_BITMAP_LAYER_WIDGET;
+                    if (layer > FT2_UI_BITMAP_LAYER_SKIN) layer = FT2_UI_BITMAP_LAYER_SKIN;
+                    widget->data.logo.layer = (ft2_ui_bitmap_layer_t)layer;
+                    break;
+                }
+                case PROP_BITMAP_FLAGS: {
+                    int flags = atoi(app.edit_buffer);
+                    if (flags < 0) flags = 0;
+                    if (flags > 255) flags = 255;
+                    widget->data.logo.flags = (uint8_t)flags;
+                    break;
+                }
+                case PROP_SKIN_PART: {
+                    int part = atoi(app.edit_buffer);
+                    if (part < FT2_UI_SKIN_PART_NONE) part = FT2_UI_SKIN_PART_NONE;
+                    if (part > FT2_UI_SKIN_PART_METER) part = FT2_UI_SKIN_PART_METER;
+                    widget->data.logo.skin_part = (ft2_ui_skin_part_t)part;
+                    break;
+                }
                 case PROP_PAGE: {
                     int page = atoi(app.edit_buffer);
                     if (page < 0) page = 0;
-                    if (page > 2) page = 2;
+                    if (page > 6) page = 6;
                     widget->page = (ft2_ui_widget_page_t)page;
                     break;
                 }
@@ -890,10 +990,31 @@ void adjust_property_value(PropField field_type, int delta) {
             designer_set_bitmap_transparent_index(widget->data.logo.bitmap_id, trans_idx);
             break;
         }
+        case PROP_BITMAP_LAYER: {
+            int layer = (int)widget->data.logo.layer + delta;
+            if (layer < FT2_UI_BITMAP_LAYER_WIDGET) layer = FT2_UI_BITMAP_LAYER_WIDGET;
+            if (layer > FT2_UI_BITMAP_LAYER_SKIN) layer = FT2_UI_BITMAP_LAYER_SKIN;
+            widget->data.logo.layer = (ft2_ui_bitmap_layer_t)layer;
+            break;
+        }
+        case PROP_BITMAP_FLAGS: {
+            int flags = (int)widget->data.logo.flags + delta;
+            if (flags < 0) flags = 0;
+            if (flags > 255) flags = 255;
+            widget->data.logo.flags = (uint8_t)flags;
+            break;
+        }
+        case PROP_SKIN_PART: {
+            int part = (int)widget->data.logo.skin_part + delta;
+            if (part < FT2_UI_SKIN_PART_NONE) part = FT2_UI_SKIN_PART_NONE;
+            if (part > FT2_UI_SKIN_PART_METER) part = FT2_UI_SKIN_PART_METER;
+            widget->data.logo.skin_part = (ft2_ui_skin_part_t)part;
+            break;
+        }
         case PROP_PAGE: {
             int page = (int)widget->page + delta;
             if (page < 0) page = 0;
-            if (page > 2) page = 2;
+            if (page > 6) page = 6;
             widget->page = (ft2_ui_widget_page_t)page;
             break;
         }
@@ -920,6 +1041,10 @@ static LayoutKind detect_layout_kind_from_path(const char *path)
         return LAYOUT_DEXED;
     if (strcmp(base, "ft2_mixer_layout.gui") == 0)
         return LAYOUT_MIXER;
+    if (strcmp(base, "v2_complete_layout.gui") == 0)
+        return LAYOUT_V2;
+    if (strcmp(base, "ostirus_complete_layout.gui") == 0)
+        return LAYOUT_OSTIRUS;
     return LAYOUT_UNKNOWN;
 }
 
@@ -932,6 +1057,10 @@ static const char *default_export_base_for_layout(LayoutKind kind)
             return "../src/dexed/dx_complete_layout_schema";
         case LAYOUT_MIXER:
             return "../src/ft2_mixer_layout_schema";
+        case LAYOUT_V2:
+            return "../src/ft2_v2_complete_layout_schema";
+        case LAYOUT_OSTIRUS:
+            return "../src/ft2_ostirus_complete_layout_schema";
         default:
             return "exported_gui";
     }
@@ -957,7 +1086,11 @@ static void start_file_prompt(FilePromptMode mode)
             if (app.last_load_path[0] != '\0')
                 default_value = app.last_load_path;
             else
-                default_value = "layouts/tf_complete_layout.gui";
+                default_value = (app.active_layout == LAYOUT_V2)
+                    ? "layouts/v2_complete_layout.gui"
+                    : (app.active_layout == LAYOUT_OSTIRUS)
+                        ? "layouts/ostirus_complete_layout.gui"
+                        : "layouts/tf_complete_layout.gui";
             break;
         case FILE_PROMPT_SAVE:
             snprintf(app.file_prompt_label, sizeof(app.file_prompt_label), "Save GUI: ");
@@ -1232,6 +1365,7 @@ bool init_designer(void) {
     app.property_editing = false;
 
     app.active_page = FT2_UI_WIDGET_PAGE_BOTH;
+    app.page_view_number = FT2_UI_WIDGET_PAGE_1;
 
     printf("FT2 GUI Designer\n");
     printf("Controls:\n");
@@ -1420,6 +1554,42 @@ void handle_mouse_down(int x, int y, int button) {
                         return;
                     }
                     field_y += 20;
+
+                    if (is_property_field_at(x, y, panel_x + label_w + 5, field_y, value_w, 15)) {
+                        start_property_edit(PROP_BITMAP_LAYER);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_BITMAP_LAYER, -1);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8 + adjust_w + adjust_gap, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_BITMAP_LAYER, 1);
+                        return;
+                    }
+                    field_y += 20;
+
+                    if (is_property_field_at(x, y, panel_x + label_w + 5, field_y, value_w, 15)) {
+                        start_property_edit(PROP_BITMAP_FLAGS);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_BITMAP_FLAGS, -1);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8 + adjust_w + adjust_gap, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_BITMAP_FLAGS, 1);
+                        return;
+                    }
+                    field_y += 20;
+
+                    if (is_property_field_at(x, y, panel_x + label_w + 5, field_y, value_w, 15)) {
+                        start_property_edit(PROP_SKIN_PART);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_SKIN_PART, -1);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8 + adjust_w + adjust_gap, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_SKIN_PART, 1);
+                        return;
+                    }
+                    field_y += 20;
                 }
             }
         }
@@ -1434,15 +1604,39 @@ void handle_mouse_down(int x, int y, int button) {
                 info_y = btn_y + btn_h + 10;
             }
             int page_y = info_y + 108 + 12;
+            int view_all_x = 5;
+            int view_all_w = 52;
+            int page_box_x = view_all_x + view_all_w + 6;
+            int minus_w = 16;
+            int page_w = 18;
+            int plus_w = 16;
+            int page_box_y = page_y;
+            int page_h = 18;
 
-            if (y >= page_y && y < page_y + 18) {
-                for (int i = 0; i < 3; i++) {
-                    int btn_x = 5 + i * 38;
-                    int btn_w = 36;
-                    if (x >= btn_x && x < btn_x + btn_w) {
-                        app.active_page = (ft2_ui_widget_page_t)i;
-                        return;
-                    }
+            if (y >= page_box_y && y < page_box_y + page_h) {
+                if (x >= view_all_x && x < view_all_x + view_all_w) {
+                    set_view_all_mode(true);
+                    return;
+                }
+
+                if (x >= page_box_x && x < page_box_x + minus_w) {
+                    set_view_all_mode(false);
+                    set_page_view_number(app.page_view_number - 1);
+                    return;
+                }
+
+                int page_value_x = page_box_x + minus_w + 2;
+                if (x >= page_value_x && x < page_value_x + page_w) {
+                    set_view_all_mode(false);
+                    set_page_view_number(app.page_view_number);
+                    return;
+                }
+
+                int plus_x = page_value_x + page_w + 2;
+                if (x >= plus_x && x < plus_x + plus_w) {
+                    set_view_all_mode(false);
+                    set_page_view_number(app.page_view_number + 1);
+                    return;
                 }
             }
 
@@ -1901,28 +2095,53 @@ void draw_toolbar(void) {
     font_draw_text(&g_designer.font_system, 5, page_y, "View Page:", get_palette_color(PAL_FORGRND));
     page_y += 12;
 
-    const char *pages[] = {"All", "1", "2"};
-    for (int i = 0; i < 3; i++)
-    {
-        int x = 5 + i * 38;
-        int y = page_y;
-        int w = 36;
-        int h = 18;
+    int view_all_x = 5;
+    int view_all_y = page_y;
+    int view_all_w = 52;
+    int view_all_h = 18;
+    bool view_all_selected = is_view_all_mode();
+    uint32_t view_all_bg = get_palette_color(view_all_selected ? PAL_BUTTON2 : PAL_BUTTONS);
+    uint32_t border1 = get_palette_color(PAL_BUTTON1);
+    uint32_t border2 = get_palette_color(PAL_BUTTON2);
 
-        bool is_selected = (app.active_page == (ft2_ui_widget_page_t)i);
-        uint32_t bg_color = get_palette_color(is_selected ? PAL_BUTTON2 : PAL_BUTTONS);
-        uint32_t border1 = get_palette_color(PAL_BUTTON1);
-        uint32_t border2 = get_palette_color(PAL_BUTTON2);
+    fill_rect(app.framebuffer, WINDOW_WIDTH, view_all_x, view_all_y, view_all_w, view_all_h, view_all_bg);
+    h_line(app.framebuffer, WINDOW_WIDTH, view_all_x, view_all_y, view_all_w - 1, border1);
+    v_line(app.framebuffer, WINDOW_WIDTH, view_all_x, view_all_y + 1, view_all_h - 2, border1);
+    h_line(app.framebuffer, WINDOW_WIDTH, view_all_x + 1, view_all_y + view_all_h - 1, view_all_w - 1, border2);
+    v_line(app.framebuffer, WINDOW_WIDTH, view_all_x + view_all_w - 1, view_all_y + 1, view_all_h - 1, border2);
+    font_draw_text(&g_designer.font_system, view_all_x + 5, view_all_y + 5, "View All", get_palette_color(PAL_BTNTEXT));
 
-        fill_rect(app.framebuffer, WINDOW_WIDTH, x, y, w, h, bg_color);
-        h_line(app.framebuffer, WINDOW_WIDTH, x, y, w - 1, border1);
-        v_line(app.framebuffer, WINDOW_WIDTH, x, y + 1, h - 2, border1);
-        h_line(app.framebuffer, WINDOW_WIDTH, x + 1, y + h - 1, w - 1, border2);
-        v_line(app.framebuffer, WINDOW_WIDTH, x + w - 1, y + 1, h - 1, border2);
+    int page_box_x = view_all_x + view_all_w + 6;
+    int page_box_y = page_y;
+    int minus_w = 16;
+    int page_w = 18;
+    int plus_w = 16;
 
-        int text_w = font_get_text_width(pages[i]);
-        font_draw_text(&g_designer.font_system, x + (w - text_w) / 2, y + 5, pages[i], get_palette_color(PAL_BTNTEXT));
-    }
+    fill_rect(app.framebuffer, WINDOW_WIDTH, page_box_x, page_box_y, minus_w, view_all_h, get_palette_color(PAL_BUTTONS));
+    h_line(app.framebuffer, WINDOW_WIDTH, page_box_x, page_box_y, minus_w - 1, border1);
+    v_line(app.framebuffer, WINDOW_WIDTH, page_box_x, page_box_y + 1, view_all_h - 2, border1);
+    h_line(app.framebuffer, WINDOW_WIDTH, page_box_x + 1, page_box_y + view_all_h - 1, minus_w - 1, border2);
+    v_line(app.framebuffer, WINDOW_WIDTH, page_box_x + minus_w - 1, page_box_y + 1, view_all_h - 1, border2);
+    font_draw_text(&g_designer.font_system, page_box_x + 5, page_box_y + 5, "-", get_palette_color(PAL_BTNTEXT));
+
+    int page_value_x = page_box_x + minus_w + 2;
+    fill_rect(app.framebuffer, WINDOW_WIDTH, page_value_x, page_box_y, page_w, view_all_h, get_palette_color(PAL_BUTTONS));
+    h_line(app.framebuffer, WINDOW_WIDTH, page_value_x, page_box_y, page_w - 1, border1);
+    v_line(app.framebuffer, WINDOW_WIDTH, page_value_x, page_box_y + 1, view_all_h - 2, border1);
+    h_line(app.framebuffer, WINDOW_WIDTH, page_value_x + 1, page_box_y + view_all_h - 1, page_w - 1, border2);
+    v_line(app.framebuffer, WINDOW_WIDTH, page_value_x + page_w - 1, page_box_y + 1, view_all_h - 1, border2);
+    char page_text[8];
+    snprintf(page_text, sizeof(page_text), "%d", clamp_page_view_number(app.page_view_number));
+    int page_text_w = font_get_text_width(page_text);
+    font_draw_text(&g_designer.font_system, page_value_x + (page_w - page_text_w) / 2, page_box_y + 5, page_text, get_palette_color(PAL_BTNTEXT));
+
+    int plus_x = page_value_x + page_w + 2;
+    fill_rect(app.framebuffer, WINDOW_WIDTH, plus_x, page_box_y, plus_w, view_all_h, get_palette_color(PAL_BUTTONS));
+    h_line(app.framebuffer, WINDOW_WIDTH, plus_x, page_box_y, plus_w - 1, border1);
+    v_line(app.framebuffer, WINDOW_WIDTH, plus_x, page_box_y + 1, view_all_h - 2, border1);
+    h_line(app.framebuffer, WINDOW_WIDTH, plus_x + 1, page_box_y + view_all_h - 1, plus_w - 1, border2);
+    v_line(app.framebuffer, WINDOW_WIDTH, plus_x + plus_w - 1, page_box_y + 1, view_all_h - 1, border2);
+    font_draw_text(&g_designer.font_system, plus_x + 5, page_box_y + 5, "+", get_palette_color(PAL_BTNTEXT));
 
     // Separator
     v_line(app.framebuffer, WINDOW_WIDTH, TOOLBAR_WIDTH, 0, WINDOW_HEIGHT, get_palette_color(PAL_DSKTOP1));
@@ -1959,7 +2178,8 @@ void draw_property_panel(void) {
             "TF Toggle", "TF Label", "TF Knob", "TF Slider", "TF Combo",
             "TF Meter", "TF Param", "TF Envelope", "TF Group",
             "Mix Strip", "Mix Gain", "Mix Pan", "Mix Mute", "Mix Scope",
-            "Mix Master", "DSP Window", "DSP Slot", "DSP Menu", "DSP Param"
+            "Mix Master", "DSP Window", "DSP Slot", "DSP Menu", "DSP Param",
+            "TF Arp Step"
         };
 
         // Widget type
@@ -2061,6 +2281,27 @@ void draw_property_panel(void) {
             font_draw_text(&g_designer.font_system, panel_x + 5, field_y + 3, "Trans:", get_palette_color(PAL_FORGRND));
             draw_property_field(panel_x + label_w + 5, field_y, value_w, 15, PROP_BITMAP_TRANSP,
                                 designer_bitmap_transparent_index(widget->data.logo.bitmap_id));
+            draw_adjust_button(adjust_x, field_y, adjust_w, 15, "-");
+            draw_adjust_button(adjust_x + adjust_w + adjust_gap, field_y, adjust_w, 15, "+");
+            field_y += 20;
+
+            font_draw_text(&g_designer.font_system, panel_x + 5, field_y + 3, "Layer:", get_palette_color(PAL_FORGRND));
+            draw_property_field(panel_x + label_w + 5, field_y, value_w, 15, PROP_BITMAP_LAYER,
+                                (int)widget->data.logo.layer);
+            draw_adjust_button(adjust_x, field_y, adjust_w, 15, "-");
+            draw_adjust_button(adjust_x + adjust_w + adjust_gap, field_y, adjust_w, 15, "+");
+            field_y += 20;
+
+            font_draw_text(&g_designer.font_system, panel_x + 5, field_y + 3, "Flags:", get_palette_color(PAL_FORGRND));
+            draw_property_field(panel_x + label_w + 5, field_y, value_w, 15, PROP_BITMAP_FLAGS,
+                                (int)widget->data.logo.flags);
+            draw_adjust_button(adjust_x, field_y, adjust_w, 15, "-");
+            draw_adjust_button(adjust_x + adjust_w + adjust_gap, field_y, adjust_w, 15, "+");
+            field_y += 20;
+
+            font_draw_text(&g_designer.font_system, panel_x + 5, field_y + 3, "Skin:", get_palette_color(PAL_FORGRND));
+            draw_property_field(panel_x + label_w + 5, field_y, value_w, 15, PROP_SKIN_PART,
+                                (int)widget->data.logo.skin_part);
             draw_adjust_button(adjust_x, field_y, adjust_w, 15, "-");
             draw_adjust_button(adjust_x + adjust_w + adjust_gap, field_y, adjust_w, 15, "+");
             field_y += 20;

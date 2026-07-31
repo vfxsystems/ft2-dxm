@@ -4,6 +4,8 @@ This project uses CMake for all supported targets. The helper scripts in the rep
 
 Build outputs are written under each build directory's `bin/` subdirectory, for example `build-linux/bin/ft2-dxm`.
 
+The FT2 GUI Designer has its own tracked CMake project in `ft2_gui_designer/`. Its output is written directly to the selected designer build directory.
+
 ## Quick Start
 
 On a Linux host with the native dependencies installed:
@@ -11,6 +13,13 @@ On a Linux host with the native dependencies installed:
 ```sh
 ./build-linux.sh --deps
 ./build-linux.sh --fresh --test -j 4
+```
+
+Build the GUI designer after schema/widget changes:
+
+```sh
+cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
+cmake --build build-gui-designer --parallel 4
 ```
 
 Run the full available matrix:
@@ -100,6 +109,28 @@ Put generated build directories outside the repository:
 ```
 
 ASan defaults to `detect_leaks=1:halt_on_error=1:abort_on_error=1`. LeakSanitizer may fail under ptrace-restricted sandboxes or debuggers; rerun the command directly in a normal shell if leak checks fail before the tests start.
+
+## GUI Designer
+
+The designer mirrors the shared schema and asset registry, so rebuild it whenever `src/shared/ft2_ui_schema.h`, `src/shared/ft2_ui_assets.*`, or designer source files change:
+
+```sh
+cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
+cmake --build build-gui-designer --parallel 4
+```
+
+Legacy Makefile builds are still available:
+
+```sh
+make -C ft2_gui_designer
+```
+
+Bitmap and skin workflow:
+
+- Import BMP/PNG assets with `Ctrl+I`.
+- Use bitmap Layer `0` for foreground/widget art, `1` for backgrounds, and `2` for skin surfaces.
+- Imported 24/32-bit BMP and PNG assets retain true-color pixels and export as `FT2_UI_BMP_FMT_RGB` assets when available.
+- Runtime schema constructors for Tunefish, Dexed, and OsTIrus load RLE4 palette assets and true-color BMP assets through the same non-interactive bitmap widget path.
 
 ## Windows
 

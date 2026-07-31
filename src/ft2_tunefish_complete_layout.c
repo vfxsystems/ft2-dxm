@@ -1061,14 +1061,23 @@ static TunefishCompleteLayout* tf_create_complete_layout_from_schema(const ft2_u
         for (uint16_t i = 0; i < desc->bitmaps.count; i++) {
             const ft2_ui_bitmap_desc_t* d = &desc->bitmap_desc[i];
             const ft2_ui_bitmap_asset_t *asset = tf_find_bitmap_asset(d->bitmap_id);
-            if (!asset || !asset->bmp || asset->fmt != FT2_UI_BMP_FMT_RLE4)
+            if (!asset || !asset->bmp)
                 continue;
 
             int32_t bmp_w = 0, bmp_h = 0;
-            uint8_t *pixels = ft2_bmp_decode_rle4_to_pal(asset->bmp, &bmp_w, &bmp_h);
-            if (!pixels) continue;
-
-            TunefishWidget* w = tf_create_bitmap("bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
+            TunefishWidget* w = NULL;
+            if (asset->fmt == FT2_UI_BMP_FMT_RLE4) {
+                uint8_t *pixels = ft2_bmp_decode_rle4_to_pal(asset->bmp, &bmp_w, &bmp_h);
+                if (!pixels) continue;
+                w = tf_create_bitmap("bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
+            } else if (asset->fmt == FT2_UI_BMP_FMT_RGB) {
+                uint32_t *pixels = ft2_bmp_decode_to_rgb32(asset->bmp, &bmp_w, &bmp_h);
+                if (!pixels) continue;
+                w = tf_create_bitmap32("bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
+            }
+            if (!w) continue;
+            w->bitmapLayer = d->layer;
+            w->bitmapSkinPart = d->skin_part;
             tf_schema_register_widget(layout, w, d->page);
         }
     }

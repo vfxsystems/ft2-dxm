@@ -7,7 +7,8 @@ FT2 GUI Designer is a layout editor that mirrors FastTracker 2 widget behavior a
 - FT2-style palette and widgets, including authentic bitmap fonts.
 - Tunefish and Dexed widget sets (buttons, toggles, labels, rotaries, linears, combos, meters, parameter controls, envelopes, groups).
 - Schema-based C export for FT2 (per-layout descriptor with ID ranges).
-- Bitmap import using FT2 asset registry (BMP/PNG, indexed).
+- Bitmap import using FT2 asset registry (BMP/PNG, indexed or 24/32-bit true-color).
+- Bitmap layer and skin metadata for foreground art, backgrounds, and widget skin surfaces.
 - Built-in file prompt for load/save/export without blocking the app.
 
 ## Build and Run
@@ -19,7 +20,15 @@ make -C ft2_gui_designer
 ./ft2_gui_designer/ft2_gui_designer
 ```
 
-If SDL2 is missing, install it using your platform package manager and rebuild.
+The tracked CMake flow is also supported and is preferred for CI-style checks:
+
+```bash
+cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
+cmake --build build-gui-designer --parallel 4
+./build-gui-designer/ft2_gui_designer
+```
+
+If SDL2/OpenGL development packages are missing, install them using your platform package manager and rebuild.
 
 ## Controls
 
@@ -64,6 +73,10 @@ Select a widget to edit:
 - Page: Tunefish/Dexed page (0=Both, 1=Page 1, 2=Page 2)
 - Font: FT2 font index
 - Bitmap: asset ID for bitmap widgets
+- Trans: palette transparency index for indexed bitmap export
+- Layer: bitmap layer (`0` foreground widget, `1` background, `2` skin)
+- Flags: bitmap flags bitmask (`1` click-through, `2` true-color; true-color is also inferred on export)
+- Skin: skin part (`0` none, `1` background, `2` panel, `3` button, `4` knob, `5` slider, `6` meter)
 - Scrollbar nudge: toggle for FT2-style arrow buttons
 
 Edits are inline and non-blocking; Enter commits, Esc cancels.
@@ -72,11 +85,11 @@ Edits are inline and non-blocking; Enter commits, Esc cancels.
 
 ### `.gui` design files
 
-Design files store the widget list and editor state. Current version is `FT2GUI_V4`.
+Design files store the widget list and editor state. Current version is `FT2GUI_V7`.
 
 Notes:
-- Captions are space-delimited in the current V4 text format. Use underscores in captions or edit captions in the properties panel after loading.
-- Backward compatibility is not required for older versions in this project.
+- Captions and names are quoted in current files.
+- `FT2GUI_V2` through `FT2GUI_V6` files are loaded with default foreground bitmap layer/skin metadata.
 
 ### Schema export
 
@@ -92,11 +105,14 @@ The export includes:
 - `ft2_ui_layout_desc_t` descriptor
 - Per-widget arrays (only for widget types that exist)
 - `*_BASE` and `*_COUNT` macros with `#ifndef` guards
+- Bitmap descriptors with page, layer, flags, skin part, and opacity metadata
 
 Recommended export targets:
 
 - Tunefish: `../src/ft2_tunefish_complete_layout_schema`
 - Dexed: `../src/dexed/dx_complete_layout_schema`
+- V2: `../src/ft2_v2_complete_layout_schema`
+- OsTIrus: `../src/ft2_ostirus_complete_layout_schema`
 
 The exporter strips a trailing `_schema` from the base name so macro prefixes match existing layout code.
 
@@ -105,6 +121,8 @@ The exporter strips a trailing `_schema` from the base name so macro prefixes ma
 1. Load an existing layout:
    - `ft2_gui_designer/layouts/tf_complete_layout.gui`
    - `ft2_gui_designer/layouts/dx_complete_layout.gui`
+   - `ft2_gui_designer/layouts/v2_complete_layout.gui`
+   - `ft2_gui_designer/layouts/ostirus_complete_layout.gui`
 2. Edit widgets on the canvas and in the properties panel.
 3. Export schema to the corresponding `src/` path.
 4. Rebuild FT2 to compile the updated schema.
@@ -112,9 +130,11 @@ The exporter strips a trailing `_schema` from the base name so macro prefixes ma
 ## Bitmap Import
 
 - Ctrl+I opens the bitmap import prompt.
-- Accepted formats: 4-bit indexed BMP or PNG (with palette/alpha handling).
+- Accepted formats: indexed/RLE BMP, uncompressed 24/32-bit BMP, or PNG.
+- Imported images retain a palette-indexed preview/export fallback and a true-color copy when the source provides 24/32-bit or RGBA pixels.
 - Imported bitmaps are registered in `ft2_ui_assets` and assigned numeric IDs.
 - Use the Bitmap property to reference the ID for bitmap widgets.
+- Set Layer to `1` for backgrounds or `2` for reusable skin surfaces. Background/skin bitmaps render behind other widgets in the designer preview and export as 32-bit BMP assets when true-color pixels are available.
 
 Import status appears in the footer and full errors are printed to the console.
 
@@ -128,7 +148,6 @@ Import status appears in the footer and full errors are printed to the console.
 
 ## Known Limitations
 
-- `.gui` captions are whitespace-delimited (underscores recommended).
 - Combo box contents are not embedded in `.gui` (schema uses runtime list injection in FT2).
 - The designer preview does not simulate full runtime state (values are preview defaults).
 

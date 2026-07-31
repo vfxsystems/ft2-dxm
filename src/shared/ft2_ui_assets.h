@@ -51,7 +51,8 @@ typedef enum
 {
     FT2_UI_BMP_FMT_RLE4 = 0,
     FT2_UI_BMP_FMT_RLE8,
-    FT2_UI_BMP_FMT_RGB
+    FT2_UI_BMP_FMT_RGB,
+    FT2_UI_BMP_FMT_RGB32 = FT2_UI_BMP_FMT_RGB
 } ft2_ui_bmp_format_t;
 
 typedef struct

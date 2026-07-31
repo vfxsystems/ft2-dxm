@@ -80,9 +80,13 @@ struct TunefishWidget {
 
     // Bitmap properties
     uint8_t *bitmapPixels;  // 4-bit palette indices (PAL_TRANSPR supported)
+    uint32_t *bitmapPixels32; // 24/32-bit RGB pixels (0x00FF00 color key supported)
     int bitmapW;
     int bitmapH;
     bool bitmapOwned;
+    bool bitmap32;
+    uint8_t bitmapLayer;
+    uint8_t bitmapSkinPart;
     
     // Styling
     uint32_t bgColor;
@@ -110,6 +114,7 @@ TunefishWidget* tf_create_group_box(const char* name, const char* title, int x, 
 TunefishWidget* tf_create_pushbutton(const char* name, const char* text, int x, int y, int w, int h, const char* label);
 TunefishWidget* tf_create_waveform_view(const char* name, int x, int y, int w, int h);
 TunefishWidget* tf_create_bitmap(const char* name, int x, int y, int w, int h, uint8_t *pixels, int bmp_w, int bmp_h, bool take_ownership);
+TunefishWidget* tf_create_bitmap32(const char* name, int x, int y, int w, int h, uint32_t *pixels, int bmp_w, int bmp_h, bool take_ownership);
 
 // Widget Property Functions
 void tf_widget_set_value(TunefishWidget* widget, float value);

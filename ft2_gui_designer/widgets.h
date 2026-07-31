@@ -36,6 +36,7 @@ typedef enum {
     WIDGET_TF_PARAMETER,
     WIDGET_TF_ENVELOPE,
     WIDGET_TF_GROUP,
+    WIDGET_TF_ARP_STEP,
     WIDGET_MIXER_STRIP,
     WIDGET_MIXER_GAIN,
     WIDGET_MIXER_PAN,
@@ -91,6 +92,9 @@ typedef union {
     struct {
         int bitmap_id;    // Which bitmap to display
         int scale;        // Scaling factor
+        ft2_ui_bitmap_layer_t layer;
+        ft2_ui_skin_part_t skin_part;
+        uint8_t flags;
     } logo;
     
     struct {
