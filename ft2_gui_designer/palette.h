@@ -38,5 +38,6 @@ void draw_framework(uint32_t *framebuffer, int fb_width, int x, int y, int w, in
 void designer_vector_fill_rect(uint32_t *framebuffer, int fb_width, float x, float y, float w, float h, uint32_t color);
 void designer_vector_stroke_rect(uint32_t *framebuffer, int fb_width, float x, float y, float w, float h, float thickness, uint32_t color);
 void designer_vector_line(uint32_t *framebuffer, int fb_width, float x1, float y1, float x2, float y2, float thickness, uint32_t color);
+void designer_vector_arc(uint32_t *framebuffer, int fb_width, float cx, float cy, float radius, float start_angle, float end_angle, float thickness, uint32_t color);
 void blit_fast(uint32_t *framebuffer, int fb_width, int x, int y, const uint8_t *src, int w, int h);
 void blit_transparent(uint32_t *framebuffer, int fb_width, int x, int y, const uint8_t *src, int w, int h);

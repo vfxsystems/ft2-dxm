@@ -288,6 +288,37 @@ void ft2_ui_render_line_f(ft2_ui_pointf_t a, ft2_ui_pointf_t b, float thickness,
 	}
 }
 
+void ft2_ui_render_arc_f(ft2_ui_pointf_t center, float radius, float startAngle, float endAngle, float thickness, uint8_t paletteIndex)
+{
+	if (radius <= 0.0f || thickness <= 0.0f || startAngle == endAngle)
+		return;
+
+	const float sweep = endAngle - startAngle;
+	int32_t steps = (int32_t)ceilf(fabsf(sweep) * radius * 0.75f);
+	if (steps < 4)
+		steps = 4;
+	else if (steps > 192)
+		steps = 192;
+
+	ft2_ui_pointf_t prev = {
+		center.x + cosf(startAngle) * radius,
+		center.y + sinf(startAngle) * radius
+	};
+
+	for (int32_t i = 1; i <= steps; i++)
+	{
+		const float t = (float)i / (float)steps;
+		const float angle = startAngle + sweep * t;
+		const ft2_ui_pointf_t next = {
+			center.x + cosf(angle) * radius,
+			center.y + sinf(angle) * radius
+		};
+
+		ft2_ui_render_line_f(prev, next, thickness, paletteIndex);
+		prev = next;
+	}
+}
+
 bool ft2_ui_render_ttf_available(void)
 {
 #ifdef FT2_ENABLE_TTF

@@ -43,6 +43,7 @@ void ft2_ui_render_framework(int32_t x, int32_t y, int32_t w, int32_t h, uint8_t
 void ft2_ui_render_fill_rect_f(ft2_ui_rectf_t rect, uint8_t paletteIndex);
 void ft2_ui_render_stroke_rect_f(ft2_ui_rectf_t rect, float thickness, uint8_t paletteIndex);
 void ft2_ui_render_line_f(ft2_ui_pointf_t a, ft2_ui_pointf_t b, float thickness, uint8_t paletteIndex);
+void ft2_ui_render_arc_f(ft2_ui_pointf_t center, float radius, float startAngle, float endAngle, float thickness, uint8_t paletteIndex);
 
 bool ft2_ui_render_ttf_available(void);
 bool ft2_ui_render_load_ttf_font(const char *path, int ptSize);

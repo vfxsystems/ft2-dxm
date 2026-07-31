@@ -12,6 +12,7 @@ FT2 GUI Designer is a layout editor that mirrors FastTracker 2 widget behavior a
 - Wider two-column toolbar with readable schema labels.
 - Page-view dropdown for all pages or Page 1 through Page 6.
 - Designer palette themes: FT2 Arctic, OP-1 inspired, Renoise inspired, and VS Code inspired.
+- Vector modulation-ring preview for TF rotary controls using the shared schema v9 `mod_ring` contract.
 - Built-in file prompt for load/save/export without blocking the app.
 
 ## Build and Run
@@ -66,6 +67,7 @@ File operations (open prompt in the canvas footer):
 - Drag tools from the toolbar or select a tool and click to place.
 - The toolbar page dropdown controls preview filtering without changing widget coordinates.
 - The theme dropdown changes the designer palette preview while preserving FT2 palette indexes used by export.
+- TF rotary widgets export modulation-ring metadata. Matrix amount knobs are tagged as direct matrix-amount rings; other rotary widgets use automatic engine/name matching for live modulation feedback.
 - Selected widgets show handles for visual feedback.
 - Drag to reposition; grid snapping is applied.
 

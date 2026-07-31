@@ -60,6 +60,10 @@ struct TunefishWidget {
     float maxValue;        // Maximum value
     float defaultValue;    // Default/reset value
     float modValue;        // Modulation amount (for rotary sliders)
+    uint8_t modRingMode;   // ft2_ui_mod_ring_mode_t for schema-driven feedback
+    int modMatrixSlot;     // Matrix row used by direct amount knobs, or -1
+    int modTargetParam;    // Optional engine target parameter, or -1 for name matching
+    float modAmountScale;  // Visual depth scale for matrix/automation feedback
     
     // Rotary slider properties
     float rotaryStartAngle;  // Start angle in radians

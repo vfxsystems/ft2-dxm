@@ -1510,9 +1510,19 @@ static void draw_tf_rotary(widget_t *widget, uint32_t *framebuffer, int fb_width
     }
 
     const float value = 0.5f;
-    const float mod_value = 0.0f;
+    float mod_value = 0.0f;
+    if (strncmp(widget->name, "mod_amt_", 8) == 0)
+        mod_value = 0.35f;
+    else if (widget->data.tf_rotary.start_angle != 0.0f || widget->data.tf_rotary.end_angle != 0.0f)
+        mod_value = 0.18f;
+
+    float mod_target = value + mod_value;
+    if (mod_target < 0.0f)
+        mod_target = 0.0f;
+    if (mod_target > 1.0f)
+        mod_target = 1.0f;
     float value_angle = start_angle + value * (end_angle - start_angle);
-    float mod_angle = start_angle + (value * mod_value) * (end_angle - start_angle);
+    float mod_angle = start_angle + mod_target * (end_angle - start_angle);
 
     uint32_t track_color = get_palette_color(PAL_BUTTON2);
     uint32_t fill_color = get_palette_color(PAL_BUTTONS);
@@ -1522,26 +1532,11 @@ static void draw_tf_rotary(widget_t *widget, uint32_t *framebuffer, int fb_width
     designer_draw_circle(framebuffer, fb_width, cx, cy, radius, track_color, true);
     designer_draw_circle(framebuffer, fb_width, cx, cy, radius - 3, fill_color, true);
 
-    int arc_steps = 256;
-    int r_inner = radius - 4;
-    int r_outer = radius + 1;
-    for (int i = 0; i <= arc_steps; i++) {
-        float angle = start_angle + (float)i / (float)arc_steps * (value_angle - start_angle);
-        int x1 = cx + (int)(r_inner * cosf(angle));
-        int y1 = cy + (int)(r_inner * sinf(angle));
-        int x2 = cx + (int)(r_outer * cosf(angle));
-        int y2 = cy + (int)(r_outer * sinf(angle));
-        designer_draw_line(framebuffer, fb_width, x1, y1, x2, y2, arc_color);
-    }
-
-    if (mod_value > 0.0f) {
-        for (int i = 0; i <= arc_steps; i++) {
-            float angle = start_angle + (float)i / (float)arc_steps * (mod_angle - start_angle);
-            int px = cx + (int)(r_inner * cosf(angle));
-            int py = cy + (int)(r_inner * sinf(angle));
-            designer_put_pixel(framebuffer, fb_width, px, py, mod_color);
-        }
-    }
+    designer_vector_arc(framebuffer, fb_width, (float)cx, (float)cy, (float)radius - 2.0f,
+                        start_angle, value_angle, 4.0f, arc_color);
+    if (fabsf(mod_target - value) > 0.001f)
+        designer_vector_arc(framebuffer, fb_width, (float)cx, (float)cy, (float)radius + 1.0f,
+                            value_angle, mod_angle, 2.0f, mod_color);
 
     char value_text[8];
     snprintf(value_text, sizeof(value_text), "%d", (int)(value * 99.0f));
@@ -3540,12 +3535,20 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
                 start_angle = -2.35f;
                 end_angle = 2.35f;
             }
+            int mod_slot = -1;
+            ft2_ui_mod_ring_mode_t mod_mode = FT2_UI_MOD_RING_AUTO_BY_NAME;
+            if (sscanf(w->name, "mod_amt_%d", &mod_slot) == 1)
+                mod_mode = FT2_UI_MOD_RING_MATRIX_AMOUNT;
+            else
+                mod_slot = -1;
             fprintf(file, "    { %s_TF_ROTARY_BASE + %d, ", macro_prefix, i);
             write_optional_c_string(file, w->name);
             fprintf(file, ", %d, %d, %d, %d, %.3ff, %.3ff, ",
                     w->x, w->y, radius, (int)w->page, start_angle, end_angle);
             write_optional_c_string(file, schema_text_or_name(w, false));
-            fprintf(file, " },\n");
+            fprintf(file, ", { %s, %d, -1, 1.000f } },\n",
+                    mod_mode == FT2_UI_MOD_RING_MATRIX_AMOUNT ? "FT2_UI_MOD_RING_MATRIX_AMOUNT" : "FT2_UI_MOD_RING_AUTO_BY_NAME",
+                    mod_slot);
         }
         fprintf(file, "};\n\n");
     }

@@ -60,6 +60,7 @@ static void tf_formant_button_handler(TunefishWidget* w);
 
 // Parameter synchronization
 static void tf_refresh_shadow_parameters_from_synth(void);
+static void tf_update_modulation_rings_from_matrix(TunefishCompleteLayout* layout);
 
 // Ensure preset combo sync helper is visible before use
 static void tf_sync_preset_combo_with_instrument(TunefishCompleteLayout* layout);
@@ -390,28 +391,28 @@ static TunefishParameterBinding g_paramBindings[] = {
     // --- Modulation Matrix ---
     { "mod_src_0",  44, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[0] },
     { "mod_dst_0",  46, 0, MOD_DST_ENUM_COUNT-1, &mmDst[0] },
-    { "mod_amt_0",  45, 0, 99,              &mmAmt[0] },
+    { "mod_amt_0",  45, 0, 127,             &mmAmt[0] },
     { "mod_src_1",  47, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[1] },
     { "mod_dst_1",  49, 0, MOD_DST_ENUM_COUNT-1, &mmDst[1] },
-    { "mod_amt_1",  48, 0, 99,              &mmAmt[1] },
+    { "mod_amt_1",  48, 0, 127,             &mmAmt[1] },
     { "mod_src_2",  50, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[2] },
     { "mod_dst_2",  52, 0, MOD_DST_ENUM_COUNT-1, &mmDst[2] },
-    { "mod_amt_2",  51, 0, 99,              &mmAmt[2] },
+    { "mod_amt_2",  51, 0, 127,             &mmAmt[2] },
     { "mod_src_3",  53, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[3] },
     { "mod_dst_3",  55, 0, MOD_DST_ENUM_COUNT-1, &mmDst[3] },
-    { "mod_amt_3",  54, 0, 99,              &mmAmt[3] },
+    { "mod_amt_3",  54, 0, 127,             &mmAmt[3] },
     { "mod_src_4",  56, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[4] },
     { "mod_dst_4",  58, 0, MOD_DST_ENUM_COUNT-1, &mmDst[4] },
-    { "mod_amt_4",  57, 0, 99,              &mmAmt[4] },
+    { "mod_amt_4",  57, 0, 127,             &mmAmt[4] },
     { "mod_src_5",  59, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[5] },
     { "mod_dst_5",  61, 0, MOD_DST_ENUM_COUNT-1, &mmDst[5] },
-    { "mod_amt_5",  60, 0, 99,              &mmAmt[5] },
+    { "mod_amt_5",  60, 0, 127,             &mmAmt[5] },
     { "mod_src_6",  62, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[6] },
     { "mod_dst_6",  64, 0, MOD_DST_ENUM_COUNT-1, &mmDst[6] },
-    { "mod_amt_6",  63, 0, 99,              &mmAmt[6] },
+    { "mod_amt_6",  63, 0, 127,             &mmAmt[6] },
     { "mod_src_7",  65, 0, MOD_SRC_ENUM_COUNT-1, &mmSrc[7] },
     { "mod_dst_7",  67, 0, MOD_DST_ENUM_COUNT-1, &mmDst[7] },
-    { "mod_amt_7",  66, 0, 99,              &mmAmt[7] },
+    { "mod_amt_7",  66, 0, 127,             &mmAmt[7] },
     // --- FX Stack ---
     { "fxstk_sel_0", 74, 0, FX_STACK_COUNT-1, &fxSel[0] },
     { "fxstk_wet_0", -1, 0, 127,               &fxWet[0] },
@@ -632,6 +633,7 @@ void tf_sync_widgets_with_parameters(TunefishCompleteLayout* layout) {
         if (layout->page2.formant_type_buttons[i])
             layout->page2.formant_type_buttons[i]->pressed = (i == synthFormant);
 
+    tf_update_modulation_rings_from_matrix(layout);
     tf_request_redraw();
 }
 
@@ -1144,6 +1146,12 @@ static TunefishCompleteLayout* tf_create_complete_layout_from_schema(const ft2_u
             TunefishWidget* w = tf_create_rotary_slider(name, center_x, center_y, d->radius, d->start_angle, d->end_angle);
             if (w && d->label) {
                 tf_widget_set_label(w, d->label);
+            }
+            if (w) {
+                w->modRingMode = d->mod_ring.mode ? d->mod_ring.mode : FT2_UI_MOD_RING_AUTO_BY_NAME;
+                w->modMatrixSlot = d->mod_ring.matrix_slot;
+                w->modTargetParam = d->mod_ring.target_param;
+                w->modAmountScale = d->mod_ring.amount_scale > 0.0f ? d->mod_ring.amount_scale : 1.0f;
             }
             tf_apply_knob_styling(w, 0.5f);
             tf_schema_register_widget(layout, w, d->page);
@@ -2222,6 +2230,90 @@ TunefishWidget* tf_find_widget_by_name(TunefishCompleteLayout* l, const char* na
         if (w && strcmp(w->name, name) == 0) return w;
     }
     return NULL;
+}
+
+typedef struct TfModRingTarget {
+    int dst;
+    const char *widgetName;
+} TfModRingTarget;
+
+static const TfModRingTarget k_tfModRingTargets[] = {
+    { 1,  "gen_bandwidth" },
+    { 2,  "gen_damp" },
+    { 3,  "gen_harmonics" },
+    { 4,  "gen_scale" },
+    { 5,  "gen_volume" },
+    { 7,  "gen_panning" },
+    { 8,  "gen_detune" },
+    { 9,  "gen_detune" },
+    { 10, "gen_drive" },
+    { 11, "gen_noise" },
+    { 12, "filter1_cutoff" },
+    { 13, "filter1_res" },
+    { 14, "filter2_cutoff" },
+    { 15, "filter2_res" },
+    { 16, "filter3_cutoff" },
+    { 17, "filter3_res" },
+    { 18, "filter4_cutoff" },
+    { 19, "filter4_res" },
+    { 22, "mod_amt_0" },
+    { 23, "mod_amt_1" },
+    { 24, "mod_amt_2" },
+    { 25, "mod_amt_3" },
+    { 26, "mod_amt_4" },
+    { 27, "mod_amt_5" },
+    { 28, "mod_amt_6" },
+    { 29, "mod_amt_7" },
+    { 30, "lfo1_amp" },
+    { 31, "lfo2_amp" },
+    { 32, "distortion_amount" },
+    { 33, "delay_left" },
+    { 34, "delay_right" },
+    { 35, "delay_decay" },
+    { 36, "reverb_wet" },
+    { 37, "flanger_wet" },
+    { 38, "chorus_gain" },
+    { 39, "formant_wet" }
+};
+
+static const char *tf_mod_ring_widget_name_for_dst(int dst)
+{
+    for (size_t i = 0; i < sizeof k_tfModRingTargets / sizeof k_tfModRingTargets[0]; i++) {
+        if (k_tfModRingTargets[i].dst == dst)
+            return k_tfModRingTargets[i].widgetName;
+    }
+    return NULL;
+}
+
+static void tf_update_modulation_rings_from_matrix(TunefishCompleteLayout* layout)
+{
+    if (!layout) return;
+
+    for (int i = 0; i < TF_TOTAL_WIDGETS; i++) {
+        TunefishWidget *w = layout->all_widgets[i];
+        if (w && w->type == TF_WIDGET_ROTARY_SLIDER)
+            w->modValue = 0.0f;
+    }
+
+    for (int slot = 0; slot < 8; slot++) {
+        if (mmSrc[slot] <= 0 || mmDst[slot] <= 0 || mmAmt[slot] <= 0)
+            continue;
+
+        const char *targetName = tf_mod_ring_widget_name_for_dst(mmDst[slot]);
+        TunefishWidget *target = targetName ? tf_find_widget_by_name(layout, targetName) : NULL;
+        if (target && target->type == TF_WIDGET_ROTARY_SLIDER &&
+            target->modRingMode != FT2_UI_MOD_RING_NONE) {
+            const float scale = target->modAmountScale > 0.0f ? target->modAmountScale : 1.0f;
+            tf_widget_set_mod_value(target, target->modValue + ((float)mmAmt[slot] / 127.0f) * scale);
+        }
+
+        TunefishWidget *amount = layout->page2.mod_amount_knobs[slot];
+        if (amount && amount->type == TF_WIDGET_ROTARY_SLIDER &&
+            amount->modRingMode != FT2_UI_MOD_RING_NONE) {
+            tf_widget_set_mod_value(amount, ((float)mmAmt[slot] / 127.0f) *
+                                     (amount->modAmountScale > 0.0f ? amount->modAmountScale : 1.0f));
+        }
+    }
 }
 
 // Forward declaration from ft2_synth.c (not in header)

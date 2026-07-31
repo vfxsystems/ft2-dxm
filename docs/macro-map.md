@@ -13,6 +13,24 @@ Synth macro targets use normalized values from `00..FF` to `0.0..1.0` after the 
 
 The editor, DXM loader/saver, and replayer all use the shared helpers in `ft2_macro_map.c` to resolve target IDs, parameter counts, parameter labels, and stale mapping sanitation.
 
+## Modulation Ring Feedback
+
+Schema version 9 adds `mod_ring` metadata to rotary slider descriptors. The
+current TF layout uses this contract to show PhasePlant/Serum/Vital-style outer
+modulation arcs on knob widgets:
+
+- matrix destination slots are mapped back to their target knob by engine
+  destination ID/name;
+- matrix amount is scaled from the live normalized `0..127` shadow value;
+- amount knobs also show their own matrix amount as a direct outer ring;
+- the draw path uses the shared vector arc primitive, matching the designer
+  preview path.
+
+DX, V2, and OsTIrus schema importers preserve the same rotary `mod_ring`
+metadata. Their live matrix/automation providers can feed the existing
+`TunefishWidget.modValue` path as those engine-side modulation surfaces are
+completed.
+
 ## DSP Targets
 
 DSP targets keep using the packed parameter ID:

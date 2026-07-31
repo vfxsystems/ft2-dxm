@@ -1227,6 +1227,13 @@ static TunefishWidget *v2_create_rotary_from_desc(const ft2_ui_tf_rotary_slider_
         desc->end_angle);
     if (widget && desc->label)
         tf_widget_set_label(widget, desc->label);
+    if (widget)
+    {
+        widget->modRingMode = desc->mod_ring.mode ? desc->mod_ring.mode : FT2_UI_MOD_RING_AUTO_BY_NAME;
+        widget->modMatrixSlot = desc->mod_ring.matrix_slot;
+        widget->modTargetParam = desc->mod_ring.target_param;
+        widget->modAmountScale = desc->mod_ring.amount_scale > 0.0f ? desc->mod_ring.amount_scale : 1.0f;
+    }
     return widget;
 }
 

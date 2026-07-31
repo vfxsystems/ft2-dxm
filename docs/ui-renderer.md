@@ -17,8 +17,13 @@ DPI scale.
 - The compatibility raster path clips internally. Public legacy wrappers keep
   their asserts to catch bad caller geometry during development.
 - New scalable widgets should prefer `ft2_ui_render_fill_rect_f()`,
-  `ft2_ui_render_stroke_rect_f()`, and `ft2_ui_render_line_f()` so they can be
-  migrated to a true SDL/vector backend without changing widget logic.
+  `ft2_ui_render_stroke_rect_f()`, `ft2_ui_render_line_f()`, and
+  `ft2_ui_render_arc_f()` so they can be migrated to a true SDL/vector backend
+  without changing widget logic.
+- Modulated rotary controls use `ft2_ui_render_arc_f()` for the outer feedback
+  ring. The filled value arc runs from the rotary start angle to the current
+  value; the modulation ring runs from the current value toward the clamped
+  modulated target value.
 
 ## TTF Fonts
 

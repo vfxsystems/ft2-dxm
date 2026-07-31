@@ -1422,7 +1422,17 @@ static TunefishWidget *osti_create_rotary_from_desc(const ft2_ui_tf_rotary_slide
     if (!d) return NULL;
     const int cx = d->x + (int)d->radius;
     const int cy = d->y + (int)d->radius;
-    return tf_create_rotary_slider(d->name ? d->name : "rotary", cx, cy, (int)d->radius, d->start_angle, d->end_angle);
+    TunefishWidget *widget = tf_create_rotary_slider(d->name ? d->name : "rotary", cx, cy, (int)d->radius, d->start_angle, d->end_angle);
+    if (widget)
+    {
+        widget->modRingMode = d->mod_ring.mode ? d->mod_ring.mode : FT2_UI_MOD_RING_AUTO_BY_NAME;
+        widget->modMatrixSlot = d->mod_ring.matrix_slot;
+        widget->modTargetParam = d->mod_ring.target_param;
+        widget->modAmountScale = d->mod_ring.amount_scale > 0.0f ? d->mod_ring.amount_scale : 1.0f;
+        if (d->label)
+            tf_widget_set_label(widget, d->label);
+    }
+    return widget;
 }
 
 static TunefishWidget *osti_create_combo_from_desc(const ft2_ui_tf_combo_box_desc_t *d)
