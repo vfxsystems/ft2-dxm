@@ -8,12 +8,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cstdarg>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -62,6 +62,9 @@ struct V2InstrumentState
     bool synthReady = false;
 };
 
+static void sanitize_bank(V2BankData& bank);
+static bool reinit_state_synth(V2InstrumentState* st);
+
 static bool g_defsReady = false;
 static bool g_factoryReady = false;
 static int g_currentSampleRate = 0;
@@ -77,33 +80,9 @@ static std::vector<int> g_globalTopicStarts;
 static std::vector<std::string> g_modDestNames;
 static std::vector<int> g_modDestParamIds;
 static std::array<V2InstrumentState*, kMaxInst + 1> g_states{};
-static std::array<bool, kMaxInst + 1> g_loggedNoteOn{};
-static std::array<bool, kMaxInst + 1> g_loggedRender{};
+static std::recursive_mutex g_v2Mutex;
 
-static void v2_diag_log(const char* fmt, ...)
-{
-    FILE* f = std::fopen("v2_diag.log", "ab");
-    if (!f) return;
-
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-
-    std::fputc('\n', f);
-    std::fflush(f);
-    std::fclose(f);
-}
-
-static float buffer_peak(const float* left, const float* right, int samples)
-{
-    float peak = 0.0f;
-    for (int i = 0; i < samples; ++i) {
-        peak = std::max(peak, std::fabs(left[i]));
-        peak = std::max(peak, std::fabs(right[i]));
-    }
-    return peak;
-}
+#define V2_LOCK_GUARD() std::lock_guard<std::recursive_mutex> v2Lock(g_v2Mutex)
 
 static std::string join_path(const std::string& a, const std::string& b)
 {
@@ -525,6 +504,7 @@ static bool load_bank_blob(const uint8_t* data, size_t size, V2BankData& out)
 
     out = std::move(bank);
     out.valid = true;
+    sanitize_bank(out);
     return true;
 }
 
@@ -613,34 +593,33 @@ static V2InstrumentState* get_state(int instrID, bool createIfMissing, bool requ
 
     if (!st) return nullptr;
 
-    if (st->bank.patchMap.empty() || !st->bank.valid)
+    bool bankStorageChanged = false;
+    if (st->bank.patchMap.empty() || !st->bank.valid) {
         st->bank = g_factoryBank;
+        bankStorageChanged = true;
+    }
 
+    bool globalsChanged = false;
     if (st->bank.globals.empty() || static_cast<int>(st->bank.globals.size()) != V2::nGParams) {
         st->bank.globals.assign(V2::InitGlobals, V2::InitGlobals + V2::nGParams);
+        globalsChanged = true;
     }
 
     if (st->synthMem.empty())
         st->synthMem.resize(synthGetSize());
 
-    if (!st->synthReady || st->sampleRate != g_currentSampleRate) {
-        st->sampleRate = g_currentSampleRate > 0 ? g_currentSampleRate : 44100;
-        synthInit(st->synthMem.data(), st->bank.patchMap.data(), st->sampleRate);
+    if (!st->synthReady || st->sampleRate != g_currentSampleRate || bankStorageChanged)
+        reinit_state_synth(st);
+    else if (globalsChanged)
         synthSetGlobals(st->synthMem.data(), st->bank.globals.data());
-        uint8_t msg[3] = {
-            static_cast<uint8_t>(0xC0),
-            static_cast<uint8_t>(std::clamp(st->currentPreset, 0, 127)),
-            0xFD
-        };
-        synthProcessMIDI(st->synthMem.data(), msg);
-        st->synthReady = true;
-    }
 
     return st;
 }
 
 static const Ft2V2ParamInfo* param_info_for_id(int paramId, bool global)
 {
+    build_info_tables();
+
     if (global) {
         if (paramId < 0 || paramId >= V2::nGParams) return nullptr;
         return &g_globalParamInfos[static_cast<size_t>(paramId)];
@@ -651,6 +630,8 @@ static const Ft2V2ParamInfo* param_info_for_id(int paramId, bool global)
 
 static const ParameterRange* param_range_for_id(int paramId, bool global)
 {
+    build_info_tables();
+
     if (global) {
         if (paramId < 0 || paramId >= V2::nGParams) return nullptr;
         return &g_globalParamRanges[static_cast<size_t>(paramId)];
@@ -681,6 +662,43 @@ static uint8_t* current_patch_ptr(V2InstrumentState* st)
 static const uint8_t* current_patch_ptr_const(const V2InstrumentState* st)
 {
     return patch_ptr_const(st, st ? std::clamp(st->currentPreset, 0, 127) : 0);
+}
+
+static int max_mod_slots_for_patch(void)
+{
+    if (g_currentPatchSize <= static_cast<size_t>(V2::nParams))
+        return 0;
+
+    const size_t modBytes = g_currentPatchSize - static_cast<size_t>(V2::nParams) - 1;
+    return static_cast<int>(modBytes / 3u);
+}
+
+static void sanitize_patch(uint8_t* raw)
+{
+    if (!raw)
+        return;
+
+    const int maxSlots = max_mod_slots_for_patch();
+    raw[V2::nParams] = static_cast<uint8_t>(std::clamp(static_cast<int>(raw[V2::nParams]), 0, maxSlots));
+
+    for (int slot = 0; slot < maxSlots; ++slot) {
+        const size_t base = static_cast<size_t>(V2::nParams + 1 + (slot * 3));
+        if (base + 2 >= g_currentPatchSize)
+            break;
+
+        raw[base + 0] = static_cast<uint8_t>(std::clamp(static_cast<int>(raw[base + 0]), 0, V2::nModSources - 1));
+        raw[base + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(raw[base + 1]), 0, 127));
+        raw[base + 2] = static_cast<uint8_t>(std::clamp(static_cast<int>(raw[base + 2]), 0, V2::nParams - 1));
+    }
+}
+
+static void sanitize_bank(V2BankData& bank)
+{
+    if (bank.patchMap.size() < kPatchHeaderSize + g_currentBankPatchBytes)
+        return;
+
+    for (int i = 0; i < 128; ++i)
+        sanitize_patch(bank.patchMap.data() + kPatchHeaderSize + (static_cast<size_t>(i) * g_currentPatchSize));
 }
 
 static void set_patch_param_raw(V2InstrumentState* st, int paramId, int rawValue)
@@ -757,6 +775,35 @@ static void send_program_change(V2InstrumentState* st, int presetIndex)
     }
 }
 
+static void silence_state(V2InstrumentState* st)
+{
+    if (!st || !st->synthReady || st->synthMem.empty())
+        return;
+
+    for (int ch = 0; ch < 16; ++ch) {
+        uint8_t msg[4] = {static_cast<uint8_t>(0xB0 | ch), 123, 0, 0xFD};
+        synthProcessMIDI(st->synthMem.data(), msg);
+        msg[1] = 120;
+        synthProcessMIDI(st->synthMem.data(), msg);
+    }
+}
+
+static bool reinit_state_synth(V2InstrumentState* st)
+{
+    if (!st || !st->bank.valid || st->bank.patchMap.size() < kPatchHeaderSize + g_currentBankPatchBytes)
+        return false;
+
+    if (st->synthMem.empty())
+        st->synthMem.resize(synthGetSize());
+
+    st->sampleRate = g_currentSampleRate > 0 ? g_currentSampleRate : 44100;
+    synthInit(st->synthMem.data(), st->bank.patchMap.data(), st->sampleRate);
+    synthSetGlobals(st->synthMem.data(), st->bank.globals.data());
+    send_program_change(st, st->currentPreset);
+    st->synthReady = true;
+    return true;
+}
+
 static void destroy_state(V2InstrumentState*& st)
 {
     if (!st) return;
@@ -821,11 +868,7 @@ static void init_or_reinit_all_states(void)
             continue;
         if (st->synthMem.empty())
             st->synthMem.resize(synthGetSize());
-        st->sampleRate = g_currentSampleRate > 0 ? g_currentSampleRate : 44100;
-        synthInit(st->synthMem.data(), st->bank.patchMap.data(), st->sampleRate);
-        synthSetGlobals(st->synthMem.data(), st->bank.globals.data());
-        send_program_change(st, st->currentPreset);
-        st->synthReady = true;
+        (void)reinit_state_synth(st);
     }
 }
 } // namespace
@@ -834,6 +877,7 @@ extern "C" {
 
 void ft2_v2_init(int samplerate)
 {
+    V2_LOCK_GUARD();
     build_info_tables();
     ensure_factory_bank_loaded();
 
@@ -844,6 +888,7 @@ void ft2_v2_init(int samplerate)
 
 void ft2_v2_shutdown(void)
 {
+    V2_LOCK_GUARD();
     for (int i = 1; i <= MAX_INST; ++i) {
         V2InstrumentState* st = g_states[i];
         if (!st) continue;
@@ -857,141 +902,175 @@ void ft2_v2_shutdown(void)
 
 bool ft2_v2_is_initialized(void)
 {
+    V2_LOCK_GUARD();
     return g_factoryReady;
 }
 
 int ft2_v2_get_patch_size(void)
 {
+    V2_LOCK_GUARD();
     return g_currentPatchSize ? static_cast<int>(g_currentPatchSize) : V2::SoundSize;
 }
 
 int ft2_v2_get_param_count(void)
 {
+    V2_LOCK_GUARD();
     return V2::nParams;
 }
 
 const char* ft2_v2_get_param_name(int paramId)
 {
+    V2_LOCK_GUARD();
     const Ft2V2ParamInfo* info = param_info_for_id(paramId, false);
     return info ? info->name : nullptr;
 }
 
 const Ft2V2ParamInfo* ft2_v2_get_param_info(int paramId)
 {
+    V2_LOCK_GUARD();
     return param_info_for_id(paramId, false);
 }
 
 const ParameterRange* ft2_v2_get_param_range(int paramId)
 {
+    V2_LOCK_GUARD();
     return param_range_for_id(paramId, false);
 }
 
 int ft2_v2_get_global_param_count(void)
 {
+    V2_LOCK_GUARD();
     return V2::nGParams;
 }
 
 const char* ft2_v2_get_global_param_name(int paramId)
 {
+    V2_LOCK_GUARD();
     const Ft2V2ParamInfo* info = param_info_for_id(paramId, true);
     return info ? info->name : nullptr;
 }
 
 const Ft2V2ParamInfo* ft2_v2_get_global_param_info(int paramId)
 {
+    V2_LOCK_GUARD();
     return param_info_for_id(paramId, true);
 }
 
 const ParameterRange* ft2_v2_get_global_param_range(int paramId)
 {
+    V2_LOCK_GUARD();
     return param_range_for_id(paramId, true);
 }
 
 int ft2_v2_get_topic_count(void)
 {
+    V2_LOCK_GUARD();
     return V2::nTopics;
 }
 
 const Ft2V2TopicInfo* ft2_v2_get_topic_info(int topicIndex)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     if (topicIndex < 0 || topicIndex >= V2::nTopics) return nullptr;
     return &g_topicInfos[static_cast<size_t>(topicIndex)];
 }
 
 int ft2_v2_get_topic_param_start(int topicIndex)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     if (topicIndex < 0 || topicIndex >= V2::nTopics) return 0;
     return g_topicStarts[static_cast<size_t>(topicIndex)];
 }
 
 int ft2_v2_get_topic_param_count(int topicIndex)
 {
+    V2_LOCK_GUARD();
     if (topicIndex < 0 || topicIndex >= V2::nTopics) return 0;
     return V2::Topics[topicIndex].no;
 }
 
 int ft2_v2_get_global_topic_count(void)
 {
+    V2_LOCK_GUARD();
     return V2::nGTopics;
 }
 
 const Ft2V2TopicInfo* ft2_v2_get_global_topic_info(int topicIndex)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     if (topicIndex < 0 || topicIndex >= V2::nGTopics) return nullptr;
     return &g_globalTopicInfos[static_cast<size_t>(topicIndex)];
 }
 
 int ft2_v2_get_global_topic_param_start(int topicIndex)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     if (topicIndex < 0 || topicIndex >= V2::nGTopics) return 0;
     return g_globalTopicStarts[static_cast<size_t>(topicIndex)];
 }
 
 int ft2_v2_get_global_topic_param_count(int topicIndex)
 {
+    V2_LOCK_GUARD();
     if (topicIndex < 0 || topicIndex >= V2::nGTopics) return 0;
     return V2::GTopics[topicIndex].no;
 }
 
 int ft2_v2_get_mod_source_count(void)
 {
+    V2_LOCK_GUARD();
     return V2::nModSources;
 }
 
 const char* ft2_v2_get_mod_source_name(int index)
 {
+    V2_LOCK_GUARD();
     if (index < 0 || index >= V2::nModSources) return nullptr;
     return V2::ModSources[index];
 }
 
 int ft2_v2_get_mod_dest_count(void)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     return static_cast<int>(g_modDestNames.size());
 }
 
 const char* ft2_v2_get_mod_dest_name(int index)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     if (index < 0 || static_cast<size_t>(index) >= g_modDestNames.size()) return nullptr;
     return g_modDestNames[static_cast<size_t>(index)].c_str();
 }
 
 int ft2_v2_get_mod_dest_param_index(int index)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     return get_dest_raw_param_id(index);
 }
 
 int ft2_v2_find_mod_dest_list_index(int paramId)
 {
+    V2_LOCK_GUARD();
+    build_info_tables();
     return get_dest_list_index_from_raw(paramId);
 }
 
 int ft2_v2_get_factory_preset_count(void)
 {
+    V2_LOCK_GUARD();
     return 128;
 }
 
 const char* ft2_v2_get_factory_preset_name(int index)
 {
+    V2_LOCK_GUARD();
     ensure_factory_bank_loaded();
     if (index < 0 || index >= 128) return nullptr;
     return g_factoryBank.patchNames[static_cast<size_t>(index)].data();
@@ -999,6 +1078,7 @@ const char* ft2_v2_get_factory_preset_name(int index)
 
 const char* ft2_v2_get_preset_name_for_instrument(int instrID, int index)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, false, false);
     if (st && st->bank.valid && index >= 0 && index < 128) {
         return st->bank.patchNames[static_cast<size_t>(index)].data();
@@ -1008,6 +1088,7 @@ const char* ft2_v2_get_preset_name_for_instrument(int instrID, int index)
 
 int ft2_v2_get_current_preset_for_instrument(int instrID)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, false, false);
     if (!st) return 0;
     return std::clamp(st->currentPreset, 0, 127);
@@ -1015,6 +1096,7 @@ int ft2_v2_get_current_preset_for_instrument(int instrID)
 
 const char* ft2_v2_get_current_preset_name_for_instrument(int instrID)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, false, false);
     if (!st) return ft2_v2_get_factory_preset_name(0);
     return st->bank.patchNames[static_cast<size_t>(std::clamp(st->currentPreset, 0, 127))].data();
@@ -1022,20 +1104,24 @@ const char* ft2_v2_get_current_preset_name_for_instrument(int instrID)
 
 int ft2_v2_load_preset_for_instrument(int instrID, int index)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return 0;
     if (index < 0 || index >= 128) return 0;
+    silence_state(st);
     send_program_change(st, index);
     return 1;
 }
 
 int ft2_v2_load_factory_preset_for_instrument(int instrID, int index)
 {
+    V2_LOCK_GUARD();
     return ft2_v2_load_preset_for_instrument(instrID, index);
 }
 
 int ft2_v2_load_factory_preset_for_current_instrument(int index)
 {
+    V2_LOCK_GUARD();
     return ft2_v2_load_preset_for_instrument(editor.curInstr, index);
 }
 
@@ -1046,16 +1132,22 @@ static uint8_t* current_patch_ptr(V2InstrumentState* st, int patchIndex)
 
 int ft2_v2_load_patch_for_instrument(int instrID, const uint8_t* data, size_t size)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, false);
     if (!st || !data || size < g_currentPatchSize) return 0;
     uint8_t* dst = current_patch_ptr(st, st->currentPreset);
     if (!dst) return 0;
+    silence_state(st);
     std::memcpy(dst, data, g_currentPatchSize);
+    sanitize_patch(dst);
+    if (st->synthReady)
+        (void)reinit_state_synth(st);
     return 1;
 }
 
 int ft2_v2_get_patch_data(int instrID, uint8_t* buffer, int32_t bufferSize)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st || !buffer || bufferSize < static_cast<int32_t>(g_currentPatchSize)) return 0;
     uint8_t* src = current_patch_ptr(st, st->currentPreset);
@@ -1066,6 +1158,7 @@ int ft2_v2_get_patch_data(int instrID, uint8_t* buffer, int32_t bufferSize)
 
 size_t ft2_v2_serialize_state(int instrID, uint8_t* outBuf, size_t bufSize)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return 0;
     std::vector<uint8_t> blob;
@@ -1079,6 +1172,7 @@ size_t ft2_v2_serialize_state(int instrID, uint8_t* outBuf, size_t bufSize)
 
 int ft2_v2_deserialize_state(int instrID, const uint8_t* data, size_t size)
 {
+    V2_LOCK_GUARD();
     if (instrID < 1 || instrID > MAX_INST || !data || size == 0) return 0;
     V2InstrumentState tmp;
     tmp.bank = g_factoryBank.valid ? g_factoryBank : V2BankData{};
@@ -1088,14 +1182,13 @@ int ft2_v2_deserialize_state(int instrID, const uint8_t* data, size_t size)
 
     if (tmp.bank.patchMap.empty())
         return 0;
+    sanitize_bank(tmp.bank);
     tmp.synthMem.resize(synthGetSize());
-    tmp.sampleRate = g_currentSampleRate > 0 ? g_currentSampleRate : 44100;
-    synthInit(tmp.synthMem.data(), tmp.bank.patchMap.data(), tmp.sampleRate);
-    synthSetGlobals(tmp.synthMem.data(), tmp.bank.globals.data());
-    send_program_change(&tmp, tmp.currentPreset);
-    tmp.synthReady = true;
+    if (!reinit_state_synth(&tmp))
+        return 0;
 
     V2InstrumentState* newState = new V2InstrumentState(std::move(tmp));
+    silence_state(g_states[instrID]);
     destroy_state(g_states[instrID]);
     g_states[instrID] = newState;
     return 1;
@@ -1103,6 +1196,7 @@ int ft2_v2_deserialize_state(int instrID, const uint8_t* data, size_t size)
 
 void ft2_v2_set_param_for_instrument(int instrID, int paramId, float value)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return;
     const Ft2V2ParamInfo* info = ft2_v2_get_param_info(paramId);
@@ -1114,6 +1208,7 @@ void ft2_v2_set_param_for_instrument(int instrID, int paramId, float value)
 
 float ft2_v2_get_param_for_instrument(int instrID, int paramId)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return 0.0f;
     const Ft2V2ParamInfo* info = ft2_v2_get_param_info(paramId);
@@ -1126,6 +1221,7 @@ float ft2_v2_get_param_for_instrument(int instrID, int paramId)
 
 void ft2_v2_set_global_param_for_instrument(int instrID, int paramId, float value)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return;
     const Ft2V2ParamInfo* info = ft2_v2_get_global_param_info(paramId);
@@ -1136,6 +1232,7 @@ void ft2_v2_set_global_param_for_instrument(int instrID, int paramId, float valu
 
 float ft2_v2_get_global_param_for_instrument(int instrID, int paramId)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return 0.0f;
     const Ft2V2ParamInfo* info = ft2_v2_get_global_param_info(paramId);
@@ -1147,20 +1244,26 @@ float ft2_v2_get_global_param_for_instrument(int instrID, int paramId)
 
 int ft2_v2_get_mod_count_for_instrument(int instrID)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return 0;
     const uint8_t* raw = current_patch_ptr_const(st);
     if (!raw) return 0;
-    return raw[V2::nParams];
+
+    const int maxSlots = max_mod_slots_for_patch();
+    return std::clamp(static_cast<int>(raw[V2::nParams]), 0, maxSlots);
 }
 
 void ft2_v2_set_mod_count_for_instrument(int instrID, int count)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return;
     uint8_t* raw = current_patch_ptr(st);
     if (!raw) return;
-    count = std::clamp(count, 0, 255);
+
+    const int maxSlots = max_mod_slots_for_patch();
+    count = std::clamp(count, 0, maxSlots);
     const int old = raw[V2::nParams];
     raw[V2::nParams] = static_cast<uint8_t>(count);
     if (count > old) {
@@ -1176,8 +1279,10 @@ void ft2_v2_set_mod_count_for_instrument(int instrID, int count)
 
 void ft2_v2_get_mod_slot_for_instrument(int instrID, int slot, int* source, int* amount, int* dest)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
-    if (!st || slot < 0 || slot >= 255) {
+    const int maxSlots = max_mod_slots_for_patch();
+    if (!st || slot < 0 || slot >= maxSlots) {
         if (source) *source = 0;
         if (amount) *amount = 0;
         if (dest) *dest = 0;
@@ -1190,7 +1295,7 @@ void ft2_v2_get_mod_slot_for_instrument(int instrID, int slot, int* source, int*
         if (dest) *dest = 0;
         return;
     }
-    const int modCount = raw[V2::nParams];
+    const int modCount = std::clamp(static_cast<int>(raw[V2::nParams]), 0, maxSlots);
     if (slot >= modCount) {
         if (source) *source = 0;
         if (amount) *amount = 0;
@@ -1198,6 +1303,12 @@ void ft2_v2_get_mod_slot_for_instrument(int instrID, int slot, int* source, int*
         return;
     }
     const size_t base = static_cast<size_t>(V2::nParams + 1 + (slot * 3));
+    if (base + 2 >= g_currentPatchSize) {
+        if (source) *source = 0;
+        if (amount) *amount = 0;
+        if (dest) *dest = 0;
+        return;
+    }
     if (source) *source = raw[base + 0];
     if (amount) *amount = raw[base + 1];
     if (dest) *dest = raw[base + 2];
@@ -1205,12 +1316,14 @@ void ft2_v2_get_mod_slot_for_instrument(int instrID, int slot, int* source, int*
 
 void ft2_v2_set_mod_slot_for_instrument(int instrID, int slot, int source, int amount, int dest)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
-    if (!st || slot < 0 || slot >= 255) return;
+    const int maxSlots = max_mod_slots_for_patch();
+    if (!st || slot < 0 || slot >= maxSlots) return;
     uint8_t* raw = current_patch_ptr(st);
     if (!raw) return;
 
-    const int modCount = raw[V2::nParams];
+    const int modCount = std::clamp(static_cast<int>(raw[V2::nParams]), 0, maxSlots);
     if (slot >= modCount)
         raw[V2::nParams] = static_cast<uint8_t>(slot + 1);
 
@@ -1229,6 +1342,7 @@ void ft2_v2_set_mod_slot_for_instrument(int instrID, int slot, int source, int a
 
 int ft2_v2_get_active_voice_count(int instrID)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, false, true);
     if (!st || !st->synthReady) return 0;
 
@@ -1239,6 +1353,7 @@ int ft2_v2_get_active_voice_count(int instrID)
 
 void ft2_v2_send_midi_to_instrument(int instrID, uint8_t status, uint8_t data1, uint8_t data2)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st || !st->synthReady) return;
 
@@ -1253,8 +1368,6 @@ void ft2_v2_send_midi_to_instrument(int instrID, uint8_t status, uint8_t data1, 
             127,
             0xFD
         };
-        if (instrID >= 1 && instrID <= MAX_INST && !g_loggedNoteOn[static_cast<size_t>(instrID)])
-            v2_diag_log("[V2_DIAG] before-cc7 instr=%d status=0x%02X note=%u vel=%u preset=%d", instrID, status, data1, data2, st->currentPreset);
         synthProcessMIDI(st->synthMem.data(), volumeMsg);
     }
 
@@ -1267,29 +1380,12 @@ void ft2_v2_send_midi_to_instrument(int instrID, uint8_t status, uint8_t data1, 
         msg[2] = data2;
         msg[3] = 0xFD;
     }
-    if ((status & 0xF0) == 0x90 && data2 != 0 && instrID >= 1 && instrID <= MAX_INST && !g_loggedNoteOn[static_cast<size_t>(instrID)])
-        v2_diag_log("[V2_DIAG] before-note-midi instr=%d status=0x%02X note=%u vel=%u preset=%d", instrID, status, data1, data2, st->currentPreset);
     synthProcessMIDI(st->synthMem.data(), msg);
-
-    if ((status & 0xF0) == 0x90 && data2 != 0 && instrID >= 1 && instrID <= MAX_INST && !g_loggedNoteOn[static_cast<size_t>(instrID)]) {
-        int poly[17] = {0};
-        synthGetPoly(st->synthMem.data(), poly);
-        v2_diag_log("[V2_DIAG] after-note-midi instr=%d status=0x%02X note=%u vel=%u preset=%d voices=%d bank=%s patch0off=%u curroff=%u",
-               instrID,
-               status,
-               data1,
-               data2,
-               st->currentPreset,
-               poly[16],
-               st->bank.valid ? "valid" : "invalid",
-               st->bank.patchMap.size() >= kPatchHeaderSize ? reinterpret_cast<const uint32_t*>(st->bank.patchMap.data())[0] : 0,
-               st->bank.patchMap.size() >= kPatchHeaderSize ? reinterpret_cast<const uint32_t*>(st->bank.patchMap.data())[std::clamp(st->currentPreset, 0, 127)] : 0);
-        g_loggedNoteOn[static_cast<size_t>(instrID)] = true;
-    }
 }
 
 void ft2_v2_panic(void)
 {
+    V2_LOCK_GUARD();
     for (int i = 1; i <= MAX_INST; ++i) {
         V2InstrumentState* st = get_state(i, false, true);
         if (!st || !st->synthReady) continue;
@@ -1304,36 +1400,37 @@ void ft2_v2_panic(void)
 
 void ft2_v2_store_instrument_state(int instrID)
 {
+    V2_LOCK_GUARD();
     (void)get_state(instrID, true, true);
 }
 
 void ft2_v2_restore_instrument_state(int instrID)
 {
+    V2_LOCK_GUARD();
     V2InstrumentState* st = get_state(instrID, true, true);
     if (!st) return;
     if (!st->synthReady) {
-        st->synthMem.resize(synthGetSize());
-        st->sampleRate = g_currentSampleRate > 0 ? g_currentSampleRate : 44100;
-        synthInit(st->synthMem.data(), st->bank.patchMap.data(), st->sampleRate);
-        synthSetGlobals(st->synthMem.data(), st->bank.globals.data());
-        send_program_change(st, st->currentPreset);
-        st->synthReady = true;
+        (void)reinit_state_synth(st);
     }
 }
 
 bool ft2_v2_has_persistent_state(int instrID)
 {
+    V2_LOCK_GUARD();
     return get_state(instrID, false, false) != nullptr;
 }
 
 void ft2_v2_clear_persistent_state(int instrID)
 {
+    V2_LOCK_GUARD();
     if (instrID < 1 || instrID > MAX_INST) return;
+    silence_state(g_states[instrID]);
     destroy_state(g_states[instrID]);
 }
 
 void ft2_v2_render(float* bufL, float* bufR, int nsamples, int add)
 {
+    V2_LOCK_GUARD();
     if (!bufL || !bufR || nsamples <= 0) return;
     if (!g_factoryReady) ft2_v2_init(g_currentSampleRate > 0 ? g_currentSampleRate : 44100);
 
@@ -1360,6 +1457,7 @@ void ft2_v2_render(float* bufL, float* bufR, int nsamples, int add)
 
 void ft2_v2_render_for_channel(int instrID, float* bufL, float* bufR, int nsamples, int add)
 {
+    V2_LOCK_GUARD();
     if (!bufL || !bufR || nsamples <= 0) return;
     if (!g_factoryReady) ft2_v2_init(g_currentSampleRate > 0 ? g_currentSampleRate : 44100);
 
@@ -1378,17 +1476,6 @@ void ft2_v2_render_for_channel(int instrID, float* bufL, float* bufR, int nsampl
     }
 
     synthRender(st->synthMem.data(), bufL, nsamples, bufR, 1);
-    if (instrID >= 1 && instrID <= MAX_INST && !g_loggedRender[static_cast<size_t>(instrID)]) {
-        int poly[17] = {0};
-        synthGetPoly(st->synthMem.data(), poly);
-        v2_diag_log("[V2_DIAG] render instr=%d samples=%d voices=%d peak=%.9f preset=%d",
-               instrID,
-               nsamples,
-               poly[16],
-               buffer_peak(bufL, bufR, nsamples),
-               st->currentPreset);
-        g_loggedRender[static_cast<size_t>(instrID)] = true;
-    }
 }
 
 } // extern "C"

@@ -54,6 +54,12 @@ Build and run CTest:
 ./build-linux.sh --fresh --test -j 4
 ```
 
+CTest currently covers:
+
+- `ft2_version`: command-line startup/version smoke test.
+- `ft2_self_test`: core table setup/teardown self-test.
+- `ft2_v2_stress`: V2 preset, patch, MIDI, render, panic, and state serialization stress test.
+
 Pass extra CMake arguments after `--`:
 
 ```sh
