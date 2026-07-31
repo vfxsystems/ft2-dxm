@@ -92,6 +92,7 @@ Pass extra CMake arguments after `--`:
 
 ```sh
 ./build-linux.sh --fresh -- -DWITH_DEXED=ON
+./build-linux.sh --fresh -- -DFT2_ENABLE_VECTOR_UI=ON
 ./build-linux.sh --fresh -- -DFT2_ENABLE_TTF=ON
 ```
 
@@ -138,13 +139,30 @@ ASAN_OPTIONS=detect_leaks=0 ctest --test-dir /tmp/ft2-linux-tests/build-linux-as
 
 The high-DPI/vector renderer compatibility layer lives in `src/ft2_ui_render.*`.
 Classic `ft2_gui.c` primitives delegate to it while preserving the 632x400
-software framebuffer output. SDL_ttf-backed scalable text is available behind
-`-DFT2_ENABLE_TTF=ON`; without that flag, the API compiles as a safe no-op and
-the application keeps using the built-in bitmap fonts.
+software framebuffer output.
 
-The renderer layer is always built into `ft2-dxm`; there is currently no
-separate `FT2_ENABLE_VECTOR_UI` build switch. The build-time option only gates
-SDL_ttf-backed scalable text support.
+The selectable vector/high-DPI backend contract is enabled by default and can be
+controlled at configure time:
+
+```sh
+./build-linux.sh --fresh -- -DFT2_ENABLE_VECTOR_UI=ON
+./build-linux.sh --fresh -- -DFT2_ENABLE_VECTOR_UI=OFF
+```
+
+Runtime testing hooks:
+
+```sh
+FT2_UI_BACKEND=vector ./build-linux/bin/ft2-dxm
+FT2_UI_THEME=op1 ./build-linux/bin/ft2-dxm
+FT2_UI_BACKEND=vector FT2_UI_THEME=vscode ./build-linux/bin/ft2-dxm
+```
+
+Available runtime themes are `classic`, `op1`, `renoise`, and `vscode`. These
+names match the GUI designer palette themes.
+
+SDL_ttf-backed scalable text is available behind `-DFT2_ENABLE_TTF=ON`; without
+that flag, the API compiles as a safe no-op and the application keeps using the
+built-in bitmap fonts.
 
 See [UI renderer](ui-renderer.md) for the migration contract and renderer
 self-test coverage.
