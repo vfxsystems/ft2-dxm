@@ -149,6 +149,11 @@ cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
 cmake --build build-gui-designer --parallel 4
 ```
 
+Designer UI changes should also be checked with the same command after editing
+`ft2_gui_designer/main.c`, `palette.*`, `canvas.*`, or `widgets.*`. The designer
+preview uses clipped/vector-aligned draw helpers in `palette.*` so it stays in
+step with the engine renderer contract in `src/ft2_ui_render.*`.
+
 Legacy Makefile builds are still available:
 
 ```sh

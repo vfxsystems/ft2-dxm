@@ -28,10 +28,10 @@
 #include "assets.h"
 #include "shared/ft2_ui_schema.h"
 
-#define WINDOW_WIDTH 1024
+#define WINDOW_WIDTH 1104
 #define WINDOW_HEIGHT 640
 #define CUBE_SIZE 100  // Larger cube for easier debugging
-#define TOOLBAR_WIDTH 120
+#define TOOLBAR_WIDTH 220
 #define PROPERTY_PANEL_WIDTH 200
 #define CANVAS_WIDTH 632
 #define CANVAS_HEIGHT 400
@@ -125,6 +125,8 @@ typedef struct {
     LayoutKind active_layout;
     ft2_ui_widget_page_t active_page;
     int page_view_number;
+    bool page_dropdown_open;
+    bool theme_dropdown_open;
 
     // 3D cube animation
     float cube_rotation_x;
@@ -236,6 +238,15 @@ static void set_view_all_mode(bool enabled)
     } else {
         set_page_view_number(app.page_view_number);
     }
+}
+
+static const char *page_view_label(ft2_ui_widget_page_t page, char *buf, size_t buf_size)
+{
+    if (page == FT2_UI_WIDGET_PAGE_BOTH)
+        return "All Pages";
+
+    snprintf(buf, buf_size, "Page %d", clamp_page_view_number((int)page));
+    return buf;
 }
 
 static bool widget_has_caption(const widget_t *widget)
@@ -435,11 +446,12 @@ static const tool_entry_t *get_tool_entry(int tool_index)
 
 static void tool_button_rect(int tool_index, int *x, int *y, int *w, int *h)
 {
-    int start_y = 50;
-    int button_height = 22;
-    int button_spacing = 2;
-    int col1_x = 5, col2_x = 62;
-    int col_width = 52;
+    int start_y = 42;
+    int button_height = 20;
+    int button_spacing = 1;
+    int col1_x = 6;
+    int col_width = (TOOLBAR_WIDTH - 18) / 2;
+    int col2_x = col1_x + col_width + 6;
     int tools_per_col = (g_tool_count + 1) / 2;
     int col = tool_index / tools_per_col;
     int row = tool_index % tools_per_col;
@@ -448,6 +460,32 @@ static void tool_button_rect(int tool_index, int *x, int *y, int *w, int *h)
     *y = start_y + row * (button_height + button_spacing);
     *w = col_width;
     *h = button_height;
+}
+
+static int toolbar_info_y(void)
+{
+    if (g_tool_count <= 0)
+        return 390;
+
+    int x, y, w, h;
+    tool_button_rect(g_tool_count - 1, &x, &y, &w, &h);
+    return y + h + 8;
+}
+
+static void toolbar_page_dropdown_rect(int *x, int *y, int *w, int *h)
+{
+    *x = 6;
+    *y = toolbar_info_y() + 86;
+    *w = TOOLBAR_WIDTH - 12;
+    *h = 18;
+}
+
+static void toolbar_theme_dropdown_rect(int *x, int *y, int *w, int *h)
+{
+    *x = 6;
+    *y = toolbar_info_y() + 132;
+    *w = TOOLBAR_WIDTH - 12;
+    *h = 18;
 }
 
 // Function declarations
@@ -1337,6 +1375,7 @@ static void handle_bitmap_prompt_key(SDL_Keycode key)
 
 bool init_designer(void) {
     // Initialize subsystems
+    designer_set_framebuffer_height(WINDOW_HEIGHT);
     init_palette();
     init_canvas(&g_designer.canvas, TOOLBAR_WIDTH + 10, 50, CANVAS_WIDTH, CANVAS_HEIGHT);
     g_designer.canvas.grid_enabled = true;
@@ -1366,6 +1405,8 @@ bool init_designer(void) {
 
     app.active_page = FT2_UI_WIDGET_PAGE_BOTH;
     app.page_view_number = FT2_UI_WIDGET_PAGE_1;
+    app.page_dropdown_open = false;
+    app.theme_dropdown_open = false;
 
     printf("FT2 GUI Designer\n");
     printf("Controls:\n");
@@ -1376,6 +1417,7 @@ bool init_designer(void) {
     printf("  Ctrl+O: Load design\n");
     printf("  Ctrl+E: Export schema\n");
     printf("  Ctrl+I: Import bitmap\n");
+    printf("  T: Cycle designer color theme\n");
     printf("  Delete: Delete selected widget\n");
     printf("  ESC: Cancel drag or exit\n");
 
@@ -1596,49 +1638,49 @@ void handle_mouse_down(int x, int y, int button) {
 
         // Check toolbar clicks
         if (x < TOOLBAR_WIDTH) {
-            // Page selector clicks
-            int info_y = 0;
-            if (g_tool_count > 0) {
-                int btn_x, btn_y, btn_w, btn_h;
-                tool_button_rect(g_tool_count - 1, &btn_x, &btn_y, &btn_w, &btn_h);
-                info_y = btn_y + btn_h + 10;
-            }
-            int page_y = info_y + 108 + 12;
-            int view_all_x = 5;
-            int view_all_w = 52;
-            int page_box_x = view_all_x + view_all_w + 6;
-            int minus_w = 16;
-            int page_w = 18;
-            int plus_w = 16;
-            int page_box_y = page_y;
-            int page_h = 18;
+            int drop_x, drop_y, drop_w, drop_h;
 
-            if (y >= page_box_y && y < page_box_y + page_h) {
-                if (x >= view_all_x && x < view_all_x + view_all_w) {
-                    set_view_all_mode(true);
-                    return;
-                }
-
-                if (x >= page_box_x && x < page_box_x + minus_w) {
-                    set_view_all_mode(false);
-                    set_page_view_number(app.page_view_number - 1);
-                    return;
-                }
-
-                int page_value_x = page_box_x + minus_w + 2;
-                if (x >= page_value_x && x < page_value_x + page_w) {
-                    set_view_all_mode(false);
-                    set_page_view_number(app.page_view_number);
-                    return;
-                }
-
-                int plus_x = page_value_x + page_w + 2;
-                if (x >= plus_x && x < plus_x + plus_w) {
-                    set_view_all_mode(false);
-                    set_page_view_number(app.page_view_number + 1);
-                    return;
+            toolbar_page_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+            if (app.page_dropdown_open) {
+                int item_y = drop_y + drop_h + 1;
+                for (int i = 0; i <= 6; i++, item_y += 16) {
+                    if (x >= drop_x && x < drop_x + drop_w && y >= item_y && y < item_y + 16) {
+                        if (i == 0)
+                            set_view_all_mode(true);
+                        else
+                            set_page_view_number(i);
+                        app.page_dropdown_open = false;
+                        return;
+                    }
                 }
             }
+
+            if (x >= drop_x && x < drop_x + drop_w && y >= drop_y && y < drop_y + drop_h) {
+                app.page_dropdown_open = !app.page_dropdown_open;
+                app.theme_dropdown_open = false;
+                return;
+            }
+
+            toolbar_theme_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+            if (app.theme_dropdown_open) {
+                int item_y = drop_y + drop_h + 1;
+                for (int i = 0; i < DESIGNER_THEME_COUNT; i++, item_y += 16) {
+                    if (x >= drop_x && x < drop_x + drop_w && y >= item_y && y < item_y + 16) {
+                        designer_set_palette_theme((designer_palette_theme_t)i);
+                        app.theme_dropdown_open = false;
+                        return;
+                    }
+                }
+            }
+
+            if (x >= drop_x && x < drop_x + drop_w && y >= drop_y && y < drop_y + drop_h) {
+                app.theme_dropdown_open = !app.theme_dropdown_open;
+                app.page_dropdown_open = false;
+                return;
+            }
+
+            app.page_dropdown_open = false;
+            app.theme_dropdown_open = false;
 
             for (int tool = 0; tool < g_tool_count; tool++) {
                 int btn_x, btn_y, btn_w, btn_h;
@@ -1656,6 +1698,9 @@ void handle_mouse_down(int x, int y, int button) {
                 }
             }
         }
+
+        app.page_dropdown_open = false;
+        app.theme_dropdown_open = false;
 
         // Check canvas clicks
         if (point_in_canvas(&g_designer.canvas, x, y)) {
@@ -1723,8 +1768,8 @@ void handle_key_down(SDL_Keycode key) {
         case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4: case SDLK_5: case SDLK_6:
         case SDLK_7: case SDLK_8: case SDLK_9: case SDLK_0:
             {
-                int tool = key - SDLK_1 + 1;
-                if (key == SDLK_0) tool = 10;
+                int tool = key - SDLK_1;
+                if (key == SDLK_0) tool = 9;
                 if (tool < g_tool_count) {
                     app.current_tool = tool;
                     cancel_drag();
@@ -1750,6 +1795,11 @@ void handle_key_down(SDL_Keycode key) {
             // Toggle properties panel
             app.show_properties = !app.show_properties;
             printf("Properties panel %s\n", app.show_properties ? "shown" : "hidden");
+            break;
+        case SDLK_t:
+            designer_cycle_palette_theme();
+            app.theme_dropdown_open = false;
+            printf("Designer theme: %s\n", designer_palette_theme_name(designer_get_palette_theme()));
             break;
         case SDLK_s:
             if (mod & KMOD_CTRL) {
@@ -2030,9 +2080,30 @@ void clear_framebuffer(uint32_t color) {
     }
 }
 
+static void draw_designer_button(int x, int y, int w, int h, bool selected)
+{
+    uint32_t bg_color = get_palette_color(selected ? PAL_BUTTON2 : PAL_BUTTONS);
+    uint32_t border1 = get_palette_color(PAL_BUTTON1);
+    uint32_t border2 = get_palette_color(PAL_BUTTON2);
+
+    designer_vector_fill_rect(app.framebuffer, WINDOW_WIDTH, (float)x, (float)y, (float)w, (float)h, bg_color);
+    h_line(app.framebuffer, WINDOW_WIDTH, x, y, w - 1, border1);
+    v_line(app.framebuffer, WINDOW_WIDTH, x, y + 1, h - 2, border1);
+    h_line(app.framebuffer, WINDOW_WIDTH, x + 1, y + h - 1, w - 1, border2);
+    v_line(app.framebuffer, WINDOW_WIDTH, x + w - 1, y + 1, h - 1, border2);
+}
+
+static void draw_dropdown_item(int x, int y, int w, const char *label, bool selected)
+{
+    draw_designer_button(x, y, w, 16, selected);
+    font_draw_text(&g_designer.font_system, x + 5, y + 4, label,
+                   get_palette_color(selected ? PAL_FORGRND : PAL_BTNTEXT));
+}
+
 void draw_toolbar(void) {
     // Toolbar background
-    fill_rect(app.framebuffer, WINDOW_WIDTH, 0, 0, TOOLBAR_WIDTH, WINDOW_HEIGHT, get_palette_color(PAL_DESKTOP));
+    designer_vector_fill_rect(app.framebuffer, WINDOW_WIDTH, 0.0f, 0.0f, (float)TOOLBAR_WIDTH, (float)WINDOW_HEIGHT,
+                              get_palette_color(PAL_DESKTOP));
 
     // Title
     font_draw_text(&g_designer.font_system, 5, 5, "FT2-DXM GUI Designer", get_palette_color(PAL_FORGRND));
@@ -2047,101 +2118,69 @@ void draw_toolbar(void) {
         int x, y, w, h;
         tool_button_rect(tool, &x, &y, &w, &h);
 
-        uint32_t bg_color = get_palette_color((app.current_tool == tool) ? PAL_BUTTON2 : PAL_BUTTONS);
-        uint32_t border1 = get_palette_color(PAL_BUTTON1);
-        uint32_t border2 = get_palette_color(PAL_BUTTON2);
-
-        // Button background
-        fill_rect(app.framebuffer, WINDOW_WIDTH, x, y, w, h, bg_color);
-
-        // 3D borders
-        h_line(app.framebuffer, WINDOW_WIDTH, x, y, w-1, border1);
-        v_line(app.framebuffer, WINDOW_WIDTH, x, y+1, h-2, border1);
-        h_line(app.framebuffer, WINDOW_WIDTH, x+1, y+h-1, w-1, border2);
-        v_line(app.framebuffer, WINDOW_WIDTH, x+w-1, y+1, h-1, border2);
+        draw_designer_button(x, y, w, h, app.current_tool == tool);
 
         // Tool name and shortcut key
         if (entry)
-            font_draw_text(&g_designer.font_system, x + 3, y + 3, entry->label, get_palette_color(PAL_BTNTEXT));
+            font_draw_text(&g_designer.font_system, x + 4, y + 4, entry->label, get_palette_color(PAL_BTNTEXT));
 
         // Shortcut key number
         char key_str[4];
-        if (tool <= 9) {
-            snprintf(key_str, sizeof(key_str), "%d", tool);
-        } else {
+        if (tool >= 0 && tool <= 8) {
+            snprintf(key_str, sizeof(key_str), "%d", tool + 1);
+            font_draw_text(&g_designer.font_system, x + w - 10, y + 4, key_str, get_palette_color(PAL_FORGRND));
+        } else if (tool == 9) {
             snprintf(key_str, sizeof(key_str), "0");
+            font_draw_text(&g_designer.font_system, x + w - 10, y + 4, key_str, get_palette_color(PAL_FORGRND));
         }
-        font_draw_text(&g_designer.font_system, x + w - 12, y + 3, key_str, get_palette_color(PAL_FORGRND));
     }
 
     // Info section
-    int info_y = 0;
-    if (g_tool_count > 0) {
-        int x, y, w, h;
-        tool_button_rect(g_tool_count - 1, &x, &y, &w, &h);
-        info_y = y + h + 10;
-    }
+    int info_y = toolbar_info_y();
     font_draw_text(&g_designer.font_system, 5, info_y, "Controls:", get_palette_color(PAL_FORGRND));
     font_draw_text(&g_designer.font_system, 5, info_y + 12, "G - Toggle Grid", get_palette_color(PAL_BTNTEXT));
     font_draw_text(&g_designer.font_system, 5, info_y + 24, "P - Properties", get_palette_color(PAL_BTNTEXT));
     font_draw_text(&g_designer.font_system, 5, info_y + 36, "Del - Delete", get_palette_color(PAL_BTNTEXT));
     font_draw_text(&g_designer.font_system, 5, info_y + 48, "Ctrl+S - Save", get_palette_color(PAL_BTNTEXT));
     font_draw_text(&g_designer.font_system, 5, info_y + 60, "Ctrl+O - Load", get_palette_color(PAL_BTNTEXT));
-    font_draw_text(&g_designer.font_system, 5, info_y + 72, "Ctrl+E - Export Schema", get_palette_color(PAL_BTNTEXT));
-    font_draw_text(&g_designer.font_system, 5, info_y + 84, "Ctrl+I - Import BMP/PNG", get_palette_color(PAL_BTNTEXT));
+    font_draw_text(&g_designer.font_system, 5, info_y + 72, "T - Theme", get_palette_color(PAL_BTNTEXT));
 
     // Page view selector
-    int page_y = info_y + 108;
-    font_draw_text(&g_designer.font_system, 5, page_y, "View Page:", get_palette_color(PAL_FORGRND));
-    page_y += 12;
+    int drop_x, drop_y, drop_w, drop_h;
+    char page_buf[16];
+    toolbar_page_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+    font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "View Page:", get_palette_color(PAL_FORGRND));
+    draw_designer_button(drop_x, drop_y, drop_w, drop_h, app.page_dropdown_open);
+    font_draw_text(&g_designer.font_system, drop_x + 5, drop_y + 5,
+                   page_view_label(effective_page_view(), page_buf, sizeof(page_buf)), get_palette_color(PAL_BTNTEXT));
+    font_draw_text(&g_designer.font_system, drop_x + drop_w - 13, drop_y + 5, "v", get_palette_color(PAL_FORGRND));
 
-    int view_all_x = 5;
-    int view_all_y = page_y;
-    int view_all_w = 52;
-    int view_all_h = 18;
-    bool view_all_selected = is_view_all_mode();
-    uint32_t view_all_bg = get_palette_color(view_all_selected ? PAL_BUTTON2 : PAL_BUTTONS);
-    uint32_t border1 = get_palette_color(PAL_BUTTON1);
-    uint32_t border2 = get_palette_color(PAL_BUTTON2);
+    toolbar_theme_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+    font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "Theme:", get_palette_color(PAL_FORGRND));
+    draw_designer_button(drop_x, drop_y, drop_w, drop_h, app.theme_dropdown_open);
+    font_draw_text(&g_designer.font_system, drop_x + 5, drop_y + 5,
+                   designer_palette_theme_name(designer_get_palette_theme()), get_palette_color(PAL_BTNTEXT));
+    font_draw_text(&g_designer.font_system, drop_x + drop_w - 13, drop_y + 5, "v", get_palette_color(PAL_FORGRND));
 
-    fill_rect(app.framebuffer, WINDOW_WIDTH, view_all_x, view_all_y, view_all_w, view_all_h, view_all_bg);
-    h_line(app.framebuffer, WINDOW_WIDTH, view_all_x, view_all_y, view_all_w - 1, border1);
-    v_line(app.framebuffer, WINDOW_WIDTH, view_all_x, view_all_y + 1, view_all_h - 2, border1);
-    h_line(app.framebuffer, WINDOW_WIDTH, view_all_x + 1, view_all_y + view_all_h - 1, view_all_w - 1, border2);
-    v_line(app.framebuffer, WINDOW_WIDTH, view_all_x + view_all_w - 1, view_all_y + 1, view_all_h - 1, border2);
-    font_draw_text(&g_designer.font_system, view_all_x + 5, view_all_y + 5, "View All", get_palette_color(PAL_BTNTEXT));
+    if (app.theme_dropdown_open) {
+        int item_y = drop_y + drop_h + 1;
+        for (int i = 0; i < DESIGNER_THEME_COUNT; i++, item_y += 16)
+            draw_dropdown_item(drop_x, item_y, drop_w, designer_palette_theme_name((designer_palette_theme_t)i),
+                               designer_get_palette_theme() == (designer_palette_theme_t)i);
+    }
 
-    int page_box_x = view_all_x + view_all_w + 6;
-    int page_box_y = page_y;
-    int minus_w = 16;
-    int page_w = 18;
-    int plus_w = 16;
-
-    fill_rect(app.framebuffer, WINDOW_WIDTH, page_box_x, page_box_y, minus_w, view_all_h, get_palette_color(PAL_BUTTONS));
-    h_line(app.framebuffer, WINDOW_WIDTH, page_box_x, page_box_y, minus_w - 1, border1);
-    v_line(app.framebuffer, WINDOW_WIDTH, page_box_x, page_box_y + 1, view_all_h - 2, border1);
-    h_line(app.framebuffer, WINDOW_WIDTH, page_box_x + 1, page_box_y + view_all_h - 1, minus_w - 1, border2);
-    v_line(app.framebuffer, WINDOW_WIDTH, page_box_x + minus_w - 1, page_box_y + 1, view_all_h - 1, border2);
-    font_draw_text(&g_designer.font_system, page_box_x + 5, page_box_y + 5, "-", get_palette_color(PAL_BTNTEXT));
-
-    int page_value_x = page_box_x + minus_w + 2;
-    fill_rect(app.framebuffer, WINDOW_WIDTH, page_value_x, page_box_y, page_w, view_all_h, get_palette_color(PAL_BUTTONS));
-    h_line(app.framebuffer, WINDOW_WIDTH, page_value_x, page_box_y, page_w - 1, border1);
-    v_line(app.framebuffer, WINDOW_WIDTH, page_value_x, page_box_y + 1, view_all_h - 2, border1);
-    h_line(app.framebuffer, WINDOW_WIDTH, page_value_x + 1, page_box_y + view_all_h - 1, page_w - 1, border2);
-    v_line(app.framebuffer, WINDOW_WIDTH, page_value_x + page_w - 1, page_box_y + 1, view_all_h - 1, border2);
-    char page_text[8];
-    snprintf(page_text, sizeof(page_text), "%d", clamp_page_view_number(app.page_view_number));
-    int page_text_w = font_get_text_width(page_text);
-    font_draw_text(&g_designer.font_system, page_value_x + (page_w - page_text_w) / 2, page_box_y + 5, page_text, get_palette_color(PAL_BTNTEXT));
-
-    int plus_x = page_value_x + page_w + 2;
-    fill_rect(app.framebuffer, WINDOW_WIDTH, plus_x, page_box_y, plus_w, view_all_h, get_palette_color(PAL_BUTTONS));
-    h_line(app.framebuffer, WINDOW_WIDTH, plus_x, page_box_y, plus_w - 1, border1);
-    v_line(app.framebuffer, WINDOW_WIDTH, plus_x, page_box_y + 1, view_all_h - 2, border1);
-    h_line(app.framebuffer, WINDOW_WIDTH, plus_x + 1, page_box_y + view_all_h - 1, plus_w - 1, border2);
-    v_line(app.framebuffer, WINDOW_WIDTH, plus_x + plus_w - 1, page_box_y + 1, view_all_h - 1, border2);
-    font_draw_text(&g_designer.font_system, plus_x + 5, page_box_y + 5, "+", get_palette_color(PAL_BTNTEXT));
+    toolbar_page_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+    if (app.page_dropdown_open) {
+        int item_y = drop_y + drop_h + 1;
+        draw_dropdown_item(drop_x, item_y, drop_w, "All Pages", is_view_all_mode());
+        item_y += 16;
+        for (int i = 1; i <= 6; i++, item_y += 16) {
+            char item[16];
+            snprintf(item, sizeof(item), "Page %d", i);
+            draw_dropdown_item(drop_x, item_y, drop_w, item,
+                               !is_view_all_mode() && clamp_page_view_number(app.page_view_number) == i);
+        }
+    }
 
     // Separator
     v_line(app.framebuffer, WINDOW_WIDTH, TOOLBAR_WIDTH, 0, WINDOW_HEIGHT, get_palette_color(PAL_DSKTOP1));

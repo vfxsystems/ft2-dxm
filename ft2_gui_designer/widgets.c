@@ -1099,20 +1099,20 @@ void draw_widget_properties(widget_manager_t *manager, uint32_t *framebuffer, in
     if (widget->type >= 0 && widget->type < (int)(sizeof(type_names)/sizeof(type_names[0]))) {
         type_name = type_names[widget->type];
     }
-    sprintf(buffer, "Type: %s", type_name);
+    snprintf(buffer, sizeof(buffer), "Type: %s", type_name);
     draw_text(framebuffer, fb_width, x, current_y, buffer, get_palette_color(PAL_FORGRND));
     current_y += line_height;
     
-    sprintf(buffer, "Pos: %d,%d", widget->x, widget->y);
+    snprintf(buffer, sizeof(buffer), "Pos: %d,%d", widget->x, widget->y);
     draw_text(framebuffer, fb_width, x, current_y, buffer, get_palette_color(PAL_FORGRND));
     current_y += line_height;
     
-    sprintf(buffer, "Size: %dx%d", widget->w, widget->h);
+    snprintf(buffer, sizeof(buffer), "Size: %dx%d", widget->w, widget->h);
     draw_text(framebuffer, fb_width, x, current_y, buffer, get_palette_color(PAL_FORGRND));
     current_y += line_height;
     
     if (widget->caption[0] != '\0') {
-        sprintf(buffer, "Text: %s", widget->caption);
+        snprintf(buffer, sizeof(buffer), "Text: %.57s", widget->caption);
         draw_text(framebuffer, fb_width, x, current_y, buffer, get_palette_color(PAL_FORGRND));
     }
 }
@@ -1748,7 +1748,7 @@ static void draw_tf_arp_step(widget_t *widget, uint32_t *framebuffer, int fb_wid
 
     int cap = 0;
     if (widget->name[0] != '\0' && sscanf(widget->name, "arp_step_%d", &cap) == 1 && cap > 0) {
-        char step_text[8];
+        char step_text[16];
         snprintf(step_text, sizeof(step_text), "%d", cap);
         ft2_ui_font_id_t font_type = widget->font_type;
         if (font_type < 0 || font_type >= FT2_UI_FONT_COUNT)
