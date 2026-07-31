@@ -1,6 +1,7 @@
 
 .vs/
 .vscode/
+archive/
 build/
 build-*/
 cmake-build-*/
@@ -42,4 +43,8 @@ release/other/*.dll
 release/other/*.exe
 release/other/*.log
 release/other/*.bin
+release/
+src/release/other/
 release/macos/ft2-dxm-macos.app/Contents/MacOS/ft2-dxm-macos
+src/tunefish4/Builds/
+src/tunefish4/JuceLibraryCode/

@@ -29,6 +29,7 @@ void mixerSetMasterGain(float g);
 
 void mixerInit(void);
 void mixerInitDSPEffects(uint32_t sampleRate);
+void mixerShutdownDSPEffects(void);
 
 // Persistent mixer/DSP state cache
 #define NUM_MIXER_DSP_PARAMS DSP_MAX_SLOTS

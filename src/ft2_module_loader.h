@@ -22,6 +22,7 @@ extern char *supportedModExtensions[];
 extern volatile bool tmpLinearPeriodsFlag;
 extern int16_t patternNumRowsTmp[MAX_PATTERNS];
 extern note_t *patternTmp[MAX_PATTERNS];
+extern macroNote_t *macroPatternTmp[MAX_PATTERNS];
 extern instr_t *instrTmp[1+256];
 extern song_t songTmp;
 

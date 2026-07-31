@@ -1136,6 +1136,10 @@ void hideTopScreen(void)
 	hideConfigScreen();
 	hideAboutScreen();
 	hideHelpScreen();
+	if (ui.trimScreenShown)
+		hideTrimScreen();
+	if (ui.instEditorExtShown)
+		hideInstEditorExt();
 
 	ui.instrSwitcherShown = false;
 	ui.scopesShown = false;

@@ -63,6 +63,18 @@ void popupListShow(int16_t x, int16_t y, const char **items, int32_t count, int3
 {
     if (count <= 0 || items == NULL) return;
 
+    const int16_t listH = LIST_ROW_HEIGHT * LIST_VISIBLE_ROWS + LIST_BORDER * 2;
+
+    /* Keep the popup fully on-screen regardless of where its anchor button sits. */
+    if (x < 0)
+        x = 0;
+    else if (x + LIST_WIDTH > SCREEN_W)
+        x = SCREEN_W - LIST_WIDTH;
+    if (y < 0)
+        y = 0;
+    else if (y + listH > SCREEN_H)
+        y = SCREEN_H - listH;
+
     memset(&pl, 0, sizeof (pl));
     pl.visible = true;
     pl.x = x;

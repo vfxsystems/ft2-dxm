@@ -243,7 +243,11 @@ static inline sF32 lerp(sF32 a, sF32 b, sF32 t)
 // DEBUG
 #include <stdarg.h>
 #include <stdio.h>
+#if defined(_WIN32)
 extern "C" void __stdcall OutputDebugStringA(const char *what);
+#else
+static inline void OutputDebugStringA(const char *what) { fputs(what, stderr); }
+#endif
 static void dprintf(const char *fmt, ...)
 {
   char buf[256];

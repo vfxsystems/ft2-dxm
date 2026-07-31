@@ -6,6 +6,7 @@
 enum // CHECKBOXES
 {
 	CB_RES_1, // reserved
+	CB_RES_2, // reserved
 
 	// NIBBLES
 	CB_NIBBLES_SURROUND,
@@ -37,6 +38,8 @@ enum // CHECKBOXES
 	CB_INST_PENV,
 	CB_INST_PENV_SUS,
 	CB_INST_PENV_LOOP,
+	CB_INST_V2,
+	CB_INST_OSTIRUS,
 	CB_INST_TF4,   // Tunefish4 enable checkbox in main instrument editor
 	CB_INST_DEXED, // Dexed enable checkbox in main instrument editor (cbInstUseDexed)
 
@@ -103,9 +106,6 @@ enum // CHECKBOXES
 	NUM_CHECKBOXES
 
 };
-
-// Reserved instrument-editor slots reused for synth-specific toggles.
-#define CB_INST_V2 CB_RES_1
 
 // Append-only ID ranges for designer-driven layouts (do not reorder existing IDs).
 #define CB_TF_BASE NUM_CHECKBOXES

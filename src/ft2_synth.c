@@ -325,7 +325,14 @@ void ft2_synth_clear_persistent_state(int instrID) {
     state->currentPreset = -1;
     state->presetName[0] = '\0';
     g_current_preset[tf4Idx] = 0;
-    
+
+    // Also tear down the live engine instance so a future instrument reassigned to
+    // this same slot doesn't inherit stale voice/parameter state.
+    if (g_instruments[tf4Idx]) {
+        tf_instrument_destroy(g_instruments[tf4Idx]);
+        g_instruments[tf4Idx] = NULL;
+    }
+
     TF4_DEBUG("Cleared persistent state for instrument %d", instrID);
 }
 
@@ -630,8 +637,10 @@ void ft2_synth_render_for_channel(int instrID, float *bufL, float *bufR, int nsa
     void* instrument = g_instruments[tf4Idx];
     if (!instrument) {
         // No synth instance for this instrument
-        memset(bufL, 0, nsamples * sizeof(float));
-        memset(bufR, 0, nsamples * sizeof(float));
+        if (!add) {
+            memset(bufL, 0, nsamples * sizeof(float));
+            memset(bufR, 0, nsamples * sizeof(float));
+        }
         return;
     }
     if (nsamples > g_maxBufferSize) nsamples = g_maxBufferSize;

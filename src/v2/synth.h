@@ -2,6 +2,10 @@
 #ifndef _SYNTH_H_
 #define _SYNTH_H_
 
+#if !defined(_MSC_VER) && !defined(__stdcall)
+  #define __stdcall
+#endif
+
 extern "C"
 {
   extern unsigned int __stdcall synthGetSize();

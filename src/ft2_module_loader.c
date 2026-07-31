@@ -66,6 +66,7 @@ char *supportedModExtensions[] =
 volatile bool tmpLinearPeriodsFlag;
 int16_t patternNumRowsTmp[MAX_PATTERNS];
 note_t *patternTmp[MAX_PATTERNS];
+macroNote_t *macroPatternTmp[MAX_PATTERNS];
 instr_t *instrTmp[1+256];
 song_t songTmp;
 bool isDXMFormat = false; // Flag to indicate if we're loading a DXM file
@@ -227,6 +228,7 @@ static void clearTmpModule(void)
 {
 	clearPendingDXMSynthLoadState();
 	memset(patternTmp, 0, sizeof (patternTmp));
+	memset(macroPatternTmp, 0, sizeof (macroPatternTmp));
 	memset(instrTmp, 0, sizeof (instrTmp));
 	memset(&songTmp, 0, sizeof (songTmp));
 
@@ -331,6 +333,11 @@ static void freeTmpModule(void) // called on module load error
 			free(patternTmp[i]);
 			patternTmp[i] = NULL;
 		}
+		if (macroPatternTmp[i] != NULL)
+		{
+			free(macroPatternTmp[i]);
+			macroPatternTmp[i] = NULL;
+		}
 	}
 
 	// free all instruments and samples
@@ -401,6 +408,7 @@ static void setupLoadedModule(void)
 	for (int32_t i = 0; i < MAX_PATTERNS; i++)
 	{
 		pattern[i] = patternTmp[i];
+		macroPattern[i] = macroPatternTmp[i];
 		patternNumRows[i] = patternNumRowsTmp[i];
 	}
 

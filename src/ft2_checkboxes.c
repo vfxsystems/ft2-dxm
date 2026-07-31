@@ -21,8 +21,8 @@
 checkBox_t checkBoxes[NUM_CHECKBOXES] =
 {
 	// ------ RESERVED CHECKBOX ------
-	{ 524, 278, 12, 12, cbInstUseV2 },
-	{ 628, 278, 12, 12, cbInstUseOsTirus },
+	{ 0 },
+	{ 0 },
 
 	/*
 	** -- STRUCT INFO: --
@@ -66,8 +66,10 @@ checkBox_t checkBoxes[NUM_CHECKBOXES] =
 	{   3, 262, 123, 12, cbPEnv },
 	{ 341, 279,  64, 12, cbPEnvSus },
 	{ 341, 304,  70, 12, cbPEnvLoop },
-	{ 594, 278,  12, 12, cbInstUseTF4 }, // CB_INST_TF4 (main editor)
-	{ 559, 278,  12, 12, cbInstUseDexed }, // CB_INST_DEXED (main editor)
+	{ 572, 314,  12, 12, cbInstUseV2 },
+	{ 613, 331,  12, 12, cbInstUseOsTirus },
+	{ 613, 314,  12, 12, cbInstUseTF4 }, // CB_INST_TF4 (main editor)
+	{ 572, 331,  12, 12, cbInstUseDexed }, // CB_INST_DEXED (main editor)
 
 	// ------ INSTRUMENT EDITOR EXTENSION CHECKBOXES ------
 	//x,   y,   w,   h,  funcOnUp

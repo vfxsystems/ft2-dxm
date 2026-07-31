@@ -9,16 +9,56 @@
 MixerChannelState gMixerState[MAX_STEREO_PAIRS];
 MixerMasterState gMasterState;
 
+static void snapshotEffectState(dspEffectInstance_t *dst, const dspEffectInstance_t *src)
+{
+    if (dst == NULL || src == NULL)
+        return;
+
+    memcpy(dst, src, sizeof (dspEffectInstance_t));
+    dst->state = NULL;
+}
+
+static void restoreEffectState(dspEffectInstance_t *dst, const dspEffectInstance_t *src, uint32_t sampleRate)
+{
+    if (dst == NULL || src == NULL)
+        return;
+
+    dspFreeEffect(dst);
+
+    if (src->type == DSP_TYPE_NONE || !src->enabled)
+    {
+        memset(dst, 0, sizeof (dspEffectInstance_t));
+        return;
+    }
+
+    if (sampleRate == 0)
+        sampleRate = src->sampleRate;
+    if (sampleRate == 0)
+        sampleRate = 44100;
+
+    if (!dspInitEffect(dst, src->type, sampleRate))
+    {
+        memset(dst, 0, sizeof (dspEffectInstance_t));
+        return;
+    }
+
+    dst->enabled = src->enabled;
+    memcpy(&dst->params, &src->params, sizeof (dst->params));
+    dspResetEffectState(dst);
+}
+
 // Persistent state functions
 void cacheMixerStateFromData(void)
 {
     for (int ch = 0; ch < MAX_STEREO_PAIRS; ch++) {
         gMixerState[ch].fader = stereoMixerCh[ch].fader;
         gMixerState[ch].pan = stereoMixerCh[ch].pan;
-        memcpy(gMixerState[ch].effects, stereoMixerCh[ch].effects, sizeof(dspEffectInstance_t) * DSP_MAX_SLOTS);
+        for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+            snapshotEffectState(&gMixerState[ch].effects[slot], &stereoMixerCh[ch].effects[slot]);
     }
     gMasterState.masterGain = mixerMasterGain;
-    memcpy(gMasterState.effects, masterEffects, sizeof(dspEffectInstance_t) * DSP_MAX_SLOTS);
+    for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+        snapshotEffectState(&gMasterState.effects[slot], &masterEffects[slot]);
 }
 
 void cacheMixerStateFromGUI(void)
@@ -28,11 +68,13 @@ void cacheMixerStateFromGUI(void)
         gMixerState[ch].fader = (float)(GAIN_SLIDER_END - pos) / 100.0f;
         uint32_t panPos = getScrollBarPos(SB_MIX_PAN_0 + ch);
         gMixerState[ch].pan = ((float)panPos / 100.0f) - 1.0f;
-        memcpy(gMixerState[ch].effects, stereoMixerCh[ch].effects, sizeof(dspEffectInstance_t) * DSP_MAX_SLOTS);
+        for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+            snapshotEffectState(&gMixerState[ch].effects[slot], &stereoMixerCh[ch].effects[slot]);
     }
     uint32_t mPos = getScrollBarPos(SB_MIX_MASTER_GAIN);
     gMasterState.masterGain = (float)(GAIN_SLIDER_END - mPos) / 100.0f;
-    memcpy(gMasterState.effects, masterEffects, sizeof(dspEffectInstance_t) * DSP_MAX_SLOTS);
+    for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+        snapshotEffectState(&gMasterState.effects[slot], &masterEffects[slot]);
 }
 
 void applyMixerStateToGUI(void)
@@ -42,7 +84,8 @@ void applyMixerStateToGUI(void)
         stereoMixerCh[ch].fader = gMixerState[ch].fader;
         mixerCh[ch].pan = gMixerState[ch].pan;
         stereoMixerCh[ch].pan = gMixerState[ch].pan;
-        memcpy(stereoMixerCh[ch].effects, gMixerState[ch].effects, sizeof(dspEffectInstance_t) * DSP_MAX_SLOTS);
+        for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+            restoreEffectState(&stereoMixerCh[ch].effects[slot], &gMixerState[ch].effects[slot], gMixerState[ch].effects[slot].sampleRate);
 
         int gainUnits = (int)lrintf(gMixerState[ch].fader * 100.0f);
         setScrollBarPos(SB_MIX_GAIN_0 + ch, GAIN_SLIDER_END - gainUnits, false);
@@ -50,7 +93,8 @@ void applyMixerStateToGUI(void)
         setScrollBarPos(SB_MIX_PAN_0 + ch, panUnits, false);
     }
     mixerMasterGain = gMasterState.masterGain;
-    memcpy(masterEffects, gMasterState.effects, sizeof(dspEffectInstance_t) * DSP_MAX_SLOTS);
+    for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+        restoreEffectState(&masterEffects[slot], &gMasterState.effects[slot], gMasterState.effects[slot].sampleRate);
     int masterUnits = (int)lrintf(gMasterState.masterGain * 100.0f);
     setScrollBarPos(SB_MIX_MASTER_GAIN, GAIN_SLIDER_END - masterUnits, false);
 }
@@ -125,4 +169,16 @@ void mixerInitDSPEffects(uint32_t sampleRate)
             dspResetEffectState(eff);
         }
     }
+}
+
+void mixerShutdownDSPEffects(void)
+{
+    for (int i = 0; i < MAX_STEREO_PAIRS; ++i)
+    {
+        for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+            dspFreeEffect(&stereoMixerCh[i].effects[slot]);
+    }
+
+    for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+        dspFreeEffect(&masterEffects[slot]);
 }
