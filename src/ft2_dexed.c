@@ -234,6 +234,18 @@ int ft2_dx_get_active_voice_count(int instrID)
     return dx_instrument_get_active_voice_count(inst);
 }
 
+void ft2_dx_release_instrument(int instrID)
+{
+    int dxIdx = dx_index_from_ft2(instrID);
+    if (dxIdx < 0) return;
+
+    if (g_dxInst[dxIdx]) {
+        dx_instrument_destroy(g_dxInst[dxIdx]);
+        g_dxInst[dxIdx] = NULL;
+        DX_DEBUG("Released instrument %d", instrID);
+    }
+}
+
 /* =============================================================================
  * Rendering
  * ============================================================================= */

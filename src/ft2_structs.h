@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include "ft2_header.h"
 
 typedef struct cpu_t

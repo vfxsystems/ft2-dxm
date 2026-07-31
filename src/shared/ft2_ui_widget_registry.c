@@ -30,7 +30,8 @@ const ft2_ui_widget_type_desc_t ft2_ui_widget_types[] =
     { FT2_UI_WIDGET_DSP_WINDOW,    "DSP Win", 192, 120, false },
     { FT2_UI_WIDGET_DSP_SLOT,      "DSP Slot", 180, 14, false },
     { FT2_UI_WIDGET_DSP_MENU,      "DSP Menu", 80, 16, false },
-    { FT2_UI_WIDGET_DSP_PARAM,     "DSP Param", 100, 16, false }
+    { FT2_UI_WIDGET_DSP_PARAM,     "DSP Param", 100, 16, false },
+    { FT2_UI_WIDGET_TF_ARP_STEP,   "TF Arp Step", 18, 96, false }
 };
 
 const uint16_t ft2_ui_widget_type_count =

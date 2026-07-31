@@ -4,15 +4,26 @@
 #include "dexed/msfa/lfo.h"
 
 #include "dexed/msfa/freqlut.h"
+#include "synthLib/os.h"
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 #include <string>
 #include <cstdio>
 #include <cmath>
+#include <cctype>
+#include <limits>
 
 #include <fstream>
 #include <array>
+#include <zlib.h>
+
+#ifdef FT2_DEXED_EMBEDDED_BUILTIN_ZIP
+extern "C" {
+extern const unsigned char ft2_dexed_builtin_pgm_zip[];
+extern const size_t ft2_dexed_builtin_pgm_zip_len;
+}
+#endif
 
 
 #define DEBUG_DX_WRAPPER 1
@@ -46,6 +57,126 @@ static bool g_factory_presets_scanned = false;
 #define CARTRIDGE_VOICE_SIZE 128
 #define NUM_CARTRIDGE_VOICES 32
 
+static uint16_t read_u16(const uint8_t *p) {
+    return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
+}
+
+static uint32_t read_u32(const uint8_t *p) {
+    return static_cast<uint32_t>(p[0]) |
+           (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+}
+
+static std::string to_lower_copy(std::string value) {
+    for (char &ch : value)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return value;
+}
+
+static std::string basename_copy(const std::string &path) {
+    const size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos)
+        return path;
+    return path.substr(pos + 1);
+}
+
+static bool inflate_raw_deflate(const uint8_t *input, size_t inputSize, std::vector<uint8_t> &out, size_t expectedSize) {
+    if (!input || inputSize == 0)
+        return false;
+
+    out.assign(expectedSize, 0);
+
+    z_stream stream{};
+    stream.next_in = const_cast<Bytef *>(reinterpret_cast<const Bytef *>(input));
+    stream.avail_in = static_cast<uInt>(std::min(inputSize, static_cast<size_t>(std::numeric_limits<uInt>::max())));
+    stream.next_out = reinterpret_cast<Bytef *>(out.data());
+    stream.avail_out = static_cast<uInt>(std::min(expectedSize, static_cast<size_t>(std::numeric_limits<uInt>::max())));
+
+    if (inflateInit2(&stream, -MAX_WBITS) != Z_OK)
+        return false;
+
+    const int ret = inflate(&stream, Z_FINISH);
+    inflateEnd(&stream);
+
+    if (ret != Z_STREAM_END)
+        return false;
+
+    out.resize(static_cast<size_t>(stream.total_out));
+    return true;
+}
+
+static bool extract_zip_entry(const std::vector<uint8_t> &zipData, const std::string &wantedName, std::vector<uint8_t> &out) {
+    if (zipData.size() < 22)
+        return false;
+
+    const std::string wantedLower = to_lower_copy(basename_copy(wantedName));
+
+    const size_t maxBackSearch = std::min<size_t>(zipData.size(), 0x10000u + 22u);
+    const size_t searchBegin = zipData.size() - maxBackSearch;
+    size_t eocdPos = std::string::npos;
+
+    for (size_t pos = zipData.size() - 22; pos >= searchBegin; --pos) {
+        if (read_u32(&zipData[pos]) == 0x06054b50u) {
+            eocdPos = pos;
+            break;
+        }
+        if (pos == searchBegin)
+            break;
+    }
+
+    if (eocdPos == std::string::npos)
+        return false;
+
+    const uint32_t cdOffset = read_u32(&zipData[eocdPos + 16]);
+    const uint16_t cdEntries = read_u16(&zipData[eocdPos + 10]);
+    if (cdOffset >= zipData.size())
+        return false;
+
+    size_t cdPos = cdOffset;
+    for (uint16_t i = 0; i < cdEntries; ++i) {
+        if (cdPos + 46 > zipData.size() || read_u32(&zipData[cdPos]) != 0x02014b50u)
+            return false;
+
+        const uint16_t compression = read_u16(&zipData[cdPos + 10]);
+        const uint32_t compressedSize = read_u32(&zipData[cdPos + 20]);
+        const uint32_t uncompressedSize = read_u32(&zipData[cdPos + 24]);
+        const uint16_t nameLen = read_u16(&zipData[cdPos + 28]);
+        const uint16_t extraLen = read_u16(&zipData[cdPos + 30]);
+        const uint16_t commentLen = read_u16(&zipData[cdPos + 32]);
+        const uint32_t localOffset = read_u32(&zipData[cdPos + 42]);
+
+        if (cdPos + 46 + nameLen + extraLen + commentLen > zipData.size())
+            return false;
+
+        const std::string entryName(reinterpret_cast<const char *>(&zipData[cdPos + 46]), nameLen);
+        if (to_lower_copy(basename_copy(entryName)) == wantedLower) {
+            if (localOffset + 30 > zipData.size() || read_u32(&zipData[localOffset]) != 0x04034b50u)
+                return false;
+
+            const uint16_t localNameLen = read_u16(&zipData[localOffset + 26]);
+            const uint16_t localExtraLen = read_u16(&zipData[localOffset + 28]);
+            const size_t dataOffset = localOffset + 30u + localNameLen + localExtraLen;
+
+            if (dataOffset + compressedSize > zipData.size())
+                return false;
+
+            const uint8_t *payload = &zipData[dataOffset];
+            if (compression == 0) {
+                out.assign(payload, payload + compressedSize);
+                return true;
+            }
+            if (compression == 8)
+                return inflate_raw_deflate(payload, compressedSize, out, uncompressedSize);
+            return false;
+        }
+
+        cdPos += 46u + nameLen + extraLen + commentLen;
+    }
+
+    return false;
+}
+
 /* Normalize a 7-bit value (0-127) to DX7 parameter range (0-99) */
 static uint8_t normparm(uint8_t value, int id) {
     if (value <= 99)
@@ -62,6 +193,43 @@ static void get_voice_name(const uint8_t* packed, char* nameOut) {
         nameOut[i] = (char)c;
     }
     nameOut[10] = '\0';
+}
+
+static int load_dx7_cartridge_bytes(const char* label, const uint8_t* sysex, size_t size, std::vector<std::array<uint8_t, 155>>& patches, std::vector<std::string>& names) {
+    if (!sysex || size < SYSEX_SIZE) {
+        DX_DEBUG("File too small for cartridge %s: %zu bytes", label ? label : "(memory)", size);
+        return -1;
+    }
+
+    if (sysex[0] != 0xF0 || sysex[1] != 0x43) {
+        DX_DEBUG("Invalid SysEx header in %s", label ? label : "(memory)");
+        return -1;
+    }
+
+    DX_DEBUG("Valid DX7 cartridge: %s", label ? label : "(memory)");
+
+    const uint8_t* voiceData = sysex + SYSEX_HEADER_SIZE;
+
+    int loadedCount = 0;
+    for (int i = 0; i < NUM_CARTRIDGE_VOICES; i++) {
+        const uint8_t* packedVoice = voiceData + (i * CARTRIDGE_VOICE_SIZE);
+
+        std::array<uint8_t, 155> unpackedVoice;
+        dx_unpack_program_from_storage(packedVoice, unpackedVoice.data());
+
+        char name[11];
+        get_voice_name(packedVoice, name);
+
+        patches.push_back(unpackedVoice);
+        names.push_back(std::string(name) + " #" + std::to_string(i + 1));
+
+        loadedCount++;
+        DX_DEBUG("  Program %d: algo=%d fb=%d name='%s'",
+                 i, unpackedVoice[134], unpackedVoice[135], name);
+    }
+
+    DX_DEBUG("Loaded %d presets from %s", loadedCount, label ? label : "(memory)");
+    return loadedCount;
 }
 
 /* Load all 32 voices from a DX7 cartridge file */
@@ -91,35 +259,7 @@ static int load_dx7_cartridge(const char* filename, std::vector<std::array<uint8
         return -1;
     }
 
-    if (sysex[0] != 0xF0 || sysex[1] != 0x43) {
-        DX_DEBUG("Invalid SysEx header in %s", filename);
-        return -1;
-    }
-
-    DX_DEBUG("Valid DX7 cartridge: %s", filename);
-
-    uint8_t* voiceData = sysex + SYSEX_HEADER_SIZE;
-
-    int loadedCount = 0;
-    for (int i = 0; i < NUM_CARTRIDGE_VOICES; i++) {
-        uint8_t* packedVoice = voiceData + (i * CARTRIDGE_VOICE_SIZE);
-
-        std::array<uint8_t, 155> unpackedVoice;
-        dx_unpack_program_from_storage(packedVoice, unpackedVoice.data());
-
-        char name[11];
-        get_voice_name(packedVoice, name);
-
-        patches.push_back(unpackedVoice);
-        names.push_back(std::string(name) + " #" + std::to_string(i + 1));
-
-        loadedCount++;
-        DX_DEBUG("  Program %d: algo=%d fb=%d name='%s'",
-                 i, unpackedVoice[134], unpackedVoice[135], name);
-    }
-
-    DX_DEBUG("Loaded %d presets from %s", loadedCount, filename);
-    return loadedCount;
+    return load_dx7_cartridge_bytes(filename, sysex, readSize, patches, names);
 }
 
 static void scan_factory_presets_if_needed(void)
@@ -131,13 +271,47 @@ static void scan_factory_presets_if_needed(void)
     g_factory_patches.clear();
     g_factory_patch_names.clear();
 
-    const char* listPath = "/home/user/ft2-dxm/src/dexed/patches/patches.txt";
+#ifdef FT2_DEXED_EMBEDDED_BUILTIN_ZIP
+    {
+        static const char *const kEmbeddedCartridges[] = {
+            "Dexed_01.syx",
+            "SynprezFM_01.syx", "SynprezFM_02.syx", "SynprezFM_03.syx", "SynprezFM_04.syx",
+            "SynprezFM_05.syx", "SynprezFM_06.syx", "SynprezFM_07.syx", "SynprezFM_08.syx",
+            "SynprezFM_09.syx", "SynprezFM_10.syx", "SynprezFM_11.syx", "SynprezFM_12.syx",
+            "SynprezFM_13.syx", "SynprezFM_14.syx", "SynprezFM_15.syx", "SynprezFM_16.syx",
+            "SynprezFM_17.syx", "SynprezFM_18.syx", "SynprezFM_19.syx", "SynprezFM_20.syx",
+            "SynprezFM_21.syx", "SynprezFM_22.syx", "SynprezFM_23.syx", "SynprezFM_24.syx",
+            "SynprezFM_25.syx", "SynprezFM_26.syx", "SynprezFM_27.syx", "SynprezFM_28.syx",
+            "SynprezFM_29.syx", "SynprezFM_30.syx", "SynprezFM_31.syx", "SynprezFM_32.syx"
+        };
+
+        std::vector<uint8_t> zipData(ft2_dexed_builtin_pgm_zip, ft2_dexed_builtin_pgm_zip + ft2_dexed_builtin_pgm_zip_len);
+        for (const char *name : kEmbeddedCartridges) {
+            std::vector<uint8_t> syxData;
+            if (extract_zip_entry(zipData, name, syxData))
+                load_dx7_cartridge_bytes(name, syxData.data(), syxData.size(), g_factory_patches, g_factory_patch_names);
+        }
+
+        if (!g_factory_patches.empty()) {
+            DX_DEBUG("Loaded %zu factory presets from embedded builtin_pgm.zip", g_factory_patches.size());
+            return;
+        }
+    }
+#endif
+
+    const std::string modulePath = synthLib::getModulePath();
+    const std::string runtimeDir = modulePath.empty() ? std::string() : (modulePath + "/Dexed/");
+    const char* listPath = "src/dexed/patches/patches.txt";
     std::ifstream listifs(listPath);
+    if (!listifs && !runtimeDir.empty())
+        listifs.open(runtimeDir + "patches.txt");
 
     if (listifs) {
         DX_DEBUG("Found patches.txt, loading cartridges...");
         std::string line;
-        const std::string baseDir = "/home/user/ft2-dxm/src/dexed/patches/";
+        std::string baseDir = "src/dexed/patches/";
+        if (!runtimeDir.empty() && std::ifstream(runtimeDir + "patches.txt"))
+            baseDir = runtimeDir;
 
         while (std::getline(listifs, line)) {
             auto start = line.find_first_not_of(" \t\r\n");
@@ -155,9 +329,14 @@ static void scan_factory_presets_if_needed(void)
     }
 
     if (g_factory_patches.empty()) {
-        const char* syxPath = "/home/user/ft2-dxm/src/dexed/patches/Dexed_01.syx";
+        const char* syxPath = "src/dexed/patches/Dexed_01.syx";
         DX_DEBUG("Loading bundled %s", syxPath);
         load_dx7_cartridge(syxPath, g_factory_patches, g_factory_patch_names);
+        if (g_factory_patches.empty() && !runtimeDir.empty()) {
+            const std::string runtimeSyx = runtimeDir + "Dexed_01.syx";
+            DX_DEBUG("Loading runtime bundled %s", runtimeSyx.c_str());
+            load_dx7_cartridge(runtimeSyx.c_str(), g_factory_patches, g_factory_patch_names);
+        }
     }
 
     DX_DEBUG("Factory scan complete: %zu presets", g_factory_patches.size());

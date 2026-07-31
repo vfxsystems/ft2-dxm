@@ -1096,6 +1096,15 @@ void showConfigScreen(void)
 	if (ui.extendedPatternEditor)
 		exitPatternEditorExtended();
 
+	// Unconditionally clear any previously-shown config page's widgets first (e.g. the
+	// palette R/G/B/contrast arrows from the Layout page) so this function is safe to
+	// call from any entry point - not just the rbConfig*() page-tab callbacks, which
+	// already paired this with an explicit hideConfigScreen() call themselves. Without
+	// this, re-entering via showTopScreen()'s screen-restore path (used e.g. when a
+	// modal dialog closes) would leave the previous page's widgets stuck visible
+	// underneath the newly (re)drawn page.
+	hideConfigScreen();
+
 	hideTopScreen();
 	ui.configScreenShown = true;
 

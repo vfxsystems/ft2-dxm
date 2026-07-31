@@ -66,6 +66,7 @@ int    ft2_dx_load_factory_preset_for_instrument(int instrID, int index);
 int    ft2_dx_load_factory_preset_for_current_instrument(int index);
 int    ft2_dx_get_current_preset_for_instrument(int instrID);
 int    ft2_dx_get_active_voice_count(int instrID);
+void ft2_dx_release_instrument(int instrID);
 void ft2_dx_panic(void);
 int ft2_dx_get_patch_data(int instrID, uint8_t *buffer, int32_t bufferSize);
 int ft2_dx_get_packed_patch_data(int instrID, uint8_t *buffer, int32_t bufferSize);

@@ -9,10 +9,12 @@
 typedef enum
 {
     MACRO_TARGET_NONE = 0,
-    MACRO_TARGET_TF4,    // TF4 synth parameter
-    MACRO_TARGET_DSP,    // DSP effect parameter
-    MACRO_TARGET_DEXED,  // Dexed synth parameter
-    MACRO_TARGET_GLOBAL  // Future: global params
+    MACRO_TARGET_TF4,     // TF4 synth parameter
+    MACRO_TARGET_DSP,     // DSP effect parameter
+    MACRO_TARGET_DEXED,   // Dexed synth parameter
+    MACRO_TARGET_GLOBAL,  // Future: global params
+    MACRO_TARGET_V2,      // V2 synth parameter
+    MACRO_TARGET_OSTIRUS  // OsTIrus synth parameter
 } macroTargetType_t;
 
 // Curve types for parameter scaling
