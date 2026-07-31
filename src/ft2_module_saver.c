@@ -226,7 +226,7 @@ static size_t writeAllSamplesDXMWAV(FILE *f)
                 continue;
             uint8_t flags = 0;
             bool sample16Bit = !!(s->flags & SAMPLE_16BIT);
-            bool stereo = !!(s->flags & SAMPLE_STEREO);
+            bool stereo = !!(s->flags & SAMPLE_STEREO) && s->dataPtrR != NULL;
             if (sample16Bit) flags |= 1;
             if (stereo) flags |= 2;
             fwrite(&instrIdx, sizeof(uint8_t), 1, f); bytesWritten += 1;

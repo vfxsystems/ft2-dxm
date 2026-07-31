@@ -350,7 +350,7 @@ bool setupDiskOp(void)
 	FReq_TrkCurPathU[0] = 0;
 	FReq_DxiCurPathU[0] = 0;
 
-	strcpy(modTmpFName, "untitled.xm");
+	strcpy(modTmpFName, "untitled.dxm");
 	strcpy(insTmpFName, "untitled.xi");
 	strcpy(smpTmpFName, "untitled.wav");
 	strcpy(patTmpFName, "untitled.xp");
@@ -668,13 +668,13 @@ void diskOpSetFilename(uint8_t type, UNICHAR *pathU)
 		case DISKOP_ITEM_MODULE:
 		{
 			strcpy(modTmpFName, filename);
-			updateCurrSongFilename(); // for window title
 
 			if (editor.moduleSaveMode == MOD_SAVE_MODE_DXM)
 				changeFilenameExt(modTmpFName, ".dxm", PATH_MAX);
 			else if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV)
 				changeFilenameExt(modTmpFName, ".wav", PATH_MAX);
 
+			updateCurrSongFilename(); // for window title
 			updateWindowTitle(true);
 		}
 		break;

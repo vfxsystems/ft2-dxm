@@ -1,6 +1,7 @@
 # Documentation
 
 - [Build instructions](build.md): native Linux, Windows MinGW, macOS, Raspberry Pi Linux ALSA, and full test matrix.
+- [DXM module workflow](dxm.md): module save/load contract, chunk handling, and synth state restoration.
 - [DXI patch workflow](dxi.md): loading and saving standalone synth patch files through Disk Op.
 - [Macro Map](macro-map.md): TF4, Dexed, V2, OsTIrus, and DSP macro target contract.
 - [UI input safety](ui-safety.md): click-through, stale overlay, and synth editor mouse ownership rules.
