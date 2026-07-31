@@ -1618,21 +1618,22 @@ bool dx_handle_layout_mouse_event(DexedCompleteLayout* layout, int mouseX, int m
                 return true;
             }
         }
+    }
 
-        /* Route to page widgets */
-        TunefishWidget** pageArray = (layout->current_page == DX_PAGE_MAIN) ? layout->page1_widgets : layout->page2_widgets;
-        int pageCount = (layout->current_page == DX_PAGE_MAIN) ? DX_PAGE1_WIDGETS : DX_PAGE2_WIDGETS;
-        for (int i = 0; i < pageCount; i++) {
-            TunefishWidget* w = pageArray[i];
-            if (!w || !w->visible) {
-                continue;
-            }
-            if (tf_widget_handle_mouse_event(w, mouseX, mouseY, pressed)) {
-                return true;
-            }
+    /* Route to page widgets */
+    TunefishWidget** pageArray = (layout->current_page == DX_PAGE_MAIN) ? layout->page1_widgets : layout->page2_widgets;
+    int pageCount = (layout->current_page == DX_PAGE_MAIN) ? DX_PAGE1_WIDGETS : DX_PAGE2_WIDGETS;
+    for (int i = 0; i < pageCount; i++) {
+        TunefishWidget* w = pageArray[i];
+        if (!w || !w->visible) {
+            continue;
+        }
+        if (tf_widget_handle_mouse_event(w, mouseX, mouseY, pressed)) {
+            return true;
         }
     }
-    return false;
+
+    return true;
 }
 
 bool dx_handle_layout_mouse_drag(DexedCompleteLayout* layout, int mouseX, int mouseY)

@@ -1639,7 +1639,7 @@ bool v2_handle_layout_mouse_event(V2CompleteLayout *layout, int mouseX, int mous
             return true;
     }
 
-    return false;
+    return true;
 }
 
 bool v2_handle_layout_mouse_drag(V2CompleteLayout *layout, int mouseX, int mouseY)
