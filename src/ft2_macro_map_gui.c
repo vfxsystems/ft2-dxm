@@ -3,7 +3,6 @@
 #include "ft2_gui.h"
 #include "ft2_events.h"
 #include "ft2_video.h"
-#include "ft2_scrollbars.h"
 #include "ft2_pushbuttons.h"
 #include "ft2_structs.h"
 #include "ft2_replayer.h"
@@ -12,21 +11,29 @@
 #include "ft2_unified_synth.h"
 #include "ft2_dsp.h"
 #include "ft2_mixer.h"
+#include "ft2_popup_list.h"
 
 // Unique bases for Macro Map Editor widgets to avoid ID collisions
-#define MM_NUM_SLOTS 16
-#define MM_SB_BASE (NUM_SCROLLBARS - MM_NUM_SLOTS)      // 16 scrollbars
-#define MM_PB_COUNT 102
+#define MM_NUM_SLOTS FT2_MACRO_MAP_NUM_SLOTS
+#define MM_PB_COUNT FT2_MACRO_MAP_PUSHBUTTON_COUNT
 #define MM_PB_BASE (NUM_PUSHBUTTONS - MM_PB_COUNT)
 #define MM_PB_OK (MM_PB_BASE + 0)
 #define MM_PB_CANCEL (MM_PB_BASE + 1)
-#define MM_PB_PARAM_BASE (MM_PB_BASE + 2) // 32 buttons (left/right interleaved)
-#define MM_PB_TARGET_BASE (MM_PB_PARAM_BASE + (MM_NUM_SLOTS * 2)) // 16 buttons
+#define MM_PB_PARAM_BASE (MM_PB_BASE + 2) // 16 buttons, one per slot (opens a dropdown)
+#define MM_PB_TARGET_BASE (MM_PB_PARAM_BASE + MM_NUM_SLOTS) // 16 buttons
 #define MM_PB_SCOPE_BASE (MM_PB_TARGET_BASE + MM_NUM_SLOTS) // 16 buttons
 #define MM_PB_SLOT_BASE (MM_PB_SCOPE_BASE + MM_NUM_SLOTS) // 32 buttons (left/right interleaved)
 #define MM_PB_TRACK_BASE (MM_PB_SLOT_BASE + (MM_NUM_SLOTS * 2)) // 4 buttons (track up/down/display/toggle)
 
+// Max entries the per-slot parameter dropdown can show (OsTIrus's 256-entry param
+// space is currently the largest source).
+#define MM_MAX_PARAM_ITEMS 256
 
+// Macro Map Editor popup box dimensions. Widened from the original 380x360 to
+// comfortably fit the wide param-name dropdown buttons plus the longer engine
+// labels/parameter names now reachable (V2/OsTIrus).
+#define MM_BOX_W 460
+#define MM_BOX_H 380
 
 // Local state for Macro Map Editor dialog
 static bool macroMapExitFlag = false;
@@ -36,84 +43,11 @@ static uint8_t macroScaleLocal[MM_NUM_SLOTS];
 static uint8_t macroDspScopeLocal[MM_NUM_SLOTS];
 static uint8_t macroDspSlotLocal[MM_NUM_SLOTS];
 static uint8_t macroTrackSel = 0;
+static const char *macroParamPopupItems[MM_MAX_PARAM_ITEMS];
 
 // Callback for OK and Cancel buttons
 static void pbMacroMapOk(void)    { ui.sysReqShown = false; macroMapExitFlag = false; }
 static void pbMacroMapCancel(void){ ui.sysReqShown = false; macroMapExitFlag = true; }
-
-// Scrollbar change callbacks
-static void sbSetMacroMap0(uint32_t pos)  { macroParamLocal[0]  = (uint16_t)pos; }
-static void sbSetMacroMap1(uint32_t pos)  { macroParamLocal[1]  = (uint16_t)pos; }
-static void sbSetMacroMap2(uint32_t pos)  { macroParamLocal[2]  = (uint16_t)pos; }
-static void sbSetMacroMap3(uint32_t pos)  { macroParamLocal[3]  = (uint16_t)pos; }
-static void sbSetMacroMap4(uint32_t pos)  { macroParamLocal[4]  = (uint16_t)pos; }
-static void sbSetMacroMap5(uint32_t pos)  { macroParamLocal[5]  = (uint16_t)pos; }
-static void sbSetMacroMap6(uint32_t pos)  { macroParamLocal[6]  = (uint16_t)pos; }
-static void sbSetMacroMap7(uint32_t pos)  { macroParamLocal[7]  = (uint16_t)pos; }
-static void sbSetMacroMap8(uint32_t pos)  { macroParamLocal[8]  = (uint16_t)pos; }
-static void sbSetMacroMap9(uint32_t pos)  { macroParamLocal[9]  = (uint16_t)pos; }
-static void sbSetMacroMap10(uint32_t pos) { macroParamLocal[10] = (uint16_t)pos; }
-static void sbSetMacroMap11(uint32_t pos) { macroParamLocal[11] = (uint16_t)pos; }
-static void sbSetMacroMap12(uint32_t pos) { macroParamLocal[12] = (uint16_t)pos; }
-static void sbSetMacroMap13(uint32_t pos) { macroParamLocal[13] = (uint16_t)pos; }
-static void sbSetMacroMap14(uint32_t pos) { macroParamLocal[14] = (uint16_t)pos; }
-static void sbSetMacroMap15(uint32_t pos) { macroParamLocal[15] = (uint16_t)pos; }
-
-// Arrow button callbacks (left)
-static void pbMacroMapLeft0(void)  { scrollBarScrollLeft(MM_SB_BASE + 0,  1); }
-static void pbMacroMapLeft1(void)  { scrollBarScrollLeft(MM_SB_BASE + 1,  1); }
-static void pbMacroMapLeft2(void)  { scrollBarScrollLeft(MM_SB_BASE + 2,  1); }
-static void pbMacroMapLeft3(void)  { scrollBarScrollLeft(MM_SB_BASE + 3,  1); }
-static void pbMacroMapLeft4(void)  { scrollBarScrollLeft(MM_SB_BASE + 4,  1); }
-static void pbMacroMapLeft5(void)  { scrollBarScrollLeft(MM_SB_BASE + 5,  1); }
-static void pbMacroMapLeft6(void)  { scrollBarScrollLeft(MM_SB_BASE + 6,  1); }
-static void pbMacroMapLeft7(void)  { scrollBarScrollLeft(MM_SB_BASE + 7,  1); }
-static void pbMacroMapLeft8(void)  { scrollBarScrollLeft(MM_SB_BASE + 8,  1); }
-static void pbMacroMapLeft9(void)  { scrollBarScrollLeft(MM_SB_BASE + 9,  1); }
-static void pbMacroMapLeft10(void) { scrollBarScrollLeft(MM_SB_BASE + 10, 1); }
-static void pbMacroMapLeft11(void) { scrollBarScrollLeft(MM_SB_BASE + 11, 1); }
-static void pbMacroMapLeft12(void) { scrollBarScrollLeft(MM_SB_BASE + 12, 1); }
-static void pbMacroMapLeft13(void) { scrollBarScrollLeft(MM_SB_BASE + 13, 1); }
-static void pbMacroMapLeft14(void) { scrollBarScrollLeft(MM_SB_BASE + 14, 1); }
-static void pbMacroMapLeft15(void) { scrollBarScrollLeft(MM_SB_BASE + 15, 1); }
-
-// Arrow button callbacks (right)
-static void pbMacroMapRight0(void)  { scrollBarScrollRight(MM_SB_BASE + 0,  1); }
-static void pbMacroMapRight1(void)  { scrollBarScrollRight(MM_SB_BASE + 1,  1); }
-static void pbMacroMapRight2(void)  { scrollBarScrollRight(MM_SB_BASE + 2,  1); }
-static void pbMacroMapRight3(void)  { scrollBarScrollRight(MM_SB_BASE + 3,  1); }
-static void pbMacroMapRight4(void)  { scrollBarScrollRight(MM_SB_BASE + 4,  1); }
-static void pbMacroMapRight5(void)  { scrollBarScrollRight(MM_SB_BASE + 5,  1); }
-static void pbMacroMapRight6(void)  { scrollBarScrollRight(MM_SB_BASE + 6,  1); }
-static void pbMacroMapRight7(void)  { scrollBarScrollRight(MM_SB_BASE + 7,  1); }
-static void pbMacroMapRight8(void)  { scrollBarScrollRight(MM_SB_BASE + 8,  1); }
-static void pbMacroMapRight9(void)  { scrollBarScrollRight(MM_SB_BASE + 9,  1); }
-static void pbMacroMapRight10(void) { scrollBarScrollRight(MM_SB_BASE + 10, 1); }
-static void pbMacroMapRight11(void) { scrollBarScrollRight(MM_SB_BASE + 11, 1); }
-static void pbMacroMapRight12(void) { scrollBarScrollRight(MM_SB_BASE + 12, 1); }
-static void pbMacroMapRight13(void) { scrollBarScrollRight(MM_SB_BASE + 13, 1); }
-static void pbMacroMapRight14(void) { scrollBarScrollRight(MM_SB_BASE + 14, 1); }
-static void pbMacroMapRight15(void) { scrollBarScrollRight(MM_SB_BASE + 15, 1); }
-
-// Callback arrays
-static void (*const macroMapScrollCbs[16])(uint32_t) = {
-    sbSetMacroMap0, sbSetMacroMap1, sbSetMacroMap2, sbSetMacroMap3,
-    sbSetMacroMap4, sbSetMacroMap5, sbSetMacroMap6, sbSetMacroMap7,
-    sbSetMacroMap8, sbSetMacroMap9, sbSetMacroMap10, sbSetMacroMap11,
-    sbSetMacroMap12, sbSetMacroMap13, sbSetMacroMap14, sbSetMacroMap15
-};
-static void (*const macroMapLeftCbs[16])(void) = {
-    pbMacroMapLeft0, pbMacroMapLeft1, pbMacroMapLeft2, pbMacroMapLeft3,
-    pbMacroMapLeft4, pbMacroMapLeft5, pbMacroMapLeft6, pbMacroMapLeft7,
-    pbMacroMapLeft8, pbMacroMapLeft9, pbMacroMapLeft10, pbMacroMapLeft11,
-    pbMacroMapLeft12, pbMacroMapLeft13, pbMacroMapLeft14, pbMacroMapLeft15
-};
-static void (*const macroMapRightCbs[16])(void) = {
-    pbMacroMapRight0, pbMacroMapRight1, pbMacroMapRight2, pbMacroMapRight3,
-    pbMacroMapRight4, pbMacroMapRight5, pbMacroMapRight6, pbMacroMapRight7,
-    pbMacroMapRight8, pbMacroMapRight9, pbMacroMapRight10, pbMacroMapRight11,
-    pbMacroMapRight12, pbMacroMapRight13, pbMacroMapRight14, pbMacroMapRight15
-};
 
 static uint8_t clampU8(uint8_t v, uint8_t lo, uint8_t hi)
 {
@@ -126,10 +60,12 @@ static const char *getTargetLabel(uint8_t target)
 {
     switch (target)
     {
-        case MACRO_TARGET_TF4:   return "TF4";
-        case MACRO_TARGET_DEXED: return "DX";
-        case MACRO_TARGET_DSP:   return "DSP";
-        default:                 return "---";
+        case MACRO_TARGET_TF4:     return "TF4";
+        case MACRO_TARGET_DEXED:   return "DX";
+        case MACRO_TARGET_DSP:     return "DSP";
+        case MACRO_TARGET_V2:      return "V2";
+        case MACRO_TARGET_OSTIRUS: return "OTI";
+        default:                   return "---";
     }
 }
 
@@ -138,24 +74,13 @@ static const char *getScopeLabel(uint8_t scope)
     return (scope == DSP_MACRO_SCOPE_MASTER) ? "MSTR" : "PAIR";
 }
 
-static int getDexedParamCount(void)
+/* Unified per-engine parameter resolution, shared by every synth-backed macro target
+   (TF4/Dexed/V2/OsTIrus) via the UnifiedSynthInterface vtable - eliminates the
+   per-engine special-casing this file used to have (only Dexed went through the
+   vtable; TF4 used a separate hardcoded array; V2/OsTIrus weren't reachable at all). */
+static bool targetToEngine(uint8_t target, SynthEngineType *out)
 {
-    const UnifiedSynthInterface *eng = ft2_unified_synth_get_engine(SYNTH_TYPE_DEXED);
-    return (eng && eng->get_param_count) ? eng->get_param_count() : 0;
-}
-
-static const char *getDexedParamName(int paramId)
-{
-    const UnifiedSynthInterface *eng = ft2_unified_synth_get_engine(SYNTH_TYPE_DEXED);
-    const int count = (eng && eng->get_param_count) ? eng->get_param_count() : 0;
-    if (paramId < 0 || paramId >= count)
-        return "Unknown";
-    if (eng && eng->get_param_name)
-    {
-        const char *name = eng->get_param_name(paramId);
-        return (name != NULL) ? name : "Unknown";
-    }
-    return "Unknown";
+    return ft2_macro_map_target_to_engine(target, out);
 }
 
 static const char *getMacroParamName(int slot)
@@ -163,15 +88,9 @@ static const char *getMacroParamName(int slot)
     const uint8_t target = macroTargetLocal[slot];
     const uint16_t param = macroParamLocal[slot];
 
-    if (target == MACRO_TARGET_TF4)
-        return tf4_param_name((int)param);
-    if (target == MACRO_TARGET_DEXED)
-    {
-        const int dCount = getDexedParamCount();
-        if (dCount <= 0 || param >= (uint16_t)dCount)
-            return "DX Param";
-        return getDexedParamName((int)param);
-    }
+    if (targetToEngine(target, NULL))
+        return ft2_macro_map_target_param_name(target, param);
+
     if (target == MACRO_TARGET_DSP)
     {
         const uint8_t scope = macroDspScopeLocal[slot];
@@ -220,24 +139,18 @@ static void updateMacroMapWidgetsForSlot(int slot)
     pushButtons[MM_PB_SLOT_BASE + slot * 2].visible = (target == MACRO_TARGET_DSP);
     pushButtons[MM_PB_SLOT_BASE + slot * 2 + 1].visible = (target == MACRO_TARGET_DSP);
 
-    // Param controls visibility
+    // Param dropdown button: visibility
     const bool showParams = (target != MACRO_TARGET_NONE);
-    pushButtons[MM_PB_PARAM_BASE + slot * 2].visible = showParams;
-    pushButtons[MM_PB_PARAM_BASE + slot * 2 + 1].visible = showParams;
-    scrollBars[MM_SB_BASE + slot].visible = showParams;
+    pushButtons[MM_PB_PARAM_BASE + slot].visible = showParams;
 
-    // Update param scrollbar range
-    uint16_t end = 0;
-    if (target == MACRO_TARGET_TF4)
+    // Clamp the stored param index to whatever range the (possibly just-changed) target
+    // actually supports, so a stale index from a previous target doesn't linger.
+    uint16_t maxIndex = 0;
+    if (targetToEngine(target, NULL))
     {
-        if (tf4_param_name_count > 0)
-            end = (uint16_t)(tf4_param_name_count - 1);
-    }
-    else if (target == MACRO_TARGET_DEXED)
-    {
-        const int dCount = getDexedParamCount();
-        if (dCount > 0)
-            end = (uint16_t)(dCount - 1);
+        const int count = ft2_macro_map_target_param_count(target);
+        if (count > 0)
+            maxIndex = (uint16_t)(count - 1);
     }
     else if (target == MACRO_TARGET_DSP)
     {
@@ -248,15 +161,80 @@ static void updateMacroMapWidgetsForSlot(int slot)
             : &stereoMixerCh[0].effects[dspSlot];
         int numParams = 0;
         const dspParamInfo_t *pi = dspGetParamInfo(eff->type, &numParams);
-        end = (pi && numParams > 0) ? (uint16_t)(numParams - 1) : 0;
+        maxIndex = (pi && numParams > 0) ? (uint16_t)(numParams - 1) : 0;
     }
 
-    setScrollBarEnd(MM_SB_BASE + slot, end);
-    if (macroParamLocal[slot] > end)
-        macroParamLocal[slot] = end;
-    setScrollBarPos(MM_SB_BASE + slot, macroParamLocal[slot], false);
+    if (macroParamLocal[slot] > maxIndex)
+        macroParamLocal[slot] = maxIndex;
 
-    (void)slot;
+    pushButtons[MM_PB_PARAM_BASE + slot].caption = (char *)getMacroParamName(slot);
+}
+
+/* Fills macroParamPopupItems[] with the display names for whichever engine/DSP effect
+   is currently targeted by the given slot. Returns the item count (0 if none). */
+static int buildParamItems(int slot)
+{
+    const uint8_t target = macroTargetLocal[slot];
+
+    if (targetToEngine(target, NULL))
+    {
+        int count = ft2_macro_map_target_param_count(target);
+        if (count > MM_MAX_PARAM_ITEMS)
+            count = MM_MAX_PARAM_ITEMS;
+        for (int i = 0; i < count; i++)
+            macroParamPopupItems[i] = ft2_macro_map_target_param_name(target, (uint16_t)i);
+        return count;
+    }
+
+    if (target == MACRO_TARGET_DSP)
+    {
+        const uint8_t scope = macroDspScopeLocal[slot];
+        const uint8_t dspSlot = macroDspSlotLocal[slot];
+        dspEffectInstance_t *eff = (scope == DSP_MACRO_SCOPE_MASTER)
+            ? &masterEffects[dspSlot]
+            : &stereoMixerCh[0].effects[dspSlot];
+        int numParams = 0;
+        const dspParamInfo_t *pi = dspGetParamInfo(eff->type, &numParams);
+        if (!pi || numParams <= 0)
+            return 0;
+        if (numParams > MM_MAX_PARAM_ITEMS)
+            numParams = MM_MAX_PARAM_ITEMS;
+        for (int i = 0; i < numParams; i++)
+            macroParamPopupItems[i] = pi[i].name;
+        return numParams;
+    }
+
+    return 0;
+}
+
+static void macroParamPopupCb(int32_t index, void *ctx)
+{
+    const int slot = (int)(intptr_t)ctx;
+    if (slot < 0 || slot >= MM_NUM_SLOTS)
+        return;
+
+    if (index >= 0)
+        macroParamLocal[slot] = (uint16_t)index;
+
+    updateMacroMapWidgetsForSlot(slot);
+}
+
+static void pbMacroMapParamOpen(void)
+{
+    const int slot = (int)mouse.lastUsedObjectID - MM_PB_PARAM_BASE;
+    if (slot < 0 || slot >= MM_NUM_SLOTS)
+        return;
+
+    if (macroTargetLocal[slot] == MACRO_TARGET_NONE)
+        return;
+
+    const int count = buildParamItems(slot);
+    if (count <= 0)
+        return;
+
+    const pushButton_t *b = &pushButtons[MM_PB_PARAM_BASE + slot];
+    popupListShow(b->x, (int16_t)(b->y + b->h), macroParamPopupItems, count,
+                  macroParamLocal[slot], macroParamPopupCb, (void *)(intptr_t)slot);
 }
 
 static void pbMacroMapTargetToggle(void)
@@ -267,10 +245,12 @@ static void pbMacroMapTargetToggle(void)
 
     switch (macroTargetLocal[slot])
     {
-        case MACRO_TARGET_NONE:  macroTargetLocal[slot] = MACRO_TARGET_TF4; break;
-        case MACRO_TARGET_TF4:   macroTargetLocal[slot] = MACRO_TARGET_DEXED; break;
-        case MACRO_TARGET_DEXED: macroTargetLocal[slot] = MACRO_TARGET_DSP; break;
-        default:                 macroTargetLocal[slot] = MACRO_TARGET_NONE; break;
+        case MACRO_TARGET_NONE:    macroTargetLocal[slot] = MACRO_TARGET_TF4;     break;
+        case MACRO_TARGET_TF4:     macroTargetLocal[slot] = MACRO_TARGET_DEXED;   break;
+        case MACRO_TARGET_DEXED:   macroTargetLocal[slot] = MACRO_TARGET_V2;      break;
+        case MACRO_TARGET_V2:      macroTargetLocal[slot] = MACRO_TARGET_OSTIRUS; break;
+        case MACRO_TARGET_OSTIRUS: macroTargetLocal[slot] = MACRO_TARGET_DSP;     break;
+        default:                   macroTargetLocal[slot] = MACRO_TARGET_NONE;    break;
     }
 
     updateMacroMapWidgetsForSlot(slot);
@@ -347,24 +327,22 @@ static void pbMacroMapTrackAdjust(void)
     ui.updatePatternEditor = true;
 }
 
-// Initialize widgets (pushbuttons and scrollbars)
+// Initialize widgets (pushbuttons)
 static void setupMacroMapBoxWidgets(void)
 {
-    const int16_t w = 380, h = 360;
+    const int16_t w = MM_BOX_W, h = MM_BOX_H;
     const int16_t x = (SCREEN_W - w) / 2;
     const int16_t y = (SCREEN_H - h) / 2;
-    const int16_t arrowW = 13, arrowH = 13;
     const int16_t tgtW = 34, tgtH = 12;
     const int16_t scopeW = 34, scopeH = 12;
     const int16_t slotArrowW = 10, slotArrowH = 12;
     const int16_t slotWidth = (w - 32) / 2;  // 16px margin each side, 2 columns
     const int16_t paramStartOffset = 44; // space for target/scope/slot controls
-    const int16_t scrollW = slotWidth - paramStartOffset - (arrowW * 2);
-    const int16_t scrollH = arrowH;
+    const int16_t paramBtnW = slotWidth - paramStartOffset - 4;
+    const int16_t paramBtnH = 13;
     const int16_t rowH = 28;
     const int16_t rowsTop = 42;
     pushButton_t *p;
-    scrollBar_t *s;
 
     // OK button
     p = &pushButtons[MM_PB_OK]; memset(p, 0, sizeof(*p));
@@ -418,7 +396,7 @@ static void setupMacroMapBoxWidgets(void)
 
     updateMacroTrackWidgets();
 
-    // Arrows and scrollbars for each slot
+    // Per-slot controls
     for (int i = 0; i < 16; i++)
     {
         int row = i % 8;
@@ -458,34 +436,13 @@ static void setupMacroMapBoxWidgets(void)
         p->callbackFuncOnUp = pbMacroMapSlotAdjust;
         p->visible = (macroTargetLocal[i] == MACRO_TARGET_DSP);
 
-        // Left arrow
-        p = &pushButtons[MM_PB_PARAM_BASE + i * 2]; memset(p, 0, sizeof(*p));
-        p->caption = ARROW_LEFT_STRING;
+        // Parameter dropdown button - opens a popupListShow() list of the current
+        // target's parameter names when clicked.
+        p = &pushButtons[MM_PB_PARAM_BASE + i]; memset(p, 0, sizeof(*p));
+        p->caption = (char *)getMacroParamName(i);
         p->x = sx + paramStartOffset; p->y = sy;
-        p->w = arrowW; p->h = arrowH;
-        p->preDelay = 1; p->delayFrames = 3;
-        p->callbackFuncOnDown = macroMapLeftCbs[i];
-        p->visible = (macroTargetLocal[i] != MACRO_TARGET_NONE);
-
-        // Scrollbar
-        s = &scrollBars[MM_SB_BASE + i]; memset(s, 0, sizeof(*s));
-        s->x = sx + paramStartOffset + arrowW; s->y = sy;
-        s->w = scrollW;  s->h = scrollH;
-        s->type = SCROLLBAR_HORIZONTAL;
-        s->thumbType = SCROLLBAR_FIXED_THUMB_SIZE;
-        s->callbackFunc = macroMapScrollCbs[i];
-        s->visible = (macroTargetLocal[i] != MACRO_TARGET_NONE);
-        setScrollBarPageLength(MM_SB_BASE + i, 1);
-        setScrollBarEnd(MM_SB_BASE + i, tf4_param_name_count - 1);
-        setScrollBarPos(MM_SB_BASE + i, macroParamLocal[i], false);
-
-        // Right arrow
-        p = &pushButtons[MM_PB_PARAM_BASE + i * 2 + 1]; memset(p, 0, sizeof(*p));
-        p->caption = ARROW_RIGHT_STRING;
-        p->x = sx + paramStartOffset + arrowW + scrollW; p->y = sy;
-        p->w = arrowW; p->h = arrowH;
-        p->preDelay = 1; p->delayFrames = 3;
-        p->callbackFuncOnDown = macroMapRightCbs[i];
+        p->w = paramBtnW; p->h = paramBtnH;
+        p->callbackFuncOnUp = pbMacroMapParamOpen;
         p->visible = (macroTargetLocal[i] != MACRO_TARGET_NONE);
 
         updateMacroMapWidgetsForSlot(i);
@@ -519,8 +476,8 @@ static void windowCloseMacroMap(void)
 
 static void drawMacroMapBox(void)
 {
-    const int16_t w = 380;
-    const int16_t h = 360;
+    const int16_t w = MM_BOX_W;
+    const int16_t h = MM_BOX_H;
     int16_t x = (SCREEN_W - w) / 2;
     int16_t y = (SCREEN_H - h) / 2;
 
@@ -551,6 +508,8 @@ void showMacroMapEditor(void)
     
     if (instr[instID] == NULL)
         return;
+
+    ft2_macro_map_sanitize_instrument(instr[instID]);
 
     // Copy current macro settings
     macroTrackSel = 0;
@@ -586,17 +545,15 @@ void showMacroMapEditor(void)
             pbMacroMapOk();
         handleRedrawing();
         drawMacroMapBox();
-        // Draw arrows, scrollbars, and parameter names
+        // Draw per-slot controls and parameter/value readouts
         {
-            const int16_t boxW = 380, boxH = 360;
+            const int16_t boxW = MM_BOX_W, boxH = MM_BOX_H;
             const int16_t boxX = (SCREEN_W - boxW) / 2;
             const int16_t boxY = (SCREEN_H - boxH) / 2;
-            const int16_t arrowW = 13;
-            const int16_t slotWidth = (boxW - 32) / 2;  // margin 16px, 2 columns
             const int16_t paramStartOffset = 44;
-            const int16_t scrollW = slotWidth - paramStartOffset - (arrowW * 2);
             const int16_t rowH = 28;
             const int16_t rowsTop = 42;
+            const int16_t slotWidth = (boxW - 32) / 2;  // margin 16px, 2 columns
             for (int i = 0; i < 16; i++)
             {
                 int row = i % 8, col = i / 8;
@@ -613,26 +570,13 @@ void showMacroMapEditor(void)
                     snprintf(slotLabel, sizeof(slotLabel), "S%u", (unsigned)macroDspSlotLocal[i]);
                     textOutTiny(sx + 92, syTop + 2, slotLabel, PAL_BUTTON1);
                 }
-                drawPushButton(MM_PB_PARAM_BASE + i * 2);
-                drawScrollBar(MM_SB_BASE + i);
-                drawPushButton(MM_PB_PARAM_BASE + i * 2 + 1);
-                /* Draw slot index and parameter name with tiny outlined font */
-                char labelBuf[72];
+                drawPushButton(MM_PB_PARAM_BASE + i);
+                /* Macro index + current live value, shown below the param button
+                   (the parameter name itself is already the button's caption). */
+                char labelBuf[16];
                 const uint8_t val = getMacroValueForInstrument(instID, i);
-                const char *paramName = getMacroParamName(i);
-                if (macroTargetLocal[i] == MACRO_TARGET_DSP)
-                {
-                    const char *scope = getScopeLabel(macroDspScopeLocal[i]);
-                    snprintf(labelBuf, sizeof(labelBuf), "M%X %s S%u: %s  %02X",
-                             i, scope, (unsigned)macroDspSlotLocal[i], paramName, val);
-                }
-                else
-                {
-                    const char *tgt = getTargetLabel(macroTargetLocal[i]);
-                    snprintf(labelBuf, sizeof(labelBuf), "M%X %s: %s  %02X", i, tgt, paramName, val);
-                }
-                textOutTiny(sx + paramStartOffset + arrowW + 2, syTop + 15, labelBuf, PAL_BUTTON1);
-
+                snprintf(labelBuf, sizeof(labelBuf), "M%X: %02X", i, val);
+                textOutTiny(sx + paramStartOffset, syTop + 16, labelBuf, PAL_BUTTON1);
             }
             // Track selector (bottom, global)
             drawPushButton(MM_PB_TRACK_BASE + 0);
@@ -642,12 +586,10 @@ void showMacroMapEditor(void)
             textOutTiny(boxX + 16, boxY + boxH - 68, "Track", PAL_BUTTON1);
             textOutTiny(boxX + 46, boxY + boxH - 40, "Macro", PAL_BUTTON1);
         }
+        // Draw the parameter dropdown last, on top of everything else in the box.
+        popupListDraw();
         flipFrame();
     }
-
-    // Hide scrollbars
-    for (int i = 0; i < MM_NUM_SLOTS; i++)
-        hideScrollBar(MM_SB_BASE + i);
 
     // Hide all Macro Map Editor pushbuttons
     for (int i = 0; i < MM_PB_COUNT; i++)
@@ -679,6 +621,7 @@ void showMacroMapEditor(void)
                     ins->macroParamID[i] = macroParamLocal[i];
                 }
             }
+            ft2_macro_map_sanitize_instrument(ins);
             ui_sync_from_instrument();
     
         }

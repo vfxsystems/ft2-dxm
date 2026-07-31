@@ -1,6 +1,10 @@
 #include "ft2_macro_map.h"
 #include "ft2_structs.h"
 #include "ft2_macromap.h"
+#include "ft2_v2.h"
+#include "ft2_ostirus.h"
+#include <stdio.h>
+#include <string.h>
 // Define macroSys instance
 macroSystem_t macroSys = { .showMapper = false, .currentInst = -1 };
 
@@ -214,6 +218,238 @@ const tf4_param_range_t tf4_param_ranges[] = {
 };
 
 const int tf4_param_ranges_count = sizeof(tf4_param_ranges) / sizeof(tf4_param_ranges[0]);
+
+bool ft2_macro_map_target_to_engine(uint8_t target, SynthEngineType *out)
+{
+    SynthEngineType engine;
+
+    switch (target)
+    {
+        case MACRO_TARGET_TF4:     engine = SYNTH_TYPE_TUNEFISH4; break;
+        case MACRO_TARGET_DEXED:   engine = SYNTH_TYPE_DEXED;     break;
+        case MACRO_TARGET_V2:      engine = SYNTH_TYPE_V2;        break;
+        case MACRO_TARGET_OSTIRUS: engine = SYNTH_TYPE_OSTIRUS;   break;
+        default:                   return false;
+    }
+
+    if (out != NULL)
+        *out = engine;
+
+    return true;
+}
+
+bool ft2_macro_map_target_matches_instrument(uint8_t target, const instr_t *ins)
+{
+    if (ins == NULL)
+        return false;
+
+    switch (target)
+    {
+        case MACRO_TARGET_TF4:     return ins->useTF4;
+        case MACRO_TARGET_DEXED:   return ins->useDexed;
+        case MACRO_TARGET_V2:      return ins->useV2;
+        case MACRO_TARGET_OSTIRUS: return ins->useOsTirus;
+        default:                   return false;
+    }
+}
+
+int ft2_macro_map_target_param_count(uint8_t target)
+{
+    switch (target)
+    {
+        case MACRO_TARGET_TF4:     return tf4_param_count();
+        case MACRO_TARGET_DEXED:   return 156;
+        case MACRO_TARGET_V2:      return ft2_v2_get_param_count();
+        case MACRO_TARGET_OSTIRUS: return ft2_ostirus_get_param_count();
+        default:                   return 0;
+    }
+}
+
+const char *ft2_macro_map_target_param_name(uint8_t target, uint16_t paramId)
+{
+    static char dexedName[32];
+    static char unknownName[32];
+    static const char *const dexedNames[] = {
+        "Op1 Freq", "Op1 Detune", "Op1 Level", "Op1 Attack", "Op1 Decay", "Op1 Release", "Op1 Sustain",
+        "Op2 Freq", "Op2 Detune", "Op2 Level", "Op2 Attack", "Op2 Decay", "Op2 Release", "Op2 Sustain",
+        "Op3 Freq", "Op3 Detune", "Op3 Level", "Op3 Attack", "Op3 Decay", "Op3 Release", "Op3 Sustain",
+        "Op4 Freq", "Op4 Detune", "Op4 Level", "Op4 Attack", "Op4 Decay", "Op4 Release", "Op4 Sustain",
+        "Algorithm", "Pitch EG Attack", "Pitch EG Decay", "Pitch EG Release", "Pitch EG Sustain",
+        "LFO Rate", "LFO Depth", "LFO Delay", "LFO Sync", "LFO Wave", "Mod Sens", "Key Track", "Pitch Bend", "Portamento", "Brightness"
+    };
+
+    const int count = ft2_macro_map_target_param_count(target);
+    if (count <= 0 || paramId >= (uint16_t)count)
+        return "Unknown";
+
+    switch (target)
+    {
+        case MACRO_TARGET_TF4:
+            return tf4_param_name(paramId);
+
+        case MACRO_TARGET_DEXED:
+        {
+            const int nameCount = (int)(sizeof (dexedNames) / sizeof (dexedNames[0]));
+            if (paramId < (uint16_t)nameCount)
+                return dexedNames[paramId];
+            snprintf(dexedName, sizeof (dexedName), "DX Param %u", (unsigned)paramId);
+            return dexedName;
+        }
+
+        case MACRO_TARGET_V2:
+        {
+            const char *name = ft2_v2_get_param_name(paramId);
+            return name ? name : "V2 Param";
+        }
+
+        case MACRO_TARGET_OSTIRUS:
+        {
+            const char *name = ft2_ostirus_get_param_name(paramId);
+            if (name != NULL)
+                return name;
+            snprintf(unknownName, sizeof (unknownName), "OsTIrus Param %u", (unsigned)paramId);
+            return unknownName;
+        }
+
+        default:
+            return "Unknown";
+    }
+}
+
+void ft2_macro_map_sanitize_slot(instr_t *ins, int slot)
+{
+    if (ins == NULL || slot < 0 || slot >= FT2_MACRO_MAP_NUM_SLOTS)
+        return;
+
+    uint8_t *target = &ins->macroTargetType[slot];
+    uint16_t *param = &ins->macroParamID[slot];
+    uint8_t *scale = &ins->macroScale[slot];
+
+    if (*scale >= NUM_MACRO_CURVES)
+        *scale = MACRO_CURVE_LINEAR;
+
+    if (*target == MACRO_TARGET_NONE)
+    {
+        *param = 0;
+        *scale = MACRO_CURVE_LINEAR;
+        return;
+    }
+
+    if (ft2_macro_map_target_to_engine(*target, NULL))
+    {
+        const int count = ft2_macro_map_target_param_count(*target);
+        if (count <= 0)
+        {
+            *target = MACRO_TARGET_NONE;
+            *param = 0;
+            *scale = MACRO_CURVE_LINEAR;
+        }
+        else if (*param >= (uint16_t)count)
+        {
+            *param = 0;
+        }
+        return;
+    }
+
+    if (*target == MACRO_TARGET_DSP)
+    {
+        uint8_t scope = DSP_MACRO_SCOPE(*param);
+        uint8_t dspSlot = DSP_MACRO_SLOT(*param);
+        uint8_t paramIdx = DSP_MACRO_PARAM(*param);
+
+        if (scope != DSP_MACRO_SCOPE_MASTER)
+            scope = DSP_MACRO_SCOPE_PAIR;
+        if (dspSlot >= DSP_MAX_SLOTS)
+            dspSlot = 0;
+
+        const dspEffectInstance_t *eff = (scope == DSP_MACRO_SCOPE_MASTER)
+            ? &masterEffects[dspSlot]
+            : &stereoMixerCh[0].effects[dspSlot];
+
+        int numParams = 0;
+        const dspParamInfo_t *pi = dspGetParamInfo(eff->type, &numParams);
+        if (pi != NULL && numParams > 0 && paramIdx >= (uint8_t)numParams)
+            paramIdx = 0;
+
+        *param = DSP_MACRO_PARAMID(scope, dspSlot, paramIdx);
+        return;
+    }
+
+    *target = MACRO_TARGET_NONE;
+    *param = 0;
+    *scale = MACRO_CURVE_LINEAR;
+}
+
+void ft2_macro_map_sanitize_instrument(instr_t *ins)
+{
+    if (ins == NULL)
+        return;
+
+    for (int i = 0; i < FT2_MACRO_MAP_NUM_SLOTS; i++)
+        ft2_macro_map_sanitize_slot(ins, i);
+}
+
+bool ft2_macro_map_self_test(char *errBuf, size_t errBufSize)
+{
+    static const uint8_t synthTargets[] = {
+        MACRO_TARGET_TF4,
+        MACRO_TARGET_DEXED,
+        MACRO_TARGET_V2,
+        MACRO_TARGET_OSTIRUS
+    };
+
+    for (size_t i = 0; i < sizeof (synthTargets) / sizeof (synthTargets[0]); i++)
+    {
+        SynthEngineType engine;
+        const uint8_t target = synthTargets[i];
+        const int count = ft2_macro_map_target_param_count(target);
+        if (!ft2_macro_map_target_to_engine(target, &engine) || count <= 0)
+        {
+            if (errBuf != NULL && errBufSize > 0)
+                snprintf(errBuf, errBufSize, "macro-map: target %u has no engine/params", (unsigned)target);
+            return false;
+        }
+
+        const char *first = ft2_macro_map_target_param_name(target, 0);
+        const char *last = ft2_macro_map_target_param_name(target, (uint16_t)(count - 1));
+        if (first == NULL || first[0] == '\0' || last == NULL || last[0] == '\0')
+        {
+            if (errBuf != NULL && errBufSize > 0)
+                snprintf(errBuf, errBufSize, "macro-map: target %u has blank parameter name", (unsigned)target);
+            return false;
+        }
+    }
+
+    instr_t testIns;
+    memset(&testIns, 0, sizeof (testIns));
+    testIns.macroTargetType[0] = MACRO_TARGET_OSTIRUS;
+    testIns.macroParamID[0] = 4095;
+    testIns.macroScale[0] = 255;
+    ft2_macro_map_sanitize_slot(&testIns, 0);
+    if (testIns.macroTargetType[0] != MACRO_TARGET_OSTIRUS ||
+        testIns.macroParamID[0] != 0 ||
+        testIns.macroScale[0] != MACRO_CURVE_LINEAR)
+    {
+        if (errBuf != NULL && errBufSize > 0)
+            snprintf(errBuf, errBufSize, "macro-map: synth slot sanitation failed");
+        return false;
+    }
+
+    testIns.macroTargetType[1] = 255;
+    testIns.macroParamID[1] = 99;
+    testIns.macroScale[1] = 255;
+    ft2_macro_map_sanitize_slot(&testIns, 1);
+    if (testIns.macroTargetType[1] != MACRO_TARGET_NONE ||
+        testIns.macroParamID[1] != 0 ||
+        testIns.macroScale[1] != MACRO_CURVE_LINEAR)
+    {
+        if (errBuf != NULL && errBufSize > 0)
+            snprintf(errBuf, errBufSize, "macro-map: invalid target sanitation failed");
+        return false;
+    }
+
+    return true;
+}
 
 // Request UI sync from audio thread (thread-safe)
 void requestMacroUiSync(void)

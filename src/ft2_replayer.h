@@ -257,6 +257,7 @@ typedef struct instr_t
 	bool useTF4;     // new flag: use Tunefish4 synth engine for this instrument
     bool useDexed;   // new flag: use Dexed FM synth engine for this instrument
     bool useV2;      // new flag: use V2 synth engine for this instrument
+    bool useOsTirus; // new flag: use Gearmulator/OsTIrus engine for this instrument
     bool isDXMInstrument; // new flag: distinguishes DXM instruments from XM instruments
 	bool midiOn, mute;
 	uint8_t midiChannel, note2SampleLUT[96];
@@ -272,11 +273,16 @@ typedef struct instr_t
 	float tf4Params[128]; // Tunefish4 patch parameters for DXM save/load
 #endif
 	uint8_t dxParams[155]; // Dexed patch data
+	uint16_t osTirusPreset; // Gearmulator/OsTIrus ROM preset index
+	uint8_t osTirusSlot;    // Gearmulator/OsTIrus MIDI part/slot (0..15)
+	uint8_t osTirusArpStepGate[16];      // OsTIrus arp user pattern gates (packed in groups of four)
+	uint8_t osTirusArpStepVelocity[16];   // Editor-side velocity lane for arp steps
+	uint8_t osTirusArpStepLength[16];     // Editor-side note length lane for arp steps
 
 	/* DXM: per-instrument macro mapping (16 slots) */
-	uint8_t macroTargetType[16]; /* 0=none,1=TF4,2=DSP,3=DEXED */
+	uint8_t macroTargetType[16]; /* macroTargetType_t: none, TF4, DSP, Dexed, V2, OsTIrus */
 	uint16_t macroParamID[16];  /* param id or packed DSP scope/slot/param */
-	uint8_t macroScale[16];     /* 0=lin,1=log,2=bipolar */
+	uint8_t macroScale[16];     /* macroCurve_t */
 	sample_t smp[16];
 } instr_t;
 
