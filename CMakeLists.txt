@@ -17,6 +17,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy compatibility 
 
 option(EXTERNAL_LIBFLAC "use external(system) flac library" OFF)
 option(FT2_ENABLE_VENDOR_TESTS "Enable tests registered by bundled third-party subprojects" OFF)
+option(FT2_ENABLE_TTF "Enable optional SDL_ttf-backed scalable UI font rendering" OFF)
 
 # ----- Dexed FM synth integration (optional) -----
 option(WITH_DEXED "Build with embedded Dexed FM synth" ON)
@@ -114,6 +115,16 @@ endif()
 
 target_link_libraries(ft2-dxm
     PRIVATE Threads::Threads ${SDL2_LIBRARIES})
+
+if(FT2_ENABLE_TTF)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SDL2TTF QUIET IMPORTED_TARGET SDL2_ttf)
+    if(NOT SDL2TTF_FOUND)
+        message(FATAL_ERROR "FT2_ENABLE_TTF requires the SDL2_ttf development package (Debian/Ubuntu: libsdl2-ttf-dev, Fedora: SDL2_ttf-devel, Arch: sdl2_ttf).")
+    endif()
+    target_compile_definitions(ft2-dxm PRIVATE FT2_ENABLE_TTF)
+    target_link_libraries(ft2-dxm PRIVATE PkgConfig::SDL2TTF)
+endif()
 
 target_compile_definitions(ft2-dxm
     PRIVATE HAS_MIDI

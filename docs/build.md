@@ -45,6 +45,20 @@ sudo dnf install cmake gcc gcc-c++ SDL2-devel alsa-lib-devel
 sudo pacman -S base-devel cmake sdl2 alsa-lib
 ```
 
+Optional SDL_ttf development packages are only required when building with
+`-DFT2_ENABLE_TTF=ON`:
+
+```sh
+# Debian/Ubuntu
+sudo apt install libsdl2-ttf-dev
+
+# Fedora
+sudo dnf install SDL2_ttf-devel
+
+# Arch
+sudo pacman -S sdl2_ttf
+```
+
 Build Release:
 
 ```sh
@@ -73,6 +87,7 @@ Pass extra CMake arguments after `--`:
 
 ```sh
 ./build-linux.sh --fresh -- -DWITH_DEXED=ON
+./build-linux.sh --fresh -- -DFT2_ENABLE_TTF=ON
 ```
 
 Useful environment overrides:
@@ -108,7 +123,22 @@ Put generated build directories outside the repository:
 ./scripts/test-linux.sh --fresh --build-root /tmp/ft2-linux-tests -j 4
 ```
 
-ASan defaults to `detect_leaks=1:halt_on_error=1:abort_on_error=1`. LeakSanitizer may fail under ptrace-restricted sandboxes or debuggers; rerun the command directly in a normal shell if leak checks fail before the tests start.
+ASan defaults to `detect_leaks=1:halt_on_error=1:abort_on_error=1`. LeakSanitizer may fail under ptrace-restricted sandboxes or debuggers; rerun the command directly in a normal shell if leak checks fail before the tests start. To keep address-sanitizer coverage in such an environment, rerun the ASan test directory with leak detection disabled:
+
+```sh
+ASAN_OPTIONS=detect_leaks=0 ctest --test-dir /tmp/ft2-linux-tests/build-linux-asan --output-on-failure
+```
+
+## UI Renderer And Fonts
+
+The high-DPI/vector renderer compatibility layer lives in `src/ft2_ui_render.*`.
+Classic `ft2_gui.c` primitives delegate to it while preserving the 632x400
+software framebuffer output. SDL_ttf-backed scalable text is available behind
+`-DFT2_ENABLE_TTF=ON`; without that flag, the API compiles as a safe no-op and
+the application keeps using the built-in bitmap fonts.
+
+See [UI renderer](ui-renderer.md) for the migration contract and renderer
+self-test coverage.
 
 ## GUI Designer
 
