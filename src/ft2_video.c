@@ -73,6 +73,53 @@ static double dRunningFrameDuration, dAvgFPS;
 
 static void drawReplayerData(void);
 
+static void getRendererOutputSize(int32_t *width, int32_t *height)
+{
+	int32_t outputW = 0;
+	int32_t outputH = 0;
+
+	if (video.renderer != NULL)
+	{
+		int sdlW = 0;
+		int sdlH = 0;
+		if (SDL_GetRendererOutputSize(video.renderer, &sdlW, &sdlH) == 0 && sdlW > 0 && sdlH > 0)
+		{
+			outputW = sdlW;
+			outputH = sdlH;
+		}
+	}
+
+	if (outputW <= 0 || outputH <= 0)
+	{
+		int sdlW = 0;
+		int sdlH = 0;
+		SDL_GL_GetDrawableSize(video.window, &sdlW, &sdlH);
+		if (sdlW > 0 && sdlH > 0)
+		{
+			outputW = sdlW;
+			outputH = sdlH;
+		}
+	}
+
+	if (outputW <= 0 || outputH <= 0)
+	{
+		outputW = video.windowW;
+		outputH = video.windowH;
+	}
+
+	*width = MAX(outputW, 1);
+	*height = MAX(outputH, 1);
+}
+
+static void updateDpiScaleFromRendererOutput(void)
+{
+	int32_t widthInPixels, heightInPixels;
+
+	getRendererOutputSize(&widthInPixels, &heightInPixels);
+	video.dDpiZoomFactorX = (double)widthInPixels / (double)MAX(video.windowW, 1);
+	video.dDpiZoomFactorY = (double)heightInPixels / (double)MAX(video.windowH, 1);
+}
+
 void resetFPSCounter(void)
 {
 	editor.framesPassed = 0;
@@ -278,7 +325,6 @@ void showErrorMsgBox(const char *fmt, ...)
 
 static void updateRenderSizeVars(void)
 {
-	int32_t widthInPixels, heightInPixels;
 	SDL_DisplayMode dm;
 
 	int32_t di = SDL_GetWindowDisplayIndex(video.window);
@@ -304,25 +350,19 @@ static void updateRenderSizeVars(void)
 			video.renderW = video.windowW;
 			video.renderH = video.windowH;
 
-			// get DPI zoom factors (Macs with Retina, etc... returns 1.0 if no zoom)
-			SDL_GL_GetDrawableSize(video.window, &widthInPixels, &heightInPixels);
-			video.dDpiZoomFactorX = (double)widthInPixels / video.windowW;
-			video.dDpiZoomFactorY = (double)heightInPixels / video.windowH;
+			updateDpiScaleFromRendererOutput();
 		}
 		else
 		{
 			// centered windowed fullscreen, with pixel-perfect integer upscaling
 
-			const int32_t maxUpscaleFactor = MIN(video.windowW / SCREEN_W, video.windowH / SCREEN_H);
+			const int32_t maxUpscaleFactor = MAX(1, MIN(video.windowW / SCREEN_W, video.windowH / SCREEN_H));
 			video.renderW = SCREEN_W * maxUpscaleFactor;
 			video.renderH = SCREEN_H * maxUpscaleFactor;
 			video.renderX = (video.windowW - video.renderW) / 2;
 			video.renderY = (video.windowH - video.renderH) / 2;
 
-			// get DPI zoom factors (Macs with Retina, etc... returns 1.0 if no zoom)
-			SDL_GL_GetDrawableSize(video.window, &widthInPixels, &heightInPixels);
-			video.dDpiZoomFactorX = (double)widthInPixels / video.windowW;
-			video.dDpiZoomFactorY = (double)heightInPixels / video.windowH;
+			updateDpiScaleFromRendererOutput();
 
 			video.renderRect.x = (int32_t)floor(video.renderX * video.dDpiZoomFactorX);
 			video.renderRect.y = (int32_t)floor(video.renderY * video.dDpiZoomFactorY);
@@ -337,15 +377,13 @@ static void updateRenderSizeVars(void)
 
 		SDL_GetWindowSize(video.window, &video.renderW, &video.renderH);
 
-		// get DPI zoom factors (Macs with Retina, etc... returns 1.0 if no zoom)
-		SDL_GL_GetDrawableSize(video.window, &widthInPixels, &heightInPixels);
-		video.dDpiZoomFactorX = (double)widthInPixels / video.windowW;
-		video.dDpiZoomFactorY = (double)heightInPixels / video.windowH;
+		updateDpiScaleFromRendererOutput();
 	}
 
 	// "hardware mouse" calculations
-	video.mouseCursorUpscaleFactor = MIN(video.renderW / SCREEN_W, video.renderH / SCREEN_H);
-	ft2_ui_render_set_metrics((double)video.renderW / SCREEN_W, (double)video.renderH / SCREEN_H,
+	video.mouseCursorUpscaleFactor = MAX(1, MIN(video.renderW / SCREEN_W, video.renderH / SCREEN_H));
+	ft2_ui_render_set_metrics(((double)video.renderW * video.dDpiZoomFactorX) / SCREEN_W,
+		((double)video.renderH * video.dDpiZoomFactorY) / SCREEN_H,
 		video.dDpiZoomFactorX, video.dDpiZoomFactorY);
 	createMouseCursors();
 }
@@ -1011,6 +1049,7 @@ bool setupRenderer(void)
 		return false;
 
 	ft2_ui_render_reset();
+	ft2_ui_render_configure_from_env();
 	updateRenderSizeVars();
 	updateMouseScaling();
 

@@ -17,6 +17,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy compatibility 
 
 option(EXTERNAL_LIBFLAC "use external(system) flac library" OFF)
 option(FT2_ENABLE_VENDOR_TESTS "Enable tests registered by bundled third-party subprojects" OFF)
+option(FT2_ENABLE_VECTOR_UI "Enable selectable high-DPI/vector UI renderer backend contract" ON)
 option(FT2_ENABLE_TTF "Enable optional SDL_ttf-backed scalable UI font rendering" OFF)
 
 # ----- Dexed FM synth integration (optional) -----
@@ -124,6 +125,10 @@ if(FT2_ENABLE_TTF)
     endif()
     target_compile_definitions(ft2-dxm PRIVATE FT2_ENABLE_TTF)
     target_link_libraries(ft2-dxm PRIVATE PkgConfig::SDL2TTF)
+endif()
+
+if(FT2_ENABLE_VECTOR_UI)
+    target_compile_definitions(ft2-dxm PRIVATE FT2_ENABLE_VECTOR_UI)
 endif()
 
 target_compile_definitions(ft2-dxm
@@ -316,5 +321,10 @@ target_sources(ft2-dxm PRIVATE src/ft2_dxi.c)
 if(BUILD_TESTING)
     add_test(NAME ft2_version COMMAND ft2-dxm --version)
     add_test(NAME ft2_self_test COMMAND ft2-dxm --self-test)
+    if(FT2_ENABLE_VECTOR_UI)
+        add_test(NAME ft2_self_test_vector_theme COMMAND ft2-dxm --self-test)
+        set_tests_properties(ft2_self_test_vector_theme PROPERTIES
+            ENVIRONMENT "FT2_UI_BACKEND=vector;FT2_UI_THEME=renoise")
+    endif()
     add_test(NAME ft2_v2_stress COMMAND ft2-dxm --v2-stress-test)
 endif()

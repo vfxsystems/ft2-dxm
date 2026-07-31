@@ -422,6 +422,8 @@ static bool runSelfTest(void)
 		return false;
 	}
 
+	ft2_ui_render_reset();
+	ft2_ui_render_configure_from_env();
 	if (!ft2_ui_render_self_test(macroErr, sizeof (macroErr)))
 	{
 		fprintf(stderr, "self-test: %s\n", macroErr);

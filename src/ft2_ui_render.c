@@ -16,6 +16,7 @@
 typedef struct ft2_ui_render_state_t
 {
 	ft2_ui_render_backend_t backend;
+	ft2_ui_theme_t theme;
 	ft2_ui_render_metrics_t metrics;
 #ifdef FT2_ENABLE_TTF
 	bool ttfInitialized;
@@ -25,9 +26,123 @@ typedef struct ft2_ui_render_state_t
 
 static ft2_ui_render_state_t uiRender;
 
+typedef struct ft2_ui_theme_desc_t
+{
+	ft2_ui_theme_t theme;
+	const char *id;
+	const char *label;
+	uint32_t pal[16];
+} ft2_ui_theme_desc_t;
+
+#define PALRGB(r, g, b) RGB32((r), (g), (b))
+#define PAL6(r, g, b) PALRGB(P6_TO_P8(r), P6_TO_P8(g), P6_TO_P8(b))
+
+static const ft2_ui_theme_desc_t uiThemeDescs[FT2_UI_THEME_COUNT] =
+{
+	{
+		FT2_UI_THEME_CLASSIC, "classic", "FT2 Arctic",
+		{
+			PAL6(0, 0, 0),    PAL6(30, 38, 63), PAL6(0, 0, 17),   PAL6(63, 63, 63),
+			PAL6(27, 36, 40), PAL6(63, 63, 63), PAL6(40, 40, 40), PAL6(0, 0, 0),
+			PAL6(10, 13, 14), PAL6(49, 63, 63), PAL6(15, 15, 15), PAL6(63, 63, 63),
+			PAL6(63, 63, 63), PAL6(63, 63, 63), PAL6(63, 63, 63), PAL6(63, 63, 63)
+		}
+	},
+	{
+		FT2_UI_THEME_OP1, "op1", "OP-1 Inspired",
+		{
+			PALRGB(18, 18, 16),    PALRGB(60, 69, 67),    PALRGB(225, 96, 74),   PALRGB(251, 246, 231),
+			PALRGB(222, 216, 195), PALRGB(34, 34, 31),    PALRGB(188, 184, 166), PALRGB(24, 24, 22),
+			PALRGB(165, 158, 141), PALRGB(255, 252, 241), PALRGB(238, 183, 64),  PALRGB(49, 49, 44),
+			PALRGB(79, 154, 172),  PALRGB(104, 181, 121), PALRGB(225, 96, 74),   PALRGB(251, 246, 231)
+		}
+	},
+	{
+		FT2_UI_THEME_RENOISE, "renoise", "Renoise Inspired",
+		{
+			PALRGB(12, 13, 12),   PALRGB(172, 216, 113), PALRGB(33, 37, 35),   PALRGB(230, 235, 220),
+			PALRGB(42, 46, 43),   PALRGB(226, 235, 212), PALRGB(62, 68, 64),   PALRGB(10, 11, 10),
+			PALRGB(24, 28, 26),   PALRGB(119, 179, 97),  PALRGB(29, 31, 30),   PALRGB(92, 105, 97),
+			PALRGB(222, 176, 72), PALRGB(88, 158, 211),  PALRGB(201, 91, 82),  PALRGB(235, 235, 220)
+		}
+	},
+	{
+		FT2_UI_THEME_VSCODE, "vscode", "VS Code Inspired",
+		{
+			PALRGB(10, 10, 10),    PALRGB(156, 220, 254), PALRGB(24, 24, 24),    PALRGB(220, 220, 220),
+			PALRGB(37, 37, 38),    PALRGB(225, 225, 225), PALRGB(51, 51, 51),    PALRGB(0, 0, 0),
+			PALRGB(30, 30, 30),    PALRGB(86, 156, 214),  PALRGB(45, 45, 48),    PALRGB(63, 63, 70),
+			PALRGB(197, 134, 192), PALRGB(78, 201, 176),  PALRGB(206, 145, 120), PALRGB(220, 220, 220)
+		}
+	}
+};
+
 static int32_t iroundf32(float v)
 {
 	return (int32_t)((v < 0.0f) ? (v - 0.5f) : (v + 0.5f));
+}
+
+static bool strEqualFold(const char *a, const char *b)
+{
+	if (a == NULL || b == NULL)
+		return false;
+
+	while (*a != '\0' || *b != '\0')
+	{
+		while (*a == '_' || *a == '-' || *a == ' ')
+			a++;
+		while (*b == '_' || *b == '-' || *b == ' ')
+			b++;
+
+		char ca = *a;
+		char cb = *b;
+
+		if (ca == '\0' || cb == '\0')
+			return ca == cb;
+
+		a++;
+		b++;
+
+		if (ca >= 'A' && ca <= 'Z')
+			ca = (char)(ca - 'A' + 'a');
+		if (cb >= 'A' && cb <= 'Z')
+			cb = (char)(cb - 'A' + 'a');
+
+		if (ca != cb)
+			return false;
+	}
+
+	return true;
+}
+
+static void refreshFrameBufferPalette(void)
+{
+	if (video.frameBuffer == NULL)
+		return;
+
+	for (int32_t i = 0; i < SCREEN_W*SCREEN_H; i++)
+		video.frameBuffer[i] = video.palette[(video.frameBuffer[i] >> 24) & 15];
+}
+
+static void deriveClonePaletteEntries(void)
+{
+#define LOOP_PIN_COL_SUB 96
+#define TEXT_MARK_COLOR 0x0078D7
+#define BOX_SELECT_COLOR 0x7F7F7F
+
+	video.palette[PAL_TEXTMRK] = (PAL_TEXTMRK << 24) | TEXT_MARK_COLOR;
+	video.palette[PAL_BOXSLCT] = (PAL_BOXSLCT << 24) | BOX_SELECT_COLOR;
+
+	int32_t r = RGB32_R(video.palette[PAL_PATTEXT]);
+	int32_t g = RGB32_G(video.palette[PAL_PATTEXT]);
+	int32_t b = RGB32_B(video.palette[PAL_PATTEXT]);
+
+	r = MAX(r - LOOP_PIN_COL_SUB, 0);
+	g = MAX(g - LOOP_PIN_COL_SUB, 0);
+	b = MAX(b - LOOP_PIN_COL_SUB, 0);
+
+	video.palette[PAL_LOOPPIN] = (PAL_LOOPPIN << 24) | RGB32(r, g, b);
+	video.palette[PAL_CUSTOM] = (PAL_CUSTOM << 24);
 }
 
 static bool clipRectToScreen(int32_t *x, int32_t *y, int32_t *w, int32_t *h)
@@ -162,6 +277,7 @@ void ft2_ui_render_reset(void)
 	ft2_ui_render_shutdown();
 	memset(&uiRender, 0, sizeof (uiRender));
 	uiRender.backend = FT2_UI_RENDER_BACKEND_SOFTWARE;
+	uiRender.theme = FT2_UI_THEME_CLASSIC;
 	uiRender.metrics.logicalToOutputX = 1.0;
 	uiRender.metrics.logicalToOutputY = 1.0;
 	uiRender.metrics.dpiScaleX = 1.0;
@@ -190,12 +306,49 @@ void ft2_ui_render_set_backend(ft2_ui_render_backend_t backend)
 	if (backend != FT2_UI_RENDER_BACKEND_SOFTWARE && backend != FT2_UI_RENDER_BACKEND_SDL_VECTOR)
 		backend = FT2_UI_RENDER_BACKEND_SOFTWARE;
 
+#ifndef FT2_ENABLE_VECTOR_UI
+	if (backend == FT2_UI_RENDER_BACKEND_SDL_VECTOR)
+		backend = FT2_UI_RENDER_BACKEND_SOFTWARE;
+#endif
+
 	uiRender.backend = backend;
 }
 
 ft2_ui_render_backend_t ft2_ui_render_get_backend(void)
 {
 	return uiRender.backend;
+}
+
+bool ft2_ui_render_set_backend_name(const char *name)
+{
+	if (name == NULL || name[0] == '\0' || strEqualFold(name, "software") || strEqualFold(name, "classic"))
+	{
+		ft2_ui_render_set_backend(FT2_UI_RENDER_BACKEND_SOFTWARE);
+		return true;
+	}
+
+	if (strEqualFold(name, "vector") || strEqualFold(name, "sdlvector") || strEqualFold(name, "sdl"))
+	{
+#ifdef FT2_ENABLE_VECTOR_UI
+		ft2_ui_render_set_backend(FT2_UI_RENDER_BACKEND_SDL_VECTOR);
+		return true;
+#else
+		ft2_ui_render_set_backend(FT2_UI_RENDER_BACKEND_SOFTWARE);
+		return false;
+#endif
+	}
+
+	return false;
+}
+
+const char *ft2_ui_render_backend_name(ft2_ui_render_backend_t backend)
+{
+	switch (backend)
+	{
+		case FT2_UI_RENDER_BACKEND_SDL_VECTOR: return "vector";
+		case FT2_UI_RENDER_BACKEND_SOFTWARE:
+		default: return "software";
+	}
 }
 
 void ft2_ui_render_set_metrics(double logicalToOutputX, double logicalToOutputY, double dpiScaleX, double dpiScaleY)
@@ -220,6 +373,69 @@ ft2_ui_render_metrics_t ft2_ui_render_get_metrics(void)
 		metrics.dpiScaleY = 1.0;
 
 	return metrics;
+}
+
+bool ft2_ui_render_set_theme(ft2_ui_theme_t theme, bool redrawScreen)
+{
+	if (theme < 0 || theme >= FT2_UI_THEME_COUNT)
+		return false;
+
+	const ft2_ui_theme_desc_t *desc = &uiThemeDescs[theme];
+	for (int32_t i = 0; i < 16; i++)
+		video.palette[i] = (i << 24) | desc->pal[i];
+
+	deriveClonePaletteEntries();
+	uiRender.theme = theme;
+
+	if (redrawScreen)
+		refreshFrameBufferPalette();
+
+	return true;
+}
+
+bool ft2_ui_render_set_theme_name(const char *name, bool redrawScreen)
+{
+	if (name == NULL || name[0] == '\0')
+		return false;
+
+	for (int32_t i = 0; i < FT2_UI_THEME_COUNT; i++)
+	{
+		if (strEqualFold(name, uiThemeDescs[i].id) || strEqualFold(name, uiThemeDescs[i].label))
+			return ft2_ui_render_set_theme(uiThemeDescs[i].theme, redrawScreen);
+	}
+
+	if (strEqualFold(name, "op") || strEqualFold(name, "op1inspired"))
+		return ft2_ui_render_set_theme(FT2_UI_THEME_OP1, redrawScreen);
+
+	if (strEqualFold(name, "vs") || strEqualFold(name, "vscodeinspired"))
+		return ft2_ui_render_set_theme(FT2_UI_THEME_VSCODE, redrawScreen);
+
+	return false;
+}
+
+ft2_ui_theme_t ft2_ui_render_get_theme(void)
+{
+	return uiRender.theme;
+}
+
+const char *ft2_ui_render_theme_name(ft2_ui_theme_t theme)
+{
+	if (theme < 0 || theme >= FT2_UI_THEME_COUNT)
+		theme = FT2_UI_THEME_CLASSIC;
+
+	return uiThemeDescs[theme].label;
+}
+
+void ft2_ui_render_configure_from_env(void)
+{
+	const char *backend = getenv("FT2_UI_BACKEND");
+	const char *theme = getenv("FT2_UI_THEME");
+
+	if (backend != NULL && backend[0] != '\0')
+		(void)ft2_ui_render_set_backend_name(backend);
+
+	if (theme != NULL && theme[0] != '\0')
+		(void)ft2_ui_render_set_theme_name(theme, false);
 }
 
 void ft2_ui_render_clear_rect(int32_t x, int32_t y, int32_t w, int32_t h)
@@ -488,6 +704,36 @@ bool ft2_ui_render_self_test(char *errBuf, size_t errBufSize)
 	    !expectPixel(buffer, 35, 44, palette[PAL_DSKTOP2], errBuf, errBufSize, "framework") ||
 	    !expectPixel(buffer, 31, 41, palette[PAL_DESKTOP], errBuf, errBufSize, "framework"))
 	{
+		free(buffer);
+		return false;
+	}
+
+	ft2_ui_render_set_metrics(2.0, 3.0, 1.5, 2.5);
+	const ft2_ui_render_metrics_t metrics = ft2_ui_render_get_metrics();
+	if (metrics.logicalToOutputX != 2.0 || metrics.logicalToOutputY != 3.0 ||
+	    metrics.dpiScaleX != 1.5 || metrics.dpiScaleY != 2.5)
+	{
+		snprintf(errBuf, errBufSize, "ui-render metrics mismatch");
+		free(buffer);
+		return false;
+	}
+
+	ft2_ui_render_set_backend(FT2_UI_RENDER_BACKEND_SDL_VECTOR);
+#ifdef FT2_ENABLE_VECTOR_UI
+	if (ft2_ui_render_get_backend() != FT2_UI_RENDER_BACKEND_SDL_VECTOR)
+#else
+	if (ft2_ui_render_get_backend() != FT2_UI_RENDER_BACKEND_SOFTWARE)
+#endif
+	{
+		snprintf(errBuf, errBufSize, "ui-render backend selection mismatch");
+		free(buffer);
+		return false;
+	}
+
+	if (!ft2_ui_render_set_theme_name("op-1", false) || ft2_ui_render_get_theme() != FT2_UI_THEME_OP1 ||
+	    video.palette[PAL_PATTEXT] != ((PAL_PATTEXT << 24) | RGB32(60, 69, 67)))
+	{
+		snprintf(errBuf, errBufSize, "ui-render theme selection mismatch");
 		free(buffer);
 		return false;
 	}
