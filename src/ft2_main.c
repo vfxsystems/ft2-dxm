@@ -4,6 +4,7 @@
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <math.h> // modf()
 #include <string.h>
@@ -15,6 +16,7 @@
 #include <unistd.h> // chdir()
 #endif
 #include "ft2_header.h"
+#include "ft2_v2.h"
 #include "ft2_v2_preparations.h"
 #include "ft2_gui.h"
 #include "ft2_video.h"
@@ -46,6 +48,7 @@
 
 static void initializeVars(void);
 static bool runSelfTest(void);
+static bool runV2StressTest(void);
 static void cleanUpAndExit(void); // never call this inside the main loop
 #ifdef __APPLE__
 static void osxSetDirToProgramDirFromArgs(char **argv);
@@ -78,6 +81,10 @@ int main(int argc, char *argv[])
 		else if (strcmp(argv[i], "--self-test") == 0)
 		{
 			return runSelfTest() ? 0 : 1;
+		}
+		else if (strcmp(argv[i], "--v2-stress-test") == 0)
+		{
+			return runV2StressTest() ? 0 : 1;
 		}
 		else
 		if (strcmp(argv[i], "--debug") == 0)
@@ -427,6 +434,126 @@ static bool runSelfTest(void)
 
 	printf("ft2-dxm self-test passed\n");
 	return true;
+}
+
+static bool runV2StressTest(void)
+{
+	float left[256], right[256];
+	uint8_t *patch = NULL, *blob = NULL;
+	bool ok = false;
+
+	initializeVars();
+	editor.curInstr = 1;
+
+	if (!allocateInstr(editor.curInstr))
+	{
+		fprintf(stderr, "v2-stress-test: allocateInstr() failed\n");
+		return false;
+	}
+
+	instr[editor.curInstr]->useV2 = true;
+	ft2_v2_init(44100);
+
+	const int patchSize = ft2_v2_get_patch_size();
+	if (patchSize <= 0)
+	{
+		fprintf(stderr, "v2-stress-test: invalid V2 patch size\n");
+		goto cleanup;
+	}
+
+	patch = (uint8_t *)malloc((size_t)patchSize);
+	if (patch == NULL)
+	{
+		fprintf(stderr, "v2-stress-test: patch allocation failed\n");
+		goto cleanup;
+	}
+
+	for (int i = 0; i < 128; i++)
+	{
+		const uint8_t note = (uint8_t)(48 + (i % 24));
+
+		memset(left, 0, sizeof (left));
+		memset(right, 0, sizeof (right));
+
+		if (!ft2_v2_load_factory_preset_for_instrument(editor.curInstr, i))
+		{
+			fprintf(stderr, "v2-stress-test: factory preset %d failed\n", i);
+			goto cleanup;
+		}
+
+		ft2_v2_send_midi_to_instrument(editor.curInstr, 0x90, note, 100);
+		ft2_v2_render_for_channel(editor.curInstr, left, right, 128, 0);
+
+		if (ft2_v2_get_patch_data(editor.curInstr, patch, patchSize) != patchSize)
+		{
+			fprintf(stderr, "v2-stress-test: patch export failed at preset %d\n", i);
+			goto cleanup;
+		}
+
+		ft2_v2_set_mod_count_for_instrument(editor.curInstr, 255);
+		ft2_v2_set_mod_slot_for_instrument(editor.curInstr, 254, 255, 255, 255);
+		if (!ft2_v2_load_patch_for_instrument(editor.curInstr, patch, (size_t)patchSize))
+		{
+			fprintf(stderr, "v2-stress-test: patch reload failed at preset %d\n", i);
+			goto cleanup;
+		}
+
+		ft2_v2_send_midi_to_instrument(editor.curInstr, 0x80, note, 0);
+		ft2_v2_render_for_channel(editor.curInstr, left, right, 128, 0);
+	}
+
+	const size_t blobSize = ft2_v2_serialize_state(editor.curInstr, NULL, 0);
+	if (blobSize == 0)
+	{
+		fprintf(stderr, "v2-stress-test: state size query failed\n");
+		goto cleanup;
+	}
+
+	blob = (uint8_t *)malloc(blobSize);
+	if (blob == NULL)
+	{
+		fprintf(stderr, "v2-stress-test: state allocation failed\n");
+		goto cleanup;
+	}
+
+	if (ft2_v2_serialize_state(editor.curInstr, blob, blobSize) != blobSize)
+	{
+		fprintf(stderr, "v2-stress-test: state serialization failed\n");
+		goto cleanup;
+	}
+
+	if (!ft2_v2_deserialize_state(editor.curInstr, blob, blobSize))
+	{
+		fprintf(stderr, "v2-stress-test: state deserialization failed\n");
+		goto cleanup;
+	}
+
+	memset(left, 0, sizeof (left));
+	memset(right, 0, sizeof (right));
+	ft2_v2_send_midi_to_instrument(editor.curInstr, 0x90, 60, 100);
+	ft2_v2_render_for_channel(editor.curInstr, left, right, 256, 0);
+	ft2_v2_panic();
+	ft2_v2_render_for_channel(editor.curInstr, left, right, 256, 0);
+
+	if (ft2_v2_get_active_voice_count(editor.curInstr) != 0)
+	{
+		fprintf(stderr, "v2-stress-test: panic left active voices\n");
+		goto cleanup;
+	}
+
+	ok = true;
+
+cleanup:
+	free(blob);
+	free(patch);
+	ft2_v2_clear_persistent_state(editor.curInstr);
+	ft2_v2_shutdown();
+	freeInstr(editor.curInstr);
+
+	if (ok)
+		printf("ft2-dxm V2 stress test passed\n");
+
+	return ok;
 }
 
 static void cleanUpAndExit(void) // never call this inside the main loop!
