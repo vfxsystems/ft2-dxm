@@ -16,7 +16,9 @@ Publication inventory starts immediately; implementation proceeds through baseli
 - `src/ft2_keyboard.c:keyUpHandler()` can return for text/modal state and gates note release on cursor/modifier state. These are candidate lost-release paths, not confirmed reproductions.
 - `src/ft2_audio.c` applies master effects and master fader in the live callback; `mixReplayerTickToBuffer()` directly mixes and converts output. Trace the full callers to establish live/export parity. `setAudioAmp()` also includes master gain in a normalization value; determine whether that value is consumed before concluding gain is doubled.
 - Both output conversion helpers apply `tanhf()` unconditionally. Characterize its effect on level and distortion before deciding output protection behavior.
-- Git tracks `src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware - Copy.bin`, `rom.bin`, several archives, and SDL DLLs. Audit contents and provenance before publication; ignore rules do not remove tracked files or historical blobs.
+- The sanitized `master` history excludes local OsTIrus firmware/runtime data,
+  `gfxassets/`, and private assistant transcripts. OsTIrus remains compiled and
+  accepts an owner-supplied `rom.bin` at runtime; source exports enforce the same exclusions.
 - The README largely describes upstream FT2, and `LICENSES.txt` does not inventory the embedded synth integrations.
 
 ## 1. Establish a baseline and reproducible failures
@@ -77,7 +79,7 @@ Done when: the exact tree and history proposed for upload pass the inventory, de
 - Keep firmware-dependent tests opt-in and report skips visibly. Public CI must have meaningful coverage of the other engines and mixer.
 - Run the final matrix once on the release candidate, including actual UI/input and audio-device smoke checks, DXM/DXI round trips, old-project playback, WAV export, and an extended playback/navigation session.
 - Record results, supported/untested platforms, remaining non-blocking issues, and any compatibility changes in release notes.
-- Review the publication candidate and destination before upload. This plan does not perform an upload or history rewrite.
+- Review the publication candidate and destination before upload. Replacing a pre-sanitation remote branch requires an explicit force-with-lease publication step.
 
 Release gate: no reproducible stuck notes or broken V2 navigation; mixer/gain contracts verified; no unexplained live/export mismatch; no unresolved release-blocking sanitizer failures; source/history audit complete; clean build and documentation validated. Cosmetic improvements can remain tracked issues.
 
