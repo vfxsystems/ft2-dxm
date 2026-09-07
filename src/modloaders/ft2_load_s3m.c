@@ -55,6 +55,15 @@ static uint8_t pattBuff[12288];
 
 static int8_t countS3MChannels(uint16_t antPtn);
 
+static size_t s3mEventPayloadSize(uint8_t descriptor)
+{
+	size_t size = 0;
+	if (descriptor & 32) size += 2;
+	if (descriptor & 64) size += 1;
+	if (descriptor & 128) size += 2;
+	return size;
+}
+
 bool loadS3M(FILE *f, uint32_t filesize)
 {
 	uint8_t alastnfo[32], alastefx[32], alastvibnfo[32], s3mLastGInstr[32];
@@ -80,7 +89,9 @@ bool loadS3M(FILE *f, uint32_t filesize)
 		return false;
 	}
 
-	if (hdr.numSamples > MAX_INST || hdr.numOrders > MAX_ORDERS || hdr.numPatterns > MAX_PATTERNS ||
+	if (hdr.numSamples < 0 || hdr.numSamples > MAX_INST ||
+		hdr.numOrders < 1 || hdr.numOrders > MAX_ORDERS ||
+		hdr.numPatterns < 0 || hdr.numPatterns > MAX_PATTERNS ||
 		hdr.type != 16 || hdr.version < 1 || hdr.version > 2)
 	{
 		loaderMsgBox("Error loading .s3m: Incompatible module!");
@@ -169,30 +180,44 @@ bool loadS3M(FILE *f, uint32_t filesize)
 		memset(alastvibnfo, 0, sizeof (alastvibnfo));
 		memset(s3mLastGInstr, 0, sizeof (s3mLastGInstr));
 
-		fseek(f, patternOffsets[i], SEEK_SET);
-		if (feof(f))
-			continue;
+		if ((uint32_t)patternOffsets[i] > filesize - 2u ||
+			fseek(f, patternOffsets[i], SEEK_SET) != 0)
+		{
+			loaderMsgBox("Error loading .s3m: Pattern offset is outside the file!");
+			return false;
+		}
 
-		if (fread(&j, 2, 1, f) != 1)
+		uint16_t packedLength;
+		if (fread(&packedLength, sizeof (packedLength), 1, f) != 1)
 		{
 			loaderMsgBox("General I/O error during loading! Is the file in use?");
 			return false;
 		}
 
-		if (j > 0 && j <= 12288)
+		if (packedLength > 0 && packedLength <= sizeof (pattBuff))
 		{
+			if ((uint32_t)patternOffsets[i] + 2u + packedLength > filesize)
+			{
+				loaderMsgBox("Error loading .s3m: Truncated pattern data!");
+				return false;
+			}
+
 			if (!allocateTmpPatt(i, 64))
 			{
 				loaderMsgBox("Not enough memory!");
 				return false;
 			}
 
-			fread(pattBuff, j, 1, f);
+			if (fread(pattBuff, 1, packedLength, f) != packedLength)
+			{
+				loaderMsgBox("General I/O error during loading! Is the file in use?");
+				return false;
+			}
 
 			k = 0;
 			kk = 0;
 
-			while (k < j && kk < 64)
+			while (k < packedLength && kk < 64)
 			{
 				uint8_t bits = pattBuff[k++];
 
@@ -203,6 +228,12 @@ bool loadS3M(FILE *f, uint32_t filesize)
 				else
 				{
 					ii = bits & 31;
+					const size_t payloadSize = s3mEventPayloadSize(bits);
+					if (payloadSize > (size_t)packedLength - (size_t)k)
+					{
+						loaderMsgBox("Error loading .s3m: Truncated pattern event!");
+						return false;
+					}
 
 					memset(&tmpNote, 0, sizeof (tmpNote));
 
@@ -520,7 +551,12 @@ bool loadS3M(FILE *f, uint32_t filesize)
 		if (sampleOffsets[i] == 0)
 			continue;
 
-		fseek(f, sampleOffsets[i], SEEK_SET);
+		if ((uint32_t)sampleOffsets[i] > filesize - sizeof (smpHdr) ||
+			fseek(f, sampleOffsets[i], SEEK_SET) != 0)
+		{
+			loaderMsgBox("Error loading .s3m: Sample header offset is outside the file!");
+			return false;
+		}
 
 		if (fread(&smpHdr, 1, sizeof (smpHdr), f) != sizeof (smpHdr))
 		{
@@ -536,7 +572,8 @@ bool loadS3M(FILE *f, uint32_t filesize)
 		}
 		else if (smpHdr.type == 1)
 		{
-			int32_t offsetInFile = ((smpHdr.offsetInFileH << 16) | smpHdr.offsetInFile) << 4;
+			const uint32_t offsetInFile = (((uint32_t)smpHdr.offsetInFileH << 16) |
+				(uint32_t)smpHdr.offsetInFile) << 4;
 			if ((smpHdr.flags & (255-1-2-4)) != 0 || smpHdr.packFlag != 0)
 			{
 				loaderMsgBox("Error loading .s3m: Incompatible module!");
@@ -544,6 +581,11 @@ bool loadS3M(FILE *f, uint32_t filesize)
 			}
 			else if (offsetInFile > 0 && smpHdr.length > 0)
 			{
+				if (offsetInFile >= filesize)
+				{
+					loaderMsgBox("Error loading .s3m: Sample data offset is outside the file!");
+					return false;
+				}
 				if (!allocateTmpInstr((int16_t)(1 + i)))
 				{
 					loaderMsgBox("Not enough memory!");
@@ -559,17 +601,24 @@ bool loadS3M(FILE *f, uint32_t filesize)
 				memcpy(s->name, smpHdr.name, 22);
 
 				// non-FT2: fixes "miracle man.s3m" and other broken S3Ms
-				if (offsetInFile+smpHdr.length > (int32_t)filesize)
-					smpHdr.length = filesize - offsetInFile;
+				if ((uint64_t)offsetInFile + (uint32_t)smpHdr.length > filesize)
+					smpHdr.length = (int32_t)(filesize - offsetInFile);
 
 				bool hasLoop = !!(smpHdr.flags & 1);
 				bool stereoSample = !!(smpHdr.flags & 2);
 				bool sample16Bit = !!(smpHdr.flags & 4);
 
-				if (stereoSample)
-					smpHdr.length <<= 1;
-
-				int32_t lengthInFile = smpHdr.length;
+				uint64_t decodedLength = (uint32_t)smpHdr.length;
+				if (stereoSample) decodedLength *= 2u;
+				uint64_t lengthInFile64 = decodedLength * (sample16Bit ? 2u : 1u);
+				if (decodedLength > INT32_MAX || lengthInFile64 > INT32_MAX ||
+					(uint64_t)offsetInFile + lengthInFile64 > filesize)
+				{
+					loaderMsgBox("Error loading .s3m: Invalid sample length!");
+					return false;
+				}
+				smpHdr.length = (int32_t)decodedLength;
+				const int32_t lengthInFile = (int32_t)lengthInFile64;
 
 				s->length = smpHdr.length;
 				s->volume = smpHdr.volume;
@@ -579,10 +628,7 @@ bool loadS3M(FILE *f, uint32_t filesize)
 				setSampleC4Hz(s, smpHdr.midCFreq);
 
 				if (sample16Bit)
-				{
 					s->flags |= SAMPLE_16BIT;
-					lengthInFile <<= 1;
-				}
 
 				if (!allocateSmpData(s, s->length, sample16Bit, false))
 				{
@@ -600,11 +646,16 @@ bool loadS3M(FILE *f, uint32_t filesize)
 				if (hasLoop)
 					s->flags |= LOOP_FWD;
 
-				fseek(f, offsetInFile, SEEK_SET);
+				if (fseek(f, (long)offsetInFile, SEEK_SET) != 0)
+				{
+					loaderMsgBox("General I/O error during loading! Is the file in use?");
+					return false;
+				}
 
 				if (hdr.version == 1)
 				{
-					fseek(f, lengthInFile, SEEK_CUR); // sample not supported
+					if (fseek(f, lengthInFile, SEEK_CUR) != 0) // sample not supported
+						return false;
 				}
 				else
 				{
@@ -640,6 +691,17 @@ bool loadS3M(FILE *f, uint32_t filesize)
 
 	return true;
 }
+
+#ifdef FT2_STABILITY_TESTS
+bool runS3MLoaderRegressionTests(void)
+{
+	return s3mEventPayloadSize(0) == 0 &&
+		s3mEventPayloadSize(32) == 2 &&
+		s3mEventPayloadSize(64) == 1 &&
+		s3mEventPayloadSize(128) == 2 &&
+		s3mEventPayloadSize(32 | 64 | 128) == 5;
+}
+#endif
 
 static int8_t countS3MChannels(uint16_t antPtn)
 {

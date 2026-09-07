@@ -34,6 +34,8 @@ extern bool runDxmChunkRegressionTests(void);
 extern bool runSampleEditorRegressionTests(void);
 extern bool runTunefishLayoutRegressionTests(void);
 extern bool runRenderSettingsRegressionTests(void);
+extern bool runS3MLoaderRegressionTests(void);
+extern bool runDigiLoaderRegressionTests(void);
 #ifdef HAS_MIDI
 extern bool runMidiRegressionTests(void);
 #endif
@@ -123,6 +125,8 @@ bool runStabilityTests(void)
     CHECK(runSampleEditorRegressionTests(), "sample ownership and stereo paste conversion regression suite");
     CHECK(runTunefishLayoutRegressionTests(), "Tunefish effect-stack level routing regression suite");
     CHECK(runRenderSettingsRegressionTests(), "render settings bounds and option regression suite");
+    CHECK(runS3MLoaderRegressionTests(), "S3M bounded event decoding regression suite");
+    CHECK(runDigiLoaderRegressionTests(), "DIGI truncated event regression suite");
     song.numChannels = 4;
     editor.curInstr = 1;
     editor.curOctave = 4;

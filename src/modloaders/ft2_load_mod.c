@@ -117,7 +117,11 @@ bool loadMOD(FILE *f, uint32_t filesize)
 				for (k = 0; k < songTmp.numChannels; k++)
 				{
 					note_t *p = &patternTmp[a][(j * MAX_CHANNELS) + k];
-					fread(bytes, 1, 4, f);
+					if (fread(bytes, 1, sizeof (bytes), f) != sizeof (bytes))
+					{
+						loaderMsgBox("Error loading MOD: Truncated pattern data!");
+						return false;
+					}
 
 					// period to note
 					uint16_t period = ((bytes[0] & 0x0F) << 8) | bytes[1];
@@ -138,7 +142,11 @@ bool loadMOD(FILE *f, uint32_t filesize)
 				if (tooManyChannels)
 				{
 					int32_t remainingChans = numChannels-songTmp.numChannels;
-					fseek(f, remainingChans*4, SEEK_CUR);
+					if (fseek(f, remainingChans*4, SEEK_CUR) != 0)
+					{
+						loaderMsgBox("Error loading MOD: Truncated pattern data!");
+						return false;
+					}
 				}
 			}
 
@@ -175,7 +183,11 @@ bool loadMOD(FILE *f, uint32_t filesize)
 				for (k = 0; k < 4; k++)
 				{
 					note_t *p = &patternTmp[pattNum][(j * MAX_CHANNELS) + (k+chnOffset)];
-					fread(bytes, 1, 4, f);
+					if (fread(bytes, 1, sizeof (bytes), f) != sizeof (bytes))
+					{
+						loaderMsgBox("Error loading MOD: Truncated pattern data!");
+						return false;
+					}
 
 					// period to note
 					uint16_t period = ((bytes[0] & 0x0F) << 8) | bytes[1];
@@ -344,11 +356,10 @@ bool loadMOD(FILE *f, uint32_t filesize)
 			return false;
 		}
 
-		int32_t bytesRead = (int32_t)fread(s->dataPtr, 1, s->length, f);
-		if (bytesRead < s->length)
+		if (fread(s->dataPtr, 1, s->length, f) != (size_t)s->length)
 		{
-			int32_t bytesToClear = s->length - bytesRead;
-			memset(&s->dataPtr[bytesRead], 0, bytesToClear);
+			loaderMsgBox("Error loading MOD: Truncated sample data!");
+			return false;
 		}
 
 		if (GET_LOOPTYPE(s->flags) == LOOP_OFF) // clear loopLength and loopStart on non-looping samples...
