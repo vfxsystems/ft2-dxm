@@ -36,6 +36,7 @@ extern bool runTunefishLayoutRegressionTests(void);
 extern bool runRenderSettingsRegressionTests(void);
 extern bool runS3MLoaderRegressionTests(void);
 extern bool runDigiLoaderRegressionTests(void);
+extern bool runBEMLoaderRegressionTests(void);
 #ifdef HAS_MIDI
 extern bool runMidiRegressionTests(void);
 #endif
@@ -127,6 +128,7 @@ bool runStabilityTests(void)
     CHECK(runRenderSettingsRegressionTests(), "render settings bounds and option regression suite");
     CHECK(runS3MLoaderRegressionTests(), "S3M bounded event decoding regression suite");
     CHECK(runDigiLoaderRegressionTests(), "DIGI truncated event regression suite");
+    CHECK(runBEMLoaderRegressionTests(), "BEM bounded track decoder regression suite");
     song.numChannels = 4;
     editor.curInstr = 1;
     editor.curOctave = 4;
