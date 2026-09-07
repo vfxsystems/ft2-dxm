@@ -4,7 +4,7 @@
 #include "shared/ft2_ui_schema.h"
 
 static const ft2_ui_bitmap_desc_t dx_complete_layout_bitmaps[DX_COMPLETE_LAYOUT_BMP_COUNT] = {
-    { DX_COMPLETE_LAYOUT_BMP_BASE + 0, 408, 8, 180, 130, 1, 19 },
+    { DX_COMPLETE_LAYOUT_BMP_BASE + 0, 408, 8, 180, 130, 1, 19, 0, 0, 0, 255 },
 };
 
 static const ft2_ui_waveform_view_desc_t dx_complete_layout_waveform_views[DX_COMPLETE_LAYOUT_WAVE_COUNT] = {

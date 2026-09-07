@@ -99,6 +99,7 @@ Select a widget to edit:
 - Trans: palette transparency index for indexed bitmap export
 - Layer: bitmap layer (`0` foreground widget, `1` background, `2` skin)
 - Flags: bitmap flags bitmask (`1` click-through, `2` true-color; true-color is also inferred on export)
+- Opacity: global bitmap opacity (`0` transparent, `255` opaque), multiplied by per-pixel alpha
 - Skin: skin part (`0` none, `1` background, `2` panel, `3` button, `4` knob, `5` slider, `6` meter)
 - Scrollbar nudge: toggle for FT2-style arrow buttons
 
@@ -108,11 +109,11 @@ Edits are inline and non-blocking; Enter commits, Esc cancels.
 
 ### `.gui` design files
 
-Design files store the widget list and editor state. Current version is `FT2GUI_V7`.
+Design files store the widget list and editor state. Current version is `FT2GUI_V8`.
 
 Notes:
 - Captions and names are quoted in current files.
-- `FT2GUI_V2` through `FT2GUI_V6` files are loaded with default foreground bitmap layer/skin metadata.
+- `FT2GUI_V2` through `FT2GUI_V7` remain loadable. Files before V8 use full bitmap opacity.
 
 ### Schema export
 
@@ -154,10 +155,10 @@ The exporter strips a trailing `_schema` from the base name so macro prefixes ma
 
 - Ctrl+I opens the bitmap import prompt.
 - Accepted formats: indexed/RLE BMP, uncompressed 24/32-bit BMP, or PNG.
-- Imported images retain a palette-indexed preview/export fallback and a true-color copy when the source provides 24/32-bit or RGBA pixels.
+- True-color pixels use straight-alpha ARGB (`0xAARRGGBB`) in both the designer and runtime. PNG and 32-bit BMP preserve all eight alpha bits; 24-bit BMP imports as opaque.
 - Imported bitmaps are registered in `ft2_ui_assets` and assigned numeric IDs.
 - Use the Bitmap property to reference the ID for bitmap widgets.
-- Set Layer to `1` for backgrounds or `2` for reusable skin surfaces. Background/skin bitmaps render behind other widgets in the designer preview and export as 32-bit BMP assets when true-color pixels are available.
+- Set Layer to `1` for backgrounds or `2` for reusable skin surfaces. Background/skin bitmaps render behind other widgets in the designer preview and export as alpha-preserving 32-bit BMP V4 assets when true-color pixels are available.
 
 Import status appears in the footer and full errors are printed to the console.
 

@@ -499,14 +499,20 @@ static void tf_draw_bitmap_ft2(const TunefishWidget* widget)
 
     const int w = (widget->bitmapW > 0) ? widget->bitmapW : widget->w;
     const int h = (widget->bitmapH > 0) ? widget->bitmapH : widget->h;
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0 || w > UINT16_MAX || h > UINT16_MAX || widget->w <= 0 || widget->h <= 0)
+        return;
+
+    const int32_t drawX = widget->x + (widget->w - w) / 2;
+    const int32_t drawY = widget->y + (widget->h - h) / 2;
 
     if (widget->bitmap32) {
         if (!widget->bitmapPixels32) return;
-        blit32((uint16_t)widget->x, (uint16_t)widget->y, widget->bitmapPixels32, (uint16_t)w, (uint16_t)h);
+        blit32AlphaClip(drawX, drawY, widget->bitmapPixels32, (uint16_t)w, (uint16_t)h,
+                        widget->bitmapOpacity, widget->x, widget->y, widget->w, widget->h);
     } else {
         if (!widget->bitmapPixels) return;
-        blit((uint16_t)widget->x, (uint16_t)widget->y, widget->bitmapPixels, (uint16_t)w, (uint16_t)h);
+        blitAlphaClip(drawX, drawY, widget->bitmapPixels, (uint16_t)w, (uint16_t)h,
+                      widget->bitmapOpacity, widget->x, widget->y, widget->w, widget->h);
     }
 }
 
@@ -1343,6 +1349,7 @@ TunefishWidget* tf_create_bitmap(const char* name, int x, int y, int w, int h, u
     widget->bitmapW = bmp_w;
     widget->bitmapH = bmp_h;
     widget->bitmapOwned = take_ownership;
+    widget->bitmapOpacity = 255;
 
     return widget;
 }
@@ -1365,6 +1372,7 @@ TunefishWidget* tf_create_bitmap32(const char* name, int x, int y, int w, int h,
     widget->bitmapH = bmp_h;
     widget->bitmapOwned = take_ownership;
     widget->bitmap32 = true;
+    widget->bitmapOpacity = 255;
 
     return widget;
 }

@@ -54,6 +54,7 @@ typedef enum {
     PROP_BITMAP_TRANSP,
     PROP_BITMAP_LAYER,
     PROP_BITMAP_FLAGS,
+    PROP_BITMAP_OPACITY,
     PROP_SKIN_PART,
     PROP_PAGE,
     PROP_SCROLLBAR_NUDGE
@@ -690,6 +691,10 @@ void draw_drag_preview(void) {
         preview_widget.visible = true;
         preview_widget.state = WIDGET_UNPRESSED;
         strcpy(preview_widget.caption, "Preview");
+        if (preview_widget.type == WIDGET_LOGO) {
+            preview_widget.data.logo.layer = FT2_UI_BITMAP_LAYER_WIDGET;
+            preview_widget.data.logo.opacity = 255;
+        }
         if (preview_widget.type == WIDGET_TF_ARP_STEP) {
             strcpy(preview_widget.name, "arp_step_01");
             preview_widget.data.tf_linear.vertical = true;
@@ -796,6 +801,9 @@ void start_property_edit(PropField field_type) {
         case PROP_BITMAP_FLAGS:
             snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->data.logo.flags);
             break;
+        case PROP_BITMAP_OPACITY:
+            snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->data.logo.opacity);
+            break;
         case PROP_SKIN_PART:
             snprintf(app.edit_buffer, sizeof(app.edit_buffer), "%d", (int)widget->data.logo.skin_part);
             break;
@@ -877,6 +885,13 @@ void finish_property_edit(bool apply_changes) {
                     if (flags < 0) flags = 0;
                     if (flags > 255) flags = 255;
                     widget->data.logo.flags = (uint8_t)flags;
+                    break;
+                }
+                case PROP_BITMAP_OPACITY: {
+                    int opacity = atoi(app.edit_buffer);
+                    if (opacity < 0) opacity = 0;
+                    if (opacity > 255) opacity = 255;
+                    widget->data.logo.opacity = (uint8_t)opacity;
                     break;
                 }
                 case PROP_SKIN_PART: {
@@ -1042,6 +1057,13 @@ void adjust_property_value(PropField field_type, int delta) {
             if (flags < 0) flags = 0;
             if (flags > 255) flags = 255;
             widget->data.logo.flags = (uint8_t)flags;
+            break;
+        }
+        case PROP_BITMAP_OPACITY: {
+            int opacity = (int)widget->data.logo.opacity + delta;
+            if (opacity < 0) opacity = 0;
+            if (opacity > 255) opacity = 255;
+            widget->data.logo.opacity = (uint8_t)opacity;
             break;
         }
         case PROP_SKIN_PART: {
@@ -1673,6 +1695,18 @@ void handle_mouse_down(int x, int y, int button) {
                         return;
                     } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8 + adjust_w + adjust_gap, field_y, adjust_w, 15)) {
                         adjust_property_value(PROP_BITMAP_FLAGS, 1);
+                        return;
+                    }
+                    field_y += 20;
+
+                    if (is_property_field_at(x, y, panel_x + label_w + 5, field_y, value_w, 15)) {
+                        start_property_edit(PROP_BITMAP_OPACITY);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_BITMAP_OPACITY, -1);
+                        return;
+                    } else if (is_property_field_at(x, y, panel_x + label_w + value_w + 8 + adjust_w + adjust_gap, field_y, adjust_w, 15)) {
+                        adjust_property_value(PROP_BITMAP_OPACITY, 1);
                         return;
                     }
                     field_y += 20;
@@ -2368,6 +2402,13 @@ void draw_property_panel(void) {
             font_draw_text(&g_designer.font_system, panel_x + 5, field_y + 3, "Flags:", get_palette_color(PAL_FORGRND));
             draw_property_field(panel_x + label_w + 5, field_y, value_w, 15, PROP_BITMAP_FLAGS,
                                 (int)widget->data.logo.flags);
+            draw_adjust_button(adjust_x, field_y, adjust_w, 15, "-");
+            draw_adjust_button(adjust_x + adjust_w + adjust_gap, field_y, adjust_w, 15, "+");
+            field_y += 20;
+
+            font_draw_text(&g_designer.font_system, panel_x + 5, field_y + 3, "Opacity:", get_palette_color(PAL_FORGRND));
+            draw_property_field(panel_x + label_w + 5, field_y, value_w, 15, PROP_BITMAP_OPACITY,
+                                (int)widget->data.logo.opacity);
             draw_adjust_button(adjust_x, field_y, adjust_w, 15, "-");
             draw_adjust_button(adjust_x + adjust_w + adjust_gap, field_y, adjust_w, 15, "+");
             field_y += 20;

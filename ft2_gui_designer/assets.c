@@ -1,7 +1,9 @@
 #include "assets.h"
 #include "palette.h"
 #include "shared/ft2_ui_assets.h"
+#include "shared/ft2_ui_bitmap.h"
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +41,7 @@ enum
     COMP_RLE4 = 2
 };
 
+#pragma pack(push, 1)
 typedef struct bmpHeader_t
 {
     uint32_t bfSizebfSize;
@@ -57,6 +60,7 @@ typedef struct bmpHeader_t
     int32_t biClrUsed;
     int32_t biClrImportant;
 } bmpHeader_t;
+#pragma pack(pop)
 
 static designer_assets_t g_assets;
 static designer_bitmap_t g_bitmaps[DESIGNER_MAX_BITMAPS];
@@ -564,51 +568,16 @@ static uint8_t *loadBMPToRGBPalMapped(const uint8_t *src, int *out_w, int *out_h
     return outData;
 }
 
-static uint32_t *loadBMPToRGB32(const uint8_t *src, int *out_w, int *out_h)
+static uint32_t *loadBMPToRGB32(const uint8_t *src, size_t src_len, int *out_w, int *out_h)
 {
-    if (!src)
+    int32_t width = 0;
+    int32_t height = 0;
+    uint32_t *pixels = NULL;
+    if (!ft2_ui_bitmap_decode_bmp_argb32(src, src_len, &pixels, &width, &height))
         return NULL;
-
-    const bmpHeader_t *hdr = (const bmpHeader_t *)&src[2];
-    if (hdr->biCompression != COMP_RGB)
-        return NULL;
-
-    int32_t width = hdr->biWidth;
-    int32_t height = hdr->biHeight;
-    bool top_down = false;
-
-    if (height < 0) {
-        height = -height;
-        top_down = true;
-    }
-
-    if (width <= 0 || height <= 0 || (hdr->biBitCount != 24 && hdr->biBitCount != 32))
-        return NULL;
-
-    int bytes_per_pixel = hdr->biBitCount / 8;
-    const uint8_t *pData = &src[hdr->bfOffBits];
-    int row_stride = (width * bytes_per_pixel + 3) & ~3;
-
-    uint32_t *outData = (uint32_t *)malloc((size_t)width * (size_t)height * sizeof(uint32_t));
-    if (!outData)
-        return NULL;
-
-    for (int y = 0; y < height; y++) {
-        int src_y = top_down ? y : (height - 1 - y);
-        const uint8_t *row = pData + src_y * row_stride;
-        for (int x = 0; x < width; x++) {
-            const uint8_t *pix = &row[x * bytes_per_pixel];
-            uint8_t b = pix[0];
-            uint8_t g = pix[1];
-            uint8_t r = pix[2];
-            uint8_t a = (bytes_per_pixel == 4) ? pix[3] : 255;
-            outData[y * width + x] = (a < 128) ? 0x00FF00 : (0xFF000000 | RGB32(r, g, b));
-        }
-    }
-
     if (out_w) *out_w = width;
     if (out_h) *out_h = height;
-    return outData;
+    return pixels;
 }
 
 static uint8_t *decode_bmp_to_pal(const uint8_t *src, int *out_w, int *out_h, bool use_custom_palette)
@@ -671,7 +640,7 @@ static void load_builtin_bitmaps(void)
         uint8_t *pixels = decode_bmp_to_pal(asset->bmp, &w, &h, use_custom_palette);
         uint32_t *pixels32 = NULL;
         if (asset->fmt == FT2_UI_BMP_FMT_RGB)
-            pixels32 = loadBMPToRGB32(asset->bmp, &w, &h);
+            pixels32 = loadBMPToRGB32(asset->bmp, asset->bmp_len, &w, &h);
 
         if (!pixels && !pixels32)
             continue;
@@ -757,7 +726,7 @@ static uint32_t *decode_rgba_to_rgb32(const uint8_t *rgba, int w, int h)
         uint8_t g = rgba[i * 4 + 1];
         uint8_t b = rgba[i * 4 + 2];
         uint8_t a = rgba[i * 4 + 3];
-        outData[i] = (a < 128) ? 0x00FF00 : (0xFF000000 | RGB32(r, g, b));
+        outData[i] = ((uint32_t)a << 24) | RGB32(r, g, b);
     }
 
     return outData;
@@ -854,32 +823,46 @@ bool designer_import_bitmap(const char *path, int *out_id)
     if (!path || path[0] == '\0')
         return false;
 
-    const char *ext = strrchr(path, '.');
+    size_t data_len = 0;
+    uint8_t *data = load_file_bytes(path, &data_len);
+    if (!data)
+        return false;
+
+    const char *format_hint = strrchr(path, '.');
+    const bool imported = designer_import_bitmap_data(data, data_len, format_hint, path, out_id);
+    free(data);
+    return imported;
+}
+
+bool designer_import_bitmap_data(const uint8_t *data, size_t data_len, const char *format_hint,
+                                 const char *name, int *out_id)
+{
+    if (!data || data_len == 0 || data_len > INT_MAX)
+        return false;
+
     uint8_t *pixels = NULL;
     uint32_t *pixels32 = NULL;
     int w = 0;
     int h = 0;
     ft2_ui_bmp_format_t format = FT2_UI_BMP_FMT_RLE4;
 
-    if (ext && (strcasecmp(ext, ".bmp") == 0)) {
-        size_t len = 0;
-        uint8_t *file_data = load_file_bytes(path, &len);
-        if (!file_data)
-            return false;
-        pixels = decode_bmp_to_pal(file_data, &w, &h, false);
-        pixels32 = loadBMPToRGB32(file_data, &w, &h);
+    const bool is_bmp = (format_hint && strcasecmp(format_hint, ".bmp") == 0) ||
+                        (data_len >= 2 && data[0] == 'B' && data[1] == 'M');
+    if (is_bmp) {
+        pixels32 = loadBMPToRGB32(data, data_len, &w, &h);
         if (pixels32)
             format = FT2_UI_BMP_FMT_RGB;
-        free(file_data);
+        else if (data_len >= 54 && data[0] == 'B' && data[1] == 'M')
+            pixels = decode_bmp_to_pal(data, &w, &h, false);
     } else {
         int comp = 0;
-        stbi_uc *data = stbi_load(path, &w, &h, &comp, 4);
-        if (data) {
-            pixels = decode_rgba_to_pal(data, w, h);
-            pixels32 = decode_rgba_to_rgb32(data, w, h);
+        stbi_uc *rgba = stbi_load_from_memory(data, (int)data_len, &w, &h, &comp, 4);
+        if (rgba) {
+            pixels = decode_rgba_to_pal(rgba, w, h);
+            pixels32 = decode_rgba_to_rgb32(rgba, w, h);
             if (pixels32)
                 format = FT2_UI_BMP_FMT_RGB;
-            stbi_image_free(data);
+            stbi_image_free(rgba);
         }
     }
 
@@ -887,7 +870,7 @@ bool designer_import_bitmap(const char *path, int *out_id)
         return false;
 
     int id = g_next_custom_id++;
-    if (!add_bitmap_entry(id, path, pixels, pixels32, w, h, format)) {
+    if (!add_bitmap_entry(id, name, pixels, pixels32, w, h, format)) {
         free(pixels);
         free(pixels32);
         return false;

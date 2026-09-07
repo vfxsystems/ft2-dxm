@@ -61,7 +61,7 @@ if(NOT WIN32)
     endif()
 endif()
 
-file(GLOB ft2_dxm_SRC
+file(GLOB ft2_dxm_SRC CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/rtmidi/*.cpp"
     "${CMAKE_SOURCE_DIR}/src/*.c"
     "${CMAKE_SOURCE_DIR}/src/shared/*.c"

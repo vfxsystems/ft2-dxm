@@ -18,10 +18,11 @@ set(DESIGNER_SOURCES
     assets.c
     stb_image.c
     "${REPO_ROOT}/src/shared/ft2_ui_assets.c"
+    "${REPO_ROOT}/src/shared/ft2_ui_bitmap.c"
     "${REPO_ROOT}/src/shared/ft2_ui_widget_registry.c"
 )
 
-file(GLOB DESIGNER_GFX_SOURCES
+file(GLOB DESIGNER_GFX_SOURCES CONFIGURE_DEPENDS
     "${REPO_ROOT}/src/gfxdata/*.c")
 
 list(APPEND DESIGNER_SOURCES ${DESIGNER_GFX_SOURCES})
@@ -102,6 +103,24 @@ endif()
 
 include(CTest)
 if (BUILD_TESTING)
+    add_executable(ft2_gui_bitmap_tests
+        bitmap_pipeline_tests.c
+        palette.c
+        assets.c
+        stb_image.c
+        "${REPO_ROOT}/src/shared/ft2_ui_assets.c"
+        "${REPO_ROOT}/src/shared/ft2_ui_bitmap.c"
+        ${DESIGNER_GFX_SOURCES})
+    target_include_directories(ft2_gui_bitmap_tests PRIVATE
+        "${DESIGNER_ROOT}"
+        "${REPO_ROOT}/src")
+    if (WIN32)
+        target_link_libraries(ft2_gui_bitmap_tests PRIVATE SDL2::SDL2)
+    else()
+        target_include_directories(ft2_gui_bitmap_tests SYSTEM PRIVATE ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(ft2_gui_bitmap_tests PRIVATE ${SDL2_LIBRARIES} m)
+    endif()
+
     add_test(NAME gui_designer_layout_validation
         COMMAND ft2_gui_designer --validate
             "${DESIGNER_ROOT}/test_design.gui"
@@ -114,4 +133,5 @@ if (BUILD_TESTING)
     add_test(NAME gui_designer_rejects_malformed_layout
         COMMAND ft2_gui_designer --validate "${CMAKE_CURRENT_BINARY_DIR}/invalid_layout.gui")
     set_tests_properties(gui_designer_rejects_malformed_layout PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME gui_designer_bitmap_pipeline COMMAND ft2_gui_bitmap_tests)
 endif()

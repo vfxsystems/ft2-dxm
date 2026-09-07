@@ -1,5 +1,6 @@
-FT2GUI_V7
-3
-1 50 50 60 16 0 1 0 0 0 0 0 0 0 "Button" "" "button_1"
-6 120 50 100 80 0 1 0 0 0 0 0 0 0 "Frame" "" "framebox_2"
-3 50 100 13 12 0 1 0 0 0 0 0 0 0 "Checkbox" "" "checkbox_3"
+FT2GUI_V8
+4
+1 50 50 60 16 0 1 0 0 0 0 0 0 0 255 "Button" "" "button_1"
+6 120 50 100 80 0 1 0 0 0 0 0 0 0 255 "Frame" "" "framebox_2"
+3 50 100 13 12 0 1 0 0 0 0 0 0 0 255 "Checkbox" "" "checkbox_3"
+7 250 50 64 32 0 1 0 0 0 0 0 0 0 128 "Logo" "" "logo_4"

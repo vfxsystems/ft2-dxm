@@ -2,6 +2,7 @@
 #include "palette.h"
 #include "font.h"
 #include "assets.h"
+#include "shared/ft2_ui_bitmap.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -149,6 +150,7 @@ int add_widget(widget_manager_t *manager, int type, int x, int y)
             widget->data.logo.layer = FT2_UI_BITMAP_LAYER_WIDGET;
             widget->data.logo.skin_part = FT2_UI_SKIN_PART_NONE;
             widget->data.logo.flags = FT2_UI_BITMAP_FLAG_NONE;
+            widget->data.logo.opacity = 255;
             break;
             
         case WIDGET_CUSTOM_BUTTON:
@@ -1226,7 +1228,7 @@ bool save_design(widget_manager_t *manager, const char *filename)
     if (!file) return false;
 
     // Write header
-    fprintf(file, "FT2GUI_V7\n");
+    fprintf(file, "FT2GUI_V8\n");
     fprintf(file, "%d\n", manager->widget_count);
 
     // Write widgets
@@ -1235,11 +1237,12 @@ bool save_design(widget_manager_t *manager, const char *filename)
         const char *caption = (w->caption[0] != '\0') ? w->caption : "";
         const char *caption2 = (w->caption2[0] != '\0') ? w->caption2 : "";
         const char *name = (w->name[0] != '\0') ? w->name : "";
-        fprintf(file, "%d %d %d %d %d %d %d %d %d %d %d %d %d %d ",
+        fprintf(file, "%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d ",
                 w->type, w->x, w->y, w->w, w->h, w->state, w->visible ? 1 : 0,
                 (int)w->page, (int)w->font_type, w->data.logo.bitmap_id,
                 w->data.scrollbar.has_nudge_buttons ? 1 : 0,
-                (int)w->data.logo.layer, (int)w->data.logo.flags, (int)w->data.logo.skin_part);
+                (int)w->data.logo.layer, (int)w->data.logo.flags, (int)w->data.logo.skin_part,
+                w->type == WIDGET_LOGO ? (int)w->data.logo.opacity : 255);
         write_quoted_string(file, caption);
         fputc(' ', file);
         write_quoted_string(file, caption2);
@@ -1963,12 +1966,12 @@ void draw_logo(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int
         int clip_top = framed ? y + 1 : y;
         int clip_right = framed ? x + w - 1 : x + w;
         int clip_bottom = framed ? y + h - 1 : y + h;
-        bool draw_truecolor = bmp->pixels32 && (widget->data.logo.layer != FT2_UI_BITMAP_LAYER_WIDGET || !bmp->pixels);
+        bool draw_truecolor = bmp->pixels32 != NULL;
 
         if (draw_w > 0 && draw_h > 0) {
             for (int dy = 0; dy < draw_h; dy++) {
                 int dst_y = start_y + dy;
-                if (dst_y < clip_top || dst_y >= clip_bottom)
+                if (dst_y < clip_top || dst_y >= clip_bottom || dst_y < 0 || dst_y >= g_widget_screen_height)
                     continue;
 
                 int src_y = dy / scale;
@@ -1977,18 +1980,22 @@ void draw_logo(widget_t *widget, uint32_t *framebuffer, int fb_width, int x, int
 
                 for (int dx = 0; dx < draw_w; dx++) {
                     int dst_x = start_x + dx;
-                    if (dst_x < clip_left || dst_x >= clip_right)
+                    if (dst_x < clip_left || dst_x >= clip_right || dst_x < 0 || dst_x >= fb_width)
                         continue;
 
                     int src_x = dx / scale;
                     if (draw_truecolor) {
                         uint32_t pix = src32_row[src_x];
-                        if ((pix & 0x00FFFFFF) != 0x00FF00)
-                            framebuffer[dst_y * fb_width + dst_x] = pix | 0xFF000000;
+                        framebuffer[dst_y * fb_width + dst_x] =
+                            ft2_ui_bitmap_blend_argb32(framebuffer[dst_y * fb_width + dst_x], pix,
+                                                       widget->data.logo.opacity);
                     } else if (src_row) {
                         uint8_t pix = src_row[src_x];
                         if (pix != PAL_TRANSPR && pix != trans_idx)
-                            framebuffer[dst_y * fb_width + dst_x] = get_palette_color(pix);
+                            framebuffer[dst_y * fb_width + dst_x] =
+                                ft2_ui_bitmap_blend_argb32(framebuffer[dst_y * fb_width + dst_x],
+                                                           0xFF000000u | get_palette_color(pix),
+                                                           widget->data.logo.opacity);
                     }
                 }
             }
@@ -2069,6 +2076,7 @@ bool load_design(widget_manager_t *manager, const char *filename)
     }
 
     int count;
+    bool is_v8 = designer_strnicmp_prefix(first_line, "FT2GUI_V8", 9);
     bool is_v7 = designer_strnicmp_prefix(first_line, "FT2GUI_V7", 9);
     bool is_v6 = designer_strnicmp_prefix(first_line, "FT2GUI_V6", 9);
     bool is_v5 = designer_strnicmp_prefix(first_line, "FT2GUI_V5", 9);
@@ -2076,7 +2084,7 @@ bool load_design(widget_manager_t *manager, const char *filename)
     bool is_v3 = designer_strnicmp_prefix(first_line, "FT2GUI_V3", 9);
     bool is_v2 = designer_strnicmp_prefix(first_line, "FT2GUI_V2", 9);
 
-    if (is_v7 || is_v6 || is_v5 || is_v4 || is_v3 || is_v2) {
+    if (is_v8 || is_v7 || is_v6 || is_v5 || is_v4 || is_v3 || is_v2) {
         if (fscanf(file, "%d\n", &count) != 1) {
             fclose(file);
             return false;
@@ -2122,6 +2130,7 @@ bool load_design(widget_manager_t *manager, const char *filename)
         int bitmap_layer = FT2_UI_BITMAP_LAYER_WIDGET;
         int bitmap_flags = FT2_UI_BITMAP_FLAG_NONE;
         int skin_part = FT2_UI_SKIN_PART_NONE;
+        int bitmap_opacity = 255;
         char caption[MAX_CAPTION_LEN];
         char caption2[MAX_CAPTION_LEN];
         char name[32];
@@ -2137,7 +2146,18 @@ bool load_design(widget_manager_t *manager, const char *filename)
             break;
         }
 
-        if (is_v7) {
+        if (is_v8) {
+            if (!parse_int_field(&cursor, &page) ||
+                !parse_int_field(&cursor, &font_type) ||
+                !parse_int_field(&cursor, &bitmap_id) ||
+                !parse_int_field(&cursor, &nudge_buttons) ||
+                !parse_int_field(&cursor, &bitmap_layer) ||
+                !parse_int_field(&cursor, &bitmap_flags) ||
+                !parse_int_field(&cursor, &skin_part) ||
+                !parse_int_field(&cursor, &bitmap_opacity)) {
+                break;
+            }
+        } else if (is_v7) {
             if (!parse_int_field(&cursor, &page) ||
                 !parse_int_field(&cursor, &font_type) ||
                 !parse_int_field(&cursor, &bitmap_id) ||
@@ -2212,15 +2232,21 @@ bool load_design(widget_manager_t *manager, const char *filename)
         widget->font_type = (font_type >= 0 && font_type < FT2_UI_FONT_COUNT)
             ? (ft2_ui_font_id_t)font_type
             : FT2_UI_FONT_1;
-        widget->data.scrollbar.has_nudge_buttons = (nudge_buttons != 0);
-        widget->data.logo.bitmap_id = bitmap_id;
-        if (bitmap_layer < FT2_UI_BITMAP_LAYER_WIDGET) bitmap_layer = FT2_UI_BITMAP_LAYER_WIDGET;
-        if (bitmap_layer > FT2_UI_BITMAP_LAYER_SKIN) bitmap_layer = FT2_UI_BITMAP_LAYER_SKIN;
-        if (skin_part < FT2_UI_SKIN_PART_NONE) skin_part = FT2_UI_SKIN_PART_NONE;
-        if (skin_part > FT2_UI_SKIN_PART_METER) skin_part = FT2_UI_SKIN_PART_METER;
-        widget->data.logo.layer = (ft2_ui_bitmap_layer_t)bitmap_layer;
-        widget->data.logo.flags = (uint8_t)(bitmap_flags & 0xFF);
-        widget->data.logo.skin_part = (ft2_ui_skin_part_t)skin_part;
+        if (type == WIDGET_SCROLLBAR)
+            widget->data.scrollbar.has_nudge_buttons = (nudge_buttons != 0);
+        if (type == WIDGET_LOGO) {
+            widget->data.logo.bitmap_id = bitmap_id;
+            if (bitmap_layer < FT2_UI_BITMAP_LAYER_WIDGET) bitmap_layer = FT2_UI_BITMAP_LAYER_WIDGET;
+            if (bitmap_layer > FT2_UI_BITMAP_LAYER_SKIN) bitmap_layer = FT2_UI_BITMAP_LAYER_SKIN;
+            if (skin_part < FT2_UI_SKIN_PART_NONE) skin_part = FT2_UI_SKIN_PART_NONE;
+            if (skin_part > FT2_UI_SKIN_PART_METER) skin_part = FT2_UI_SKIN_PART_METER;
+            widget->data.logo.layer = (ft2_ui_bitmap_layer_t)bitmap_layer;
+            widget->data.logo.flags = (uint8_t)(bitmap_flags & 0xFF);
+            widget->data.logo.skin_part = (ft2_ui_skin_part_t)skin_part;
+            if (bitmap_opacity < 0) bitmap_opacity = 0;
+            if (bitmap_opacity > 255) bitmap_opacity = 255;
+            widget->data.logo.opacity = (uint8_t)bitmap_opacity;
+        }
 
         if (strcmp(caption, "-") == 0)
             widget->caption[0] = '\0';
@@ -2584,66 +2610,7 @@ static bool build_rgb32_bmp(const designer_bitmap_t *bmp, uint8_t **out_data, si
 {
     if (!bmp || !bmp->pixels32 || bmp->w <= 0 || bmp->h <= 0 || !out_data || !out_len)
         return false;
-
-    const uint32_t width = bmp->w;
-    const uint32_t height = bmp->h;
-    const uint32_t header_size = 14 + 40;
-    const uint32_t row_stride = width * 4;
-    const uint32_t image_size = row_stride * height;
-    const uint32_t file_size = header_size + image_size;
-
-    uint8_t *bmp_data = (uint8_t *)malloc(file_size);
-    if (!bmp_data)
-        return false;
-
-    memset(bmp_data, 0, file_size);
-    bmp_data[0] = 'B';
-    bmp_data[1] = 'M';
-    bmp_data[2] = (uint8_t)(file_size & 0xFF);
-    bmp_data[3] = (uint8_t)((file_size >> 8) & 0xFF);
-    bmp_data[4] = (uint8_t)((file_size >> 16) & 0xFF);
-    bmp_data[5] = (uint8_t)((file_size >> 24) & 0xFF);
-    bmp_data[10] = (uint8_t)(header_size & 0xFF);
-    bmp_data[14] = 40;
-    bmp_data[18] = (uint8_t)(width & 0xFF);
-    bmp_data[19] = (uint8_t)((width >> 8) & 0xFF);
-    bmp_data[20] = (uint8_t)((width >> 16) & 0xFF);
-    bmp_data[21] = (uint8_t)((width >> 24) & 0xFF);
-    bmp_data[22] = (uint8_t)(height & 0xFF);
-    bmp_data[23] = (uint8_t)((height >> 8) & 0xFF);
-    bmp_data[24] = (uint8_t)((height >> 16) & 0xFF);
-    bmp_data[25] = (uint8_t)((height >> 24) & 0xFF);
-    bmp_data[26] = 1;
-    bmp_data[28] = 32;
-    bmp_data[34] = (uint8_t)(image_size & 0xFF);
-    bmp_data[35] = (uint8_t)((image_size >> 8) & 0xFF);
-    bmp_data[36] = (uint8_t)((image_size >> 16) & 0xFF);
-    bmp_data[37] = (uint8_t)((image_size >> 24) & 0xFF);
-    bmp_data[38] = 0x12;
-    bmp_data[39] = 0x0B;
-    bmp_data[42] = 0x12;
-    bmp_data[43] = 0x0B;
-
-    uint8_t *dst = bmp_data + header_size;
-    for (int y = (int)height - 1; y >= 0; y--) {
-        const uint32_t *src_row = &bmp->pixels32[y * width];
-        for (uint32_t x = 0; x < width; x++) {
-            uint32_t pix = src_row[x];
-            bool transparent = ((pix & 0x00FFFFFF) == DESIGNER_TRANSPARENT_KEY_COLOR) ||
-                               ((pix >> 24) != 0 && (pix >> 24) < 128);
-            uint8_t r = transparent ? 0 : (uint8_t)RGB32_R(pix);
-            uint8_t g = transparent ? 255 : (uint8_t)RGB32_G(pix);
-            uint8_t b = transparent ? 0 : (uint8_t)RGB32_B(pix);
-            *dst++ = b;
-            *dst++ = g;
-            *dst++ = r;
-            *dst++ = transparent ? 0 : 255;
-        }
-    }
-
-    *out_data = bmp_data;
-    *out_len = file_size;
-    return true;
+    return ft2_ui_bitmap_encode_bmp_argb32(bmp->pixels32, bmp->w, bmp->h, out_data, out_len);
 }
 
 static bool write_c_array_file(FILE *file, const char *array_name, const uint8_t *data, size_t len)
@@ -3470,9 +3437,10 @@ bool export_gui_schema_code(widget_manager_t *manager, const char *base_filename
                 flags |= FT2_UI_BITMAP_FLAG_TRUECOLOR;
             if (w->data.logo.layer != FT2_UI_BITMAP_LAYER_WIDGET)
                 flags |= FT2_UI_BITMAP_FLAG_CLICK_THROUGH;
-            fprintf(file, "    { %s_BMP_BASE + %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, 255 },\n",
+            fprintf(file, "    { %s_BMP_BASE + %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d },\n",
                     macro_prefix, i, w->x, w->y, w->w, w->h, (int)w->page, w->data.logo.bitmap_id,
-                    (int)w->data.logo.layer, (int)flags, (int)w->data.logo.skin_part);
+                    (int)w->data.logo.layer, (int)flags, (int)w->data.logo.skin_part,
+                    (int)w->data.logo.opacity);
         }
         fprintf(file, "};\n\n");
     }

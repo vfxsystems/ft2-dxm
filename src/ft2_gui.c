@@ -20,6 +20,7 @@
 #include "ft2_trim.h"
 #include "ft2_video.h"
 #include "ft2_ui_render.h"
+#include "shared/ft2_ui_bitmap.h"
 #include "ft2_tables.h"
 #include "ft2_bmp.h"
 #include "ft2_structs.h"
@@ -743,19 +744,78 @@ void fillRect(uint16_t xPos, uint16_t yPos, uint16_t w, uint16_t h, uint8_t pale
 
 void blit32(uint16_t xPos, uint16_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h)
 {
-	assert(srcPtr != NULL && xPos < SCREEN_W && yPos < SCREEN_H && (xPos + w) <= SCREEN_W && (yPos + h) <= SCREEN_H);
+	blit32Alpha(xPos, yPos, srcPtr, w, h, 255);
+}
 
-	uint32_t *dstPtr = &video.frameBuffer[(yPos * SCREEN_W) + xPos];
-	for (int32_t y = 0; y < h; y++)
+void blit32Alpha(int32_t xPos, int32_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h, uint8_t opacity)
+{
+	blit32AlphaClip(xPos, yPos, srcPtr, w, h, opacity, 0, 0, SCREEN_W, SCREEN_H);
+}
+
+void blit32AlphaClip(int32_t xPos, int32_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h,
+	uint8_t opacity, int32_t clipX, int32_t clipY, int32_t clipW, int32_t clipH)
+{
+	if (srcPtr == NULL || video.frameBuffer == NULL || w == 0 || h == 0 || opacity == 0)
+		return;
+	if (clipW <= 0 || clipH <= 0)
+		return;
+
+	const int64_t clipRight = (int64_t)clipX + clipW;
+	const int64_t clipBottom = (int64_t)clipY + clipH;
+	const int32_t left = MAX(0, MAX(xPos, clipX));
+	const int32_t top = MAX(0, MAX(yPos, clipY));
+	const int32_t right = (int32_t)MIN((int64_t)SCREEN_W,
+		MIN((int64_t)xPos + w, clipRight));
+	const int32_t bottom = (int32_t)MIN((int64_t)SCREEN_H,
+		MIN((int64_t)yPos + h, clipBottom));
+	if (left >= right || top >= bottom)
+		return;
+
+	for (int32_t y = top; y < bottom; y++)
 	{
-		for (int32_t x = 0; x < w; x++)
+		const uint32_t *src = &srcPtr[((size_t)(y - yPos) * w) + (left - xPos)];
+		uint32_t *dst = &video.frameBuffer[(y * SCREEN_W) + left];
+		for (int32_t x = left; x < right; x++, src++, dst++)
 		{
-			if (srcPtr[x] != 0x00FF00)
-				dstPtr[x] = srcPtr[x] | 0xFF000000; // most significant 8 bits = palette number. 0xFF because no true palette
+			if (*src != 0x0000FF00u)
+				*dst = ft2_ui_bitmap_blend_argb32(*dst, *src, opacity);
 		}
+	}
+}
 
-		srcPtr += w;
-		dstPtr += SCREEN_W;
+void blitAlpha(int32_t xPos, int32_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h, uint8_t opacity)
+{
+	blitAlphaClip(xPos, yPos, srcPtr, w, h, opacity, 0, 0, SCREEN_W, SCREEN_H);
+}
+
+void blitAlphaClip(int32_t xPos, int32_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h,
+	uint8_t opacity, int32_t clipX, int32_t clipY, int32_t clipW, int32_t clipH)
+{
+	if (srcPtr == NULL || video.frameBuffer == NULL || w == 0 || h == 0 || opacity == 0)
+		return;
+	if (clipW <= 0 || clipH <= 0)
+		return;
+
+	const int64_t clipRight = (int64_t)clipX + clipW;
+	const int64_t clipBottom = (int64_t)clipY + clipH;
+	const int32_t left = MAX(0, MAX(xPos, clipX));
+	const int32_t top = MAX(0, MAX(yPos, clipY));
+	const int32_t right = (int32_t)MIN((int64_t)SCREEN_W,
+		MIN((int64_t)xPos + w, clipRight));
+	const int32_t bottom = (int32_t)MIN((int64_t)SCREEN_H,
+		MIN((int64_t)yPos + h, clipBottom));
+	if (left >= right || top >= bottom)
+		return;
+
+	for (int32_t y = top; y < bottom; y++)
+	{
+		const uint8_t *src = &srcPtr[((size_t)(y - yPos) * w) + (left - xPos)];
+		uint32_t *dst = &video.frameBuffer[(y * SCREEN_W) + left];
+		for (int32_t x = left; x < right; x++, src++, dst++)
+		{
+			if (*src != PAL_TRANSPR)
+				*dst = ft2_ui_bitmap_blend_argb32(*dst, 0xFF000000u | (video.palette[*src] & 0x00FFFFFFu), opacity);
+		}
 	}
 }
 

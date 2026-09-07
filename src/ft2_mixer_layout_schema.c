@@ -63,7 +63,7 @@ static const ft2_ui_scrollbar_desc_t ft2_mixer_layout_scrollbars[FT2_MIXER_LAYOU
 };
 
 static const ft2_ui_bitmap_desc_t ft2_mixer_layout_bitmaps[FT2_MIXER_LAYOUT_BMP_COUNT] = {
-    { FT2_MIXER_LAYOUT_BMP_BASE + 0, 481, 202, 151, 198, 0, 21 },
+    { FT2_MIXER_LAYOUT_BMP_BASE + 0, 481, 202, 151, 198, 0, 21, 0, 0, 0, 255 },
 };
 
 static const ft2_ui_mixer_strip_desc_t ft2_mixer_layout_mixer_strips[FT2_MIXER_LAYOUT_MIXER_STRIP_COUNT] = {

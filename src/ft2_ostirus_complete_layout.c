@@ -1504,7 +1504,7 @@ static TunefishWidget *osti_create_bitmap_from_desc(const ft2_ui_bitmap_desc_t *
     }
     else if (asset->fmt == FT2_UI_BMP_FMT_RGB)
     {
-        uint32_t *pixels = ft2_bmp_decode_to_rgb32(asset->bmp, &bmp_w, &bmp_h);
+        uint32_t *pixels = ft2_bmp_decode_to_rgb32(asset->bmp, asset->bmp_len, &bmp_w, &bmp_h);
         if (!pixels) return NULL;
         w = tf_create_bitmap32("osti_bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
     }
@@ -1513,6 +1513,7 @@ static TunefishWidget *osti_create_bitmap_from_desc(const ft2_ui_bitmap_desc_t *
     {
         w->bitmapLayer = d->layer;
         w->bitmapSkinPart = d->skin_part;
+        w->bitmapOpacity = d->opacity;
     }
 
     return w;

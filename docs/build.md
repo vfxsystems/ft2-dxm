@@ -222,7 +222,9 @@ Bitmap and skin workflow:
 
 - Import BMP/PNG assets with `Ctrl+I`.
 - Use bitmap Layer `0` for foreground/widget art, `1` for backgrounds, and `2` for skin surfaces.
-- Imported 24/32-bit BMP and PNG assets retain true-color pixels and export as `FT2_UI_BMP_FMT_RGB` assets when available.
+- Imported 24/32-bit BMP and PNG assets use the same straight-alpha ARGB representation in the designer and FT2 runtime. PNG and 32-bit BMP preserve eight-bit alpha; 24-bit BMP is opaque. True-color exports use an alpha-masked 32-bit BMP V4 payload and `FT2_UI_BMP_FMT_RGB`.
+- Bitmap descriptor opacity is applied consistently in designer previews and at runtime and multiplies per-pixel alpha.
+- Bitmap pixels are centered in their schema descriptor and clipped to its bounds in both designer previews and runtime drawing.
 - Runtime schema constructors for Tunefish, Dexed, and OsTIrus load RLE4 palette assets and true-color BMP assets through the same non-interactive bitmap widget path.
 
 ## Windows

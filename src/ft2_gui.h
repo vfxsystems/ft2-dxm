@@ -83,6 +83,12 @@ void clearRect(uint16_t xPos, uint16_t yPos, uint16_t w, uint16_t h);
 void fillRect(uint16_t xPos, uint16_t yPos, uint16_t w, uint16_t h, uint8_t paletteIndex);
 void drawFramework(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint8_t type);
 void blit32(uint16_t xPos, uint16_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h);
+void blit32Alpha(int32_t xPos, int32_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h, uint8_t opacity);
+void blitAlpha(int32_t xPos, int32_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h, uint8_t opacity);
+void blit32AlphaClip(int32_t xPos, int32_t yPos, const uint32_t *srcPtr, uint16_t w, uint16_t h,
+                     uint8_t opacity, int32_t clipX, int32_t clipY, int32_t clipW, int32_t clipH);
+void blitAlphaClip(int32_t xPos, int32_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h,
+                   uint8_t opacity, int32_t clipX, int32_t clipY, int32_t clipW, int32_t clipH);
 void blit(uint16_t xPos, uint16_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h);
 void blitClipX(uint16_t xPos, uint16_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h, uint16_t clipX);
 void blitFast(uint16_t xPos, uint16_t yPos, const uint8_t *srcPtr, uint16_t w, uint16_t h); // no transparency/colorkey

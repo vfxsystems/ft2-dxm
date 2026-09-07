@@ -10,6 +10,7 @@
 #include "ft2_events.h"
 #include "ft2_audio.h"
 #include "ft2_bmp.h"
+#include "ft2_gui.h"
 #include "ft2_v2.h"
 #include "ft2_dexed.h"
 #include "ft2_unified_synth.h"
@@ -57,6 +58,48 @@ static void renderRelease(int instrument)
     float left[256], right[256];
     for (int i = 0; i < 600; i++)
         ft2_v2_render_for_channel(instrument, left, right, 256, 0);
+}
+
+static void checkBitmapCompositing(void)
+{
+    uint32_t *previous = video.frameBuffer;
+    uint32_t *framebuffer = (uint32_t *)calloc((size_t)SCREEN_W * SCREEN_H, sizeof(uint32_t));
+    CHECK(framebuffer != NULL, "allocate bitmap compositor fixture");
+    if (!framebuffer)
+        return;
+
+    video.frameBuffer = framebuffer;
+    framebuffer[10 * SCREEN_W + 10] = 0xFF0000FFu;
+    framebuffer[10 * SCREEN_W + 11] = 0xFF123456u;
+    const uint32_t alpha_pixels[2] = { 0x80FF0000u, 0x00010203u };
+    blit32Alpha(10, 10, alpha_pixels, 2, 1, 255);
+    CHECK(framebuffer[10 * SCREEN_W + 10] == 0xFF80007Fu,
+          "runtime bitmap renderer preserves eight-bit pixel alpha");
+    CHECK(framebuffer[10 * SCREEN_W + 11] == 0xFF123456u,
+          "runtime bitmap renderer skips zero-alpha pixels");
+
+    framebuffer[11 * SCREEN_W + 10] = 0xFF0000FFu;
+    blit32Alpha(10, 11, alpha_pixels, 1, 1, 128);
+    CHECK(framebuffer[11 * SCREEN_W + 10] == 0xFF4000BFu,
+          "runtime bitmap renderer multiplies schema opacity by pixel alpha");
+
+    const uint32_t clipped_pixels[2] = { 0xFFFF0000u, 0xFF00FF00u };
+    blit32Alpha(-1, 0, clipped_pixels, 2, 1, 255);
+    CHECK(framebuffer[0] == 0xFF00FF00u,
+          "runtime bitmap renderer clips safely and does not color-key opaque green");
+
+    const uint32_t bounded_pixels[3] = { 0xFFFF0000u, 0xFF00FF00u, 0xFF0000FFu };
+    framebuffer[12 * SCREEN_W + 9] = 0xFF101010u;
+    framebuffer[12 * SCREEN_W + 10] = 0xFF101010u;
+    framebuffer[12 * SCREEN_W + 11] = 0xFF101010u;
+    blit32AlphaClip(9, 12, bounded_pixels, 3, 1, 255, 10, 12, 1, 1);
+    CHECK(framebuffer[12 * SCREEN_W + 9] == 0xFF101010u &&
+          framebuffer[12 * SCREEN_W + 10] == 0xFF00FF00u &&
+          framebuffer[12 * SCREEN_W + 11] == 0xFF101010u,
+          "runtime bitmap renderer stays inside descriptor bounds");
+
+    video.frameBuffer = previous;
+    free(framebuffer);
 }
 
 static void checkSynthMixing(void)
@@ -130,6 +173,7 @@ static void checkSynthMixing(void)
 bool runStabilityTests(void)
 {
     failures = 0;
+    checkBitmapCompositing();
     CHECK(runDexedRegressionTests(), "Dexed envelope and panic regression suite");
     CHECK(runDxmChunkRegressionTests(), "DXM bounded chunk and macro round-trip regression suite");
     CHECK(runSampleEditorRegressionTests(), "sample ownership and stereo paste conversion regression suite");

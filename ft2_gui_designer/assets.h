@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "shared/ft2_ui_assets.h"
 
 #define DESIGNER_MAX_BITMAPS 256
@@ -36,6 +37,8 @@ int designer_bitmap_index_for_id(int id);
 const designer_bitmap_t *designer_bitmap_at(int index);
 const designer_bitmap_t *designer_bitmap_by_id(int id);
 bool designer_import_bitmap(const char *path, int *out_id);
+bool designer_import_bitmap_data(const uint8_t *data, size_t data_len, const char *format_hint,
+                                 const char *name, int *out_id);
 int designer_bitmap_transparent_index(int id);
 bool designer_set_bitmap_transparent_index(int id, int index);
 uint32_t designer_custom_palette_color(int index);

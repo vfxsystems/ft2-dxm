@@ -95,6 +95,7 @@ typedef union {
         ft2_ui_bitmap_layer_t layer;
         ft2_ui_skin_part_t skin_part;
         uint8_t flags;
+        uint8_t opacity;
     } logo;
     
     struct {

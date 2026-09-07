@@ -10,6 +10,7 @@
 #include <string.h>
 #include "ft2_palette.h"
 #include "ft2_gfxdata.h"
+#include "shared/ft2_ui_bitmap.h"
 #include "ft2_bmp.h"
 #include "ft2_video.h"
 
@@ -20,6 +21,7 @@ enum
 	COMP_RLE4 = 2
 };
 
+#pragma pack(push, 1)
 typedef struct bmpHeader_t
 {
 	uint32_t bfSizebfSize;
@@ -38,6 +40,7 @@ typedef struct bmpHeader_t
 	int32_t biClrUsed;
 	int32_t biClrImportant;
 } bmpHeader_t;
+#pragma pack(pop)
 
 static uint32_t *loadBMPTo32BitEx(const uint8_t *src, int32_t *out_w, int32_t *out_h);
 static uint8_t *loadBMPTo1Bit(const uint8_t *src);
@@ -365,9 +368,33 @@ static uint32_t *loadBMPTo32BitEx(const uint8_t *src, int32_t *out_w, int32_t *o
 	return outData;
 }
 
-uint32_t *ft2_bmp_decode_to_rgb32(const uint8_t *src, int32_t *out_w, int32_t *out_h)
+uint32_t *ft2_bmp_decode_to_rgb32(const uint8_t *src, size_t src_len, int32_t *out_w, int32_t *out_h)
 {
-	return loadBMPTo32BitEx(src, out_w, out_h);
+	int32_t width = 0;
+	int32_t height = 0;
+	uint32_t *pixels = NULL;
+	if (ft2_ui_bitmap_decode_bmp_argb32(src, src_len, &pixels, &width, &height))
+	{
+		if (out_w != NULL) *out_w = width;
+		if (out_h != NULL) *out_h = height;
+		return pixels;
+	}
+
+	pixels = loadBMPTo32BitEx(src, &width, &height);
+	if (pixels != NULL && width > 0 && height > 0)
+	{
+		const size_t count = (size_t)width * (size_t)height;
+		for (size_t i = 0; i < count; i++)
+		{
+			if ((pixels[i] & 0x00FFFFFFu) == 0x0000FF00u)
+				pixels[i] = 0x0000FF00u;
+			else
+				pixels[i] = 0xFF000000u | (pixels[i] & 0x00FFFFFFu);
+		}
+	}
+	if (out_w != NULL) *out_w = width;
+	if (out_h != NULL) *out_h = height;
+	return pixels;
 }
 
 static uint8_t *loadBMPTo1Bit(const uint8_t *src) // supports 4-bit RLE only

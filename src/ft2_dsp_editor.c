@@ -10,6 +10,7 @@
 #include "ft2_mixer_layout_schema.h"
 #include "shared/ft2_ui_assets.h"
 #include "ft2_bmp.h"
+#include <stdlib.h>
 #include <string.h>
 
 static uint8_t editChannel = 0;
@@ -66,6 +67,7 @@ typedef struct
     bool valid;
     uint16_t id;
     uint8_t *pixels;
+    uint32_t *pixels32;
     int32_t w, h;
 } DspBitmapCache;
 
@@ -164,25 +166,28 @@ static const ft2_ui_bitmap_asset_t *dsp_find_bitmap_asset(uint16_t id)
     return NULL;
 }
 
-static uint8_t *dsp_get_bitmap_pixels(uint16_t id, int32_t *w, int32_t *h)
+static DspBitmapCache *dsp_get_bitmap(uint16_t id)
 {
     for (size_t i = 0; i < sizeof(dspBitmapCache) / sizeof(dspBitmapCache[0]); i++)
     {
         if (dspBitmapCache[i].valid && dspBitmapCache[i].id == id)
         {
-            if (w) *w = dspBitmapCache[i].w;
-            if (h) *h = dspBitmapCache[i].h;
-            return dspBitmapCache[i].pixels;
+            return &dspBitmapCache[i];
         }
     }
 
     const ft2_ui_bitmap_asset_t *asset = dsp_find_bitmap_asset(id);
-    if (!asset || !asset->bmp || asset->fmt != FT2_UI_BMP_FMT_RLE4)
+    if (!asset || !asset->bmp)
         return NULL;
 
     int32_t bmp_w = 0, bmp_h = 0;
-    uint8_t *pixels = ft2_bmp_decode_rle4_to_pal(asset->bmp, &bmp_w, &bmp_h);
-    if (!pixels) return NULL;
+    uint8_t *pixels = NULL;
+    uint32_t *pixels32 = NULL;
+    if (asset->fmt == FT2_UI_BMP_FMT_RLE4)
+        pixels = ft2_bmp_decode_rle4_to_pal(asset->bmp, &bmp_w, &bmp_h);
+    else if (asset->fmt == FT2_UI_BMP_FMT_RGB)
+        pixels32 = ft2_bmp_decode_to_rgb32(asset->bmp, asset->bmp_len, &bmp_w, &bmp_h);
+    if (!pixels && !pixels32) return NULL;
 
     for (size_t i = 0; i < sizeof(dspBitmapCache) / sizeof(dspBitmapCache[0]); i++)
     {
@@ -191,15 +196,16 @@ static uint8_t *dsp_get_bitmap_pixels(uint16_t id, int32_t *w, int32_t *h)
             dspBitmapCache[i].valid = true;
             dspBitmapCache[i].id = id;
             dspBitmapCache[i].pixels = pixels;
+            dspBitmapCache[i].pixels32 = pixels32;
             dspBitmapCache[i].w = bmp_w;
             dspBitmapCache[i].h = bmp_h;
-            break;
+            return &dspBitmapCache[i];
         }
     }
 
-    if (w) *w = bmp_w;
-    if (h) *h = bmp_h;
-    return pixels;
+    free(pixels);
+    free(pixels32);
+    return NULL;
 }
 
 static void dsp_draw_schema_bitmaps(void)
@@ -213,17 +219,32 @@ static void dsp_draw_schema_bitmaps(void)
     for (uint16_t i = 0; i < desc->bitmaps.count; i++)
     {
         const ft2_ui_bitmap_desc_t *d = &desc->bitmap_desc[i];
-        int32_t w = 0, h = 0;
-        uint8_t *pixels = dsp_get_bitmap_pixels(d->bitmap_id, &w, &h);
-        if (!pixels || w <= 0 || h <= 0)
+        DspBitmapCache *bitmap = dsp_get_bitmap(d->bitmap_id);
+        if (!bitmap || bitmap->w <= 0 || bitmap->h <= 0)
+            continue;
+        if (d->w == 0 || d->h == 0 || bitmap->w > UINT16_MAX || bitmap->h > UINT16_MAX)
             continue;
 
         // only draw if bitmap intersects DSP window bounds
-        if ((int32_t)d->x + w <= DSP_WIN_X || d->x >= DSP_WIN_X + DSP_WIN_W ||
-            (int32_t)d->y + h <= DSP_WIN_Y || d->y >= DSP_WIN_Y + DSP_WIN_H)
+        const int32_t clip_x = d->x > DSP_WIN_X ? d->x : DSP_WIN_X;
+        const int32_t clip_y = d->y > DSP_WIN_Y ? d->y : DSP_WIN_Y;
+        const int32_t descriptor_right = (int32_t)d->x + d->w;
+        const int32_t descriptor_bottom = (int32_t)d->y + d->h;
+        const int32_t clip_right = descriptor_right < DSP_WIN_X + DSP_WIN_W
+            ? descriptor_right : DSP_WIN_X + DSP_WIN_W;
+        const int32_t clip_bottom = descriptor_bottom < DSP_WIN_Y + DSP_WIN_H
+            ? descriptor_bottom : DSP_WIN_Y + DSP_WIN_H;
+        if (clip_x >= clip_right || clip_y >= clip_bottom)
             continue;
+        const int32_t draw_x = d->x + ((int32_t)d->w - bitmap->w) / 2;
+        const int32_t draw_y = d->y + ((int32_t)d->h - bitmap->h) / 2;
 
-        blit(d->x, d->y, pixels, (uint16_t)w, (uint16_t)h);
+        if (bitmap->pixels32)
+            blit32AlphaClip(draw_x, draw_y, bitmap->pixels32, (uint16_t)bitmap->w, (uint16_t)bitmap->h,
+                            d->opacity, clip_x, clip_y, clip_right - clip_x, clip_bottom - clip_y);
+        else
+            blitAlphaClip(draw_x, draw_y, bitmap->pixels, (uint16_t)bitmap->w, (uint16_t)bitmap->h,
+                          d->opacity, clip_x, clip_y, clip_right - clip_x, clip_bottom - clip_y);
     }
 }
 

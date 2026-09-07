@@ -84,13 +84,14 @@ struct TunefishWidget {
 
     // Bitmap properties
     uint8_t *bitmapPixels;  // 4-bit palette indices (PAL_TRANSPR supported)
-    uint32_t *bitmapPixels32; // 24/32-bit RGB pixels (0x00FF00 color key supported)
+    uint32_t *bitmapPixels32; // straight-alpha ARGB pixels (0xAARRGGBB)
     int bitmapW;
     int bitmapH;
     bool bitmapOwned;
     bool bitmap32;
     uint8_t bitmapLayer;
     uint8_t bitmapSkinPart;
+    uint8_t bitmapOpacity;
     
     // Styling
     uint32_t bgColor;

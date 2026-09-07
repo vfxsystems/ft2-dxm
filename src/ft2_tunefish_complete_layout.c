@@ -1095,13 +1095,14 @@ static TunefishCompleteLayout* tf_create_complete_layout_from_schema(const ft2_u
                 if (!pixels) continue;
                 w = tf_create_bitmap("bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
             } else if (asset->fmt == FT2_UI_BMP_FMT_RGB) {
-                uint32_t *pixels = ft2_bmp_decode_to_rgb32(asset->bmp, &bmp_w, &bmp_h);
+                uint32_t *pixels = ft2_bmp_decode_to_rgb32(asset->bmp, asset->bmp_len, &bmp_w, &bmp_h);
                 if (!pixels) continue;
                 w = tf_create_bitmap32("bitmap", d->x, d->y, d->w, d->h, pixels, bmp_w, bmp_h, true);
             }
             if (!w) continue;
             w->bitmapLayer = d->layer;
             w->bitmapSkinPart = d->skin_part;
+            w->bitmapOpacity = d->opacity;
             tf_schema_register_widget(layout, w, d->page);
         }
     }
