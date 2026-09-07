@@ -41,6 +41,7 @@ master gain/export discrepancies and the stateless-gainer bypass.
 - BEM import now validates every metadata, instrument, track-table, track, and sample read. Track storage is sized from validated pattern references, compressed opcodes decode from bounded buffers, repeat runs cannot overrun row storage, and temporary decoded tracks are released on success and failure.
 - IT import now validates signatures, count tables, offsets, instrument/sample references, pattern bounds, loop ranges, and complete sample payloads before use. Pattern events and compressed 8/16-bit samples decode through bounded readers; invalid channel descriptors, bit-width transitions, truncated blocks, and row overruns fail cleanly. Empty instruments no longer access an uninitialized sample header.
 - XM import now validates module, pattern, instrument, extended sample-header, loop, and sample payload boundaries. Packed events use the declared payload size, odd ADPCM lengths do not write an extra sample, and XM 1.02/1.03 retains unsupported-sample skip lengths per instrument. ModPlug/OpenMPT stereo samples now use their defined planar channel layout, independent delta decoding, and consistent frame/loop units.
+- Shared sample allocation and reallocation now compute byte counts in `size_t`, reject negative or over-limit frame counts before touching existing buffers, and include interpolation padding without signed overflow at the configured maximum 16-bit sample length.
 
 ## Validation
 
