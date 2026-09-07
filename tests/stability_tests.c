@@ -42,6 +42,7 @@ extern bool runXMLoaderRegressionTests(void);
 extern bool runBRRLoaderRegressionTests(void);
 extern bool runIFFLoaderRegressionTests(void);
 extern bool runWAVLoaderRegressionTests(void);
+extern bool runAIFFLoaderRegressionTests(void);
 #ifdef HAS_MIDI
 extern bool runMidiRegressionTests(void);
 #endif
@@ -139,6 +140,7 @@ bool runStabilityTests(void)
     CHECK(runBRRLoaderRegressionTests(), "BRR bounded block decoder regression suite");
     CHECK(runIFFLoaderRegressionTests(), "IFF bounded chunk decoder regression suite");
     CHECK(runWAVLoaderRegressionTests(), "WAV bounded chunk and sample decoder regression suite");
+    CHECK(runAIFFLoaderRegressionTests(), "AIFF bounded chunk and sample decoder regression suite");
     song.numChannels = 4;
     editor.curInstr = 1;
     editor.curOctave = 4;
