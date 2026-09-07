@@ -1,60 +1,26 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -O2 -I../src
-LIBS = -lSDL2 -lGL -lGLU -lm
+CMAKE ?= cmake
+BUILD_DIR ?= ../build-gui-designer
+BUILD_TYPE ?= Release
+JOBS ?= 4
 
-TARGET = ft2_gui_designer
-TEST_TARGET = ft2_gui_bitmap_tests
-SOURCES = main.c palette.c canvas.c widgets.c font.c assets.c stb_image.c \
-	$(wildcard ../src/gfxdata/*.c) \
-	../src/shared/ft2_ui_assets.c \
-	../src/shared/ft2_ui_bitmap.c \
-	../src/shared/ft2_ui_widget_registry.c
-OBJECTS = $(SOURCES:.c=.o)
-TEST_SOURCES = bitmap_pipeline_tests.c palette.c assets.c stb_image.c \
-	$(wildcard ../src/gfxdata/*.c) \
-	../src/shared/ft2_ui_assets.c \
-	../src/shared/ft2_ui_bitmap.c
-TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
+.PHONY: all configure test run debug clean
 
-.PHONY: all clean test
+all: configure
+	$(CMAKE) --build "$(BUILD_DIR)" --parallel "$(JOBS)"
 
-all: $(TARGET)
+configure:
+	$(CMAKE) -S . -B "$(BUILD_DIR)" \
+		-DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" \
+		-DBUILD_TESTING=ON
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(TARGET) $(LIBS)
+test: all
+	ctest --test-dir "$(BUILD_DIR)" --output-on-failure
 
-$(TEST_TARGET): $(TEST_OBJECTS)
-	$(CC) $(TEST_OBJECTS) -o $(TEST_TARGET) $(LIBS)
+run: all
+	"$(BUILD_DIR)/ft2_gui_designer"
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+debug:
+	$(MAKE) BUILD_TYPE=Debug all
 
 clean:
-	rm -f $(OBJECTS) $(TEST_OBJECTS) $(TARGET) $(TEST_TARGET)
-
-test: $(TARGET) $(TEST_TARGET)
-	./$(TARGET) --validate test_design.gui layouts/*.gui
-	./$(TEST_TARGET)
-
-install:
-	sudo apt-get update
-	sudo apt-get install libsdl2-dev
-
-# Dependencies
-main.o: main.c widgets.h canvas.h palette.h font.h assets.h
-palette.o: palette.c palette.h
-canvas.o: canvas.c canvas.h palette.h
-widgets.o: widgets.c widgets.h palette.h assets.h ../src/shared/ft2_ui_bitmap.h
-font.o: font.c font.h
-assets.o: assets.c assets.h palette.h ../src/shared/ft2_ui_bitmap.h
-../src/shared/ft2_ui_bitmap.o: ../src/shared/ft2_ui_bitmap.c ../src/shared/ft2_ui_bitmap.h
-stb_image.o: stb_image.c
-bitmap_pipeline_tests.o: bitmap_pipeline_tests.c assets.h ../src/shared/ft2_ui_bitmap.h
-
-run: $(TARGET)
-	./$(TARGET)
-
-debug: CFLAGS += -g -DDEBUG
-debug: $(TARGET)
-
-.SUFFIXES: .c .o
+	$(CMAKE) -E remove_directory "$(BUILD_DIR)"

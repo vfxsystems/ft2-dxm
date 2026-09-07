@@ -5,6 +5,8 @@ This project requires CMake 3.16 or newer for all supported targets. The helper 
 Build outputs are written under each build directory's `bin/` subdirectory, for example `build-linux/bin/ft2-dxm`.
 
 The FT2 GUI Designer has its own tracked CMake project in `ft2_gui_designer/`. Its output is written directly to the selected designer build directory.
+The compatibility Makefile and `test_compile.sh` use this same out-of-source
+CMake flow and do not place objects or executables beside designer source files.
 
 ## Quick Start
 

@@ -65,3 +65,5 @@ OsTIrus/
 __pycache__/
 *.pyc
 ft2_gui_designer/ft2_gui_bitmap_tests
+ft2_gui_designer/ft2_gui_designer
+ft2_gui_designer/demo_export

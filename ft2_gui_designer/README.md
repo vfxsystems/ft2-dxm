@@ -10,7 +10,7 @@ FT2 GUI Designer is a layout editor that mirrors FastTracker 2 widget behavior a
 - Bitmap import using FT2 asset registry (BMP/PNG, indexed or 24/32-bit true-color).
 - Bitmap layer and skin metadata for foreground art, backgrounds, and widget skin surfaces.
 - Wider two-column toolbar with readable schema labels.
-- Numeric page selector with up/down arrows for layout pages 0 through 7 (`0` shows all pages).
+- Numeric page selector with minus/plus controls for layout pages 0 through 7 (`0` shows all pages).
 - Designer palette themes: FT2 Arctic, OP-1 inspired, Renoise inspired, and VS Code inspired.
 - Vector modulation-ring preview for TF rotary controls using the shared schema v9 `mod_ring` contract.
 - Built-in file prompt for load/save/export without blocking the app.
@@ -21,10 +21,11 @@ From the repository root:
 
 ```bash
 make -C ft2_gui_designer
-./ft2_gui_designer/ft2_gui_designer
+./build-gui-designer/ft2_gui_designer
 ```
 
-The tracked CMake flow is also supported and is preferred for CI-style checks:
+The Makefile is a convenience wrapper around the same out-of-source CMake build.
+The equivalent direct commands are:
 
 ```bash
 cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
