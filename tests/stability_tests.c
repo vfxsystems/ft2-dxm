@@ -38,6 +38,7 @@ extern bool runS3MLoaderRegressionTests(void);
 extern bool runDigiLoaderRegressionTests(void);
 extern bool runBEMLoaderRegressionTests(void);
 extern bool runITLoaderRegressionTests(void);
+extern bool runXMLoaderRegressionTests(void);
 #ifdef HAS_MIDI
 extern bool runMidiRegressionTests(void);
 #endif
@@ -131,6 +132,7 @@ bool runStabilityTests(void)
     CHECK(runDigiLoaderRegressionTests(), "DIGI truncated event regression suite");
     CHECK(runBEMLoaderRegressionTests(), "BEM bounded track decoder regression suite");
     CHECK(runITLoaderRegressionTests(), "IT bounded pattern and sample decoder regression suite");
+    CHECK(runXMLoaderRegressionTests(), "XM bounded pattern, stereo, and ADPCM decoder regression suite");
     song.numChannels = 4;
     editor.curInstr = 1;
     editor.curOctave = 4;
