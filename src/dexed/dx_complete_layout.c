@@ -7,9 +7,8 @@
  * This implementation approximates the DX look using color constants inspired
  * by DXLookNFeel (no JUCE dependency / no BinaryData images).
  *
- * Note: This is intentionally conservative and only implements a basic
- * layout + show/hide/render + mouse dispatch and a few placeholder param
- * widgets for later binding.
+ * The controls bind directly to the embedded engine's operator, global,
+ * modulation, filter, and effect parameters.
  */
 
 #include <stdlib.h>
@@ -29,6 +28,12 @@
 #include "../ft2_inst_ed.h"
 #include "../ft2_structs.h"
 #include <math.h>
+
+#ifdef FT2_UI_TRACE
+#define DX_UI_TRACE(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DX_UI_TRACE(...) ((void)0)
+#endif
 
 #ifdef DX_USE_SCHEMA_LAYOUT
 #include "dx_complete_layout_schema.h"
@@ -779,7 +784,6 @@ static int dx_param_id_from_widget_name(const char* name)
     if (strcmp(name, "dx_lfo_amp_depth") == 0) return 140;
 
     /* System parameters (bytes 146-154) */
-    if (strcmp(name, "dx_preset_combo") == 0) return 153; /* preset selection placeholder */
     if (strcmp(name, "dx_global_level") == 0) return 154; /* master output level */
 
     /* Algorithm selection (byte 134, 0-31) */
@@ -833,9 +837,14 @@ static void dx_populate_preset_combo(DexedCompleteLayout* layout)
 
     int count = ft2_dx_get_factory_preset_count();
     if (count <= 0) {
-        /* No factory presets available, keep placeholder */
+        tf_widget_clear_combo_items(layout->preset_combo);
+        tf_widget_add_combo_item(layout->preset_combo, "No presets available");
+        layout->preset_combo->selectedIndex = 0;
+        layout->preset_combo->enabled = false;
         return;
     }
+
+    layout->preset_combo->enabled = true;
 
     /* Clear existing combo items */
     tf_widget_clear_combo_items(layout->preset_combo);
@@ -957,10 +966,10 @@ void dx_sync_widgets_with_parameters(DexedCompleteLayout* layout)
         if (layout->preset_combo->comboItemCount == 0) {
             dx_populate_preset_combo(layout);
         } else {
-            /* Just update the selection to match current preset */
             extern struct editor_t editor;
-            /* For now, keep current selection since we don't have a way to get current preset */
-            /* TODO: Add function to get current preset index */
+            const int currentPreset = ft2_dx_get_current_preset_for_instrument(editor.curInstr);
+            if (currentPreset >= 0 && currentPreset < layout->preset_combo->comboItemCount)
+                layout->preset_combo->selectedIndex = currentPreset;
         }
     }
 
@@ -1048,8 +1057,7 @@ void dx_sync_widgets_with_parameters(DexedCompleteLayout* layout)
         }
     }
 
-    /* Debug output for sync status */
-    printf("[DX_SYNC] Completed parameter synchronization for instrument %d\n", instrID);
+    DX_UI_TRACE("[DX_SYNC] Completed parameter synchronization for instrument %d\n", instrID);
 
     /* Finally request a redraw of the UI to reflect updated widget visuals */
     ui.updatePatternEditor = true;
@@ -1070,7 +1078,6 @@ void dx_update_widget_from_parameter(DexedCompleteLayout* layout, const char* wi
     tf_widget_set_value(w, norm);
 }
 
-/* Update all widgets from synth (placeholder) */
 void dx_update_all_widgets_from_synth(DexedCompleteLayout* layout)
 {
     dx_sync_widgets_with_parameters(layout);
@@ -1427,13 +1434,19 @@ void dx_destroy_complete_layout(DexedCompleteLayout* layout)
 {
     if (!layout) return;
 
-    /* Destroy all widgets we created */
+    if (g_active_dexed_layout == layout)
+        g_active_dexed_layout = NULL;
+
     for (int i = 0; i < DX_TOTAL_WIDGETS; i++) {
         TunefishWidget* w = layout->all_widgets[i];
-        if (w) {
-            tf_widget_destroy(w);
-            layout->all_widgets[i] = NULL;
+        if (w == NULL) continue;
+        for (int previous = 0; previous < i; ++previous) {
+            if (layout->all_widgets[previous] == w) {
+                w = NULL;
+                break;
+            }
         }
+        if (w != NULL) tf_widget_destroy(w);
     }
 
     free(layout);
@@ -1698,10 +1711,7 @@ void dx_set_param_for_current_instrument(int paramId, float normalizedValue)
     int instrID = editor.curInstr;
     if (instrID <= 0) return;
     /* Map normalized [0..1] to 0..127 and call ft2_dx_set_param_for_instrument (wrapper) */
-    int intVal = (int)lroundf(normalizedValue * 127.0f);
-    /* ft2_dx_set_param_for_instrument may expect a float; convert */
     ft2_dx_set_param_for_instrument(instrID, paramId, normalizedValue);
-    (void)intVal;
 }
 
 /* Combo box selection handler */
@@ -1725,9 +1735,9 @@ static void dx_combo_on_select(TunefishWidget* widget, int selectedIndex)
         if (idx >= count) idx = count - 1;
         /* Request loading the indexed factory preset into the currently selected instrument */
         if (!ft2_dx_load_factory_preset_for_current_instrument(idx)) {
-            printf("[DX_CUI] Failed to load factory preset %d from UI combo\n", idx);
+            DX_UI_TRACE("[DX_CUI] Failed to load factory preset %d from UI combo\n", idx);
         } else {
-            printf("[DX_CUI] Requested factory preset %d load from UI combo\n", idx);
+            DX_UI_TRACE("[DX_CUI] Requested factory preset %d load from UI combo\n", idx);
             /* Update combo to reflect new selection */
             widget->selectedIndex = idx;
             if (g_active_dexed_layout && g_active_dexed_layout->program_name_label) {

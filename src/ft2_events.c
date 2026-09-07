@@ -29,6 +29,7 @@
 #include "ft2_textboxes.h"
 #include "ft2_sysreqs.h"
 #include "ft2_keyboard.h"
+#include "ft2_edit.h"
 #include "ft2_sample_ed.h"
 #include "ft2_sample_ed_features.h"
 #include "ft2_structs.h"
@@ -61,6 +62,9 @@ void readInput(void)
 	readMouseXY();
 	readKeyModifiers();
 	setSyncedReplayerVars();
+#ifdef HAS_MIDI
+	processMidiInput();
+#endif
 	handleSDLEvents();
 }
 
@@ -378,7 +382,10 @@ void handleWaitVblQuirk(SDL_Event *event)
 
 		// reset vblank end time if we minimize window
 		if (event->window.event == SDL_WINDOWEVENT_MINIMIZED || event->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+		{
+			releaseAllNoteKeys();
 			hpc_ResetCounters(&video.vblankHpc);
+		}
 	}
 }
 

@@ -142,7 +142,6 @@ typedef struct {
     void (*drawLabel)(const TunefishWidget* widget);
     void (*drawToggleButton)(const TunefishWidget* widget);
     void (*drawParameterControl)(const TunefishWidget* widget);
-    void (*drawEnvelopeDisplay)(const TunefishWidget* widget);
     void (*drawGroupBox)(const TunefishWidget* widget);
     void (*drawWaveformView)(const TunefishWidget* widget);
 } TunefishWidgetRenderer;

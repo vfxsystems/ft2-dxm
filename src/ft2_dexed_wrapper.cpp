@@ -26,7 +26,9 @@ extern const size_t ft2_dexed_builtin_pgm_zip_len;
 #endif
 
 
-#define DEBUG_DX_WRAPPER 1
+#ifndef DEBUG_DX_WRAPPER
+#define DEBUG_DX_WRAPPER 0
+#endif
 
 #if DEBUG_DX_WRAPPER
 #define DX_DEBUG(fmt, ...) printf("[DX_WRAPPER] " fmt "\n", ##__VA_ARGS__)
@@ -406,14 +408,7 @@ void dx_instrument_send_midi(void* inst, uint8_t status, uint8_t data1, uint8_t 
 {
     if (!inst) return;
     DexedAudio* aud = static_cast<DexedAudio*>(inst);
-    uint8_t msgType = status & 0xF0;
-    if (msgType == 0x90 && data2 != 0) {
-        aud->midiNoteOn(data1, data2);
-    } else if (msgType == 0x80 || (msgType == 0x90 && data2 == 0)) {
-        aud->midiNoteOff(data1);
-    } else if (msgType == 0xB0) {
-        aud->midiCC(data1, data2);
-    }
+    aud->sendMidi(status, data1, data2);
 }
 
 void dx_instrument_set_param(void* inst, int param, float value)

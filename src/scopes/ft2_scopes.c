@@ -68,7 +68,12 @@ void stopAllScopes(void)
 // toggle mute
 void setChannelMute(int32_t chNr, bool off)
 {
+	const bool wasLocked = audio.locked;
+	if (!wasLocked) lockAudio();
 	channel_t *ch = &channel[chNr];
+	if (off && !ch->channelOff && ch->instrPtr && ch->noteNum > 0 &&
+	    (ch->instrPtr->useTF4 || ch->instrPtr->useDexed || ch->instrPtr->useV2 || ch->instrPtr->useOsTirus))
+		keyOff(ch);
 
 	ch->channelOff = off;
 	if (ch->channelOff)
@@ -88,6 +93,7 @@ void setChannelMute(int32_t chNr, bool off)
 	}
 
 	scope[chNr].wasCleared = false;
+	if (!wasLocked) unlockAudio();
 }
 
 static void drawScopeNumber(uint16_t scopeXOffs, uint16_t scopeYOffs, uint8_t chNr, bool outline)

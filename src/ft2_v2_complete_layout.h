@@ -74,6 +74,7 @@ typedef struct V2CompleteLayout
 
     TunefishWidget *all_widgets[V2_MAX_WIDGETS];
     int all_widget_count;
+    TunefishWidget *mouse_capture;
 
     int current_page;
     int current_mod_bank;

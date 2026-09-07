@@ -46,6 +46,11 @@ static const int8_t tickArr[16] = { 16, 8, 0, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0
 
 void recordNote(uint8_t note, int8_t vol);
 
+typedef struct { uint8_t note, channel, instrument; } heldNoteKey_t;
+enum { INPUT_NOTE_SOURCES = SDL_NUM_SCANCODES + 16 * 128 };
+static heldNoteKey_t heldNoteKeys[INPUT_NOTE_SOURCES];
+static void recordNoteImpl(uint8_t noteNum, int8_t vol, int sourceKey, int releaseChannel);
+
 // when the cursor is at the note slot
 static bool testNoteKeys(SDL_Scancode scancode)
 {
@@ -80,7 +85,7 @@ static bool testNoteKeys(SDL_Scancode scancode)
 
 	if (noteNum > 0 && noteNum <= 96)
 	{
-		recordNote(noteNum, -1);
+		recordNoteImpl(noteNum, -1, scancode, -1);
 		return true; // note key pressed (and note triggered)
 	}
 
@@ -90,9 +95,57 @@ static bool testNoteKeys(SDL_Scancode scancode)
 // when the cursor is at the note slot
 void testNoteKeysRelease(SDL_Scancode scancode)
 {
-	const int8_t noteNum = scancodeKeyToNote(scancode); // convert key scancode to note number
-	if (noteNum > 0 && noteNum <= 96)
-		recordNote(noteNum, 0); // release note
+	if (scancode <= SDL_SCANCODE_UNKNOWN || scancode >= SDL_NUM_SCANCODES) return;
+	const heldNoteKey_t held = heldNoteKeys[scancode];
+	heldNoteKeys[scancode].note = 0;
+	if (held.note != 0 && editor.keyOnTab[held.channel] == held.note &&
+	    channel[held.channel].instrNum == held.instrument && channel[held.channel].noteNum == held.note)
+		recordNoteImpl(held.note, 0, SDL_SCANCODE_UNKNOWN, held.channel);
+}
+
+void releaseAllNoteKeys(void)
+{
+	/* Focus loss is a release, not an edit/record operation. */
+	for (int i = 0; i < SDL_NUM_SCANCODES; i++)
+	{
+		const heldNoteKey_t held = heldNoteKeys[i];
+		heldNoteKeys[i].note = 0;
+		if (held.note == 0 || editor.keyOnTab[held.channel] != held.note) continue;
+		editor.keyOnTab[held.channel] = 0;
+		editor.keyOffTime[held.channel] = ++editor.keyOffNr;
+		if (channel[held.channel].instrNum == held.instrument && channel[held.channel].noteNum == held.note)
+			playTone(held.channel, held.instrument, NOTE_OFF, 0, 0, 0);
+	}
+}
+
+/* MIDI ownership uses the wire channel/note, independently of transpose/cursor. */
+void releaseMidiInputNote(uint8_t midiChannel, uint8_t wireNote, bool recordRelease)
+{
+    if (midiChannel >= 16 || wireNote >= 128) return;
+    const int source = SDL_NUM_SCANCODES + midiChannel * 128 + wireNote;
+    const heldNoteKey_t held = heldNoteKeys[source];
+    heldNoteKeys[source].note = 0;
+    if (!held.note || editor.keyOnTab[held.channel] != held.note ||
+        channel[held.channel].instrNum != held.instrument || channel[held.channel].noteNum != held.note) return;
+    if (recordRelease) recordNoteImpl(held.note, 0, SDL_SCANCODE_UNKNOWN, held.channel);
+    else {
+        editor.keyOnTab[held.channel] = 0;
+        editor.keyOffTime[held.channel] = ++editor.keyOffNr;
+        playTone(held.channel, held.instrument, NOTE_OFF, 0, 0, 0);
+    }
+}
+
+void recordMidiInputNote(uint8_t midiChannel, uint8_t wireNote, uint8_t note, int8_t volume)
+{
+    if (midiChannel >= 16 || wireNote >= 128 || note < 1 || note > 96 || volume == 0) return;
+    releaseMidiInputNote(midiChannel, wireNote, false);
+    recordNoteImpl(note, volume, SDL_NUM_SCANCODES + midiChannel * 128 + wireNote, -1);
+}
+
+void releaseAllMidiInputNotes(void)
+{
+    for (int ch = 0; ch < 16; ++ch)
+        for (int note = 0; note < 128; ++note) releaseMidiInputNote(ch, note, false);
 }
 
 static bool testEditKeys(SDL_Scancode scancode, SDL_Keycode keycode)
@@ -395,7 +448,12 @@ static void evaluateTimeStamp(int16_t *songPos, int16_t *pattNum, int16_t *row, 
 	*tick = outTick;
 }
 
-void recordNote(uint8_t noteNum, int8_t vol) // directly ported from the original FT2 code - what a mess, but it works...
+void recordNote(uint8_t noteNum, int8_t vol)
+{
+	recordNoteImpl(noteNum, vol, SDL_SCANCODE_UNKNOWN, -1);
+}
+
+static void recordNoteImpl(uint8_t noteNum, int8_t vol, int sourceKey, int releaseChannel)
 {
 	int8_t i;
 	int16_t pattNum, songPos, row, tick;
@@ -499,12 +557,18 @@ void recordNote(uint8_t noteNum, int8_t vol) // directly ported from the origina
 
 	if (vol != 0)
 	{
-		if (c < 0 || (k >= 0 && (config.multiEdit || (recmode || !editmode))))
+		if (c < 0 || (sourceKey < SDL_NUM_SCANCODES && k >= 0 && (config.multiEdit || (recmode || !editmode))))
 			return;
 
 		// play note
 
 		editor.keyOnTab[c] = noteNum;
+		/* A stolen tracker channel no longer belongs to its previous physical key. */
+		for (int key = 0; key < INPUT_NOTE_SOURCES; key++)
+			if (heldNoteKeys[key].note != 0 && heldNoteKeys[key].channel == c)
+				heldNoteKeys[key].note = 0;
+		if (sourceKey > SDL_SCANCODE_UNKNOWN && sourceKey < INPUT_NOTE_SOURCES)
+			heldNoteKeys[sourceKey] = (heldNoteKey_t){noteNum, (uint8_t)c, editor.curInstr};
 
 		if (row >= oldRow) // non-FT2 fix: only do this if we didn't quantize to next row
 		{
@@ -554,6 +618,15 @@ void recordNote(uint8_t noteNum, int8_t vol) // directly ported from the origina
 	else
 	{
 		// note off
+		if (releaseChannel >= 0)
+			k = releaseChannel;
+		else if (noteNum != NOTE_OFF)
+		{
+			/* A release must never fall back to an unrelated cursor channel. */
+			for (int ch = 0; ch < song.numChannels; ch++)
+				if (editor.keyOnTab[ch] == noteNum) k = ch;
+			if (k < 0) return;
+		}
 
 		if (k != -1)
 			c = k;

@@ -17,7 +17,6 @@
 #endif
 #include "ft2_header.h"
 #include "ft2_v2.h"
-#include "ft2_v2_preparations.h"
 #include "ft2_gui.h"
 #include "ft2_video.h"
 #include "ft2_audio.h"
@@ -50,6 +49,10 @@
 static void initializeVars(void);
 static bool runSelfTest(void);
 static bool runV2StressTest(void);
+#ifdef FT2_STABILITY_TESTS
+extern bool runStabilityTests(void);
+extern bool runSynthLevelTests(void);
+#endif
 static void cleanUpAndExit(void); // never call this inside the main loop
 #ifdef __APPLE__
 static void osxSetDirToProgramDirFromArgs(char **argv);
@@ -87,6 +90,18 @@ int main(int argc, char *argv[])
 		{
 			return runV2StressTest() ? 0 : 1;
 		}
+#ifdef FT2_STABILITY_TESTS
+		else if (strcmp(argv[i], "--synth-level-test") == 0)
+		{
+			initializeVars();
+			return runSynthLevelTests() ? 0 : 1;
+		}
+		else if (strcmp(argv[i], "--stability-test") == 0)
+		{
+			initializeVars();
+			return runStabilityTests() ? 0 : 1;
+		}
+#endif
 		else
 		if (strcmp(argv[i], "--debug") == 0)
 		{
@@ -103,11 +118,11 @@ int main(int argc, char *argv[])
 	if (!debugConsole)
 	{
 #ifdef _WIN32
-		freopen("NUL", "w", stdout);
-		freopen("NUL", "w", stderr);
+		(void)!freopen("NUL", "w", stdout);
+		(void)!freopen("NUL", "w", stderr);
 #else
-		freopen("/dev/null", "w", stdout);
-		freopen("/dev/null", "w", stderr);
+		(void)!freopen("/dev/null", "w", stdout);
+		(void)!freopen("/dev/null", "w", stderr);
 #endif
 	}
 
@@ -124,10 +139,6 @@ int main(int argc, char *argv[])
 		audioSetSynthRoutingDebug(true);
 	setupCrashHandler();
 	
-	// TODO: Initialize v2 preparations
-	// ft2_v2_initialize();
-	// ft2_v2_apply_optimizations();
-
 	// on Windows and macOS, test what version SDL2.DLL is (against library version used in compilation)
 #if defined _WIN32 || defined __APPLE__
 	SDL_GetVersion(&sdlVer);
@@ -591,7 +602,6 @@ static void cleanUpAndExit(void) // never call this inside the main loop!
 	}
 #endif
 	midi.enable = false; // stop MIDI callback from doing things
-	while (midi.callbackBusy) SDL_Delay(1); // wait for MIDI callback to finish
 
 	closeMidiInDevice();
 	freeMidiIn();

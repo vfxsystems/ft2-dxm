@@ -729,15 +729,18 @@ void dspProcessChain(dspEffectInstance_t *effects, float *bufL, float *bufR, uin
     if (effects == NULL || bufL == NULL || bufR == NULL || frames == 0)
         return;
 
-    // Safety check: ensure frames is reasonable
-    if (frames > 8192) // Max reasonable buffer size
-        return;
-
-    for (int i = 0; i < DSP_MAX_SLOTS; i++)
+    /* High-rate offline ticks can exceed a device block. Process all frames. */
+    for (uint32_t offset = 0; offset < frames; )
     {
-        dspEffectInstance_t *e = &effects[i];
-        if (e && e->enabled && e->process && e->state)
-            e->process(e, bufL, bufR, frames);
+        const uint32_t count = frames - offset > 8192 ? 8192 : frames - offset;
+        for (int i = 0; i < DSP_MAX_SLOTS; i++)
+        {
+            dspEffectInstance_t *e = &effects[i];
+            /* Stateless processors (notably the gainer) legitimately have no state. */
+            if (e->enabled && e->process)
+                e->process(e, bufL + offset, bufR + offset, count);
+        }
+        offset += count;
     }
 }
 

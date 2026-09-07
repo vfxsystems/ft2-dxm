@@ -73,9 +73,10 @@ run_or_skip() {
     printf '\n== %s ==\n' "$name"
     if "$@"; then
         return 0
+    else
+        local status=$?
     fi
 
-    local status=$?
     if [ "$strict" -eq 1 ]; then
         return "$status"
     fi

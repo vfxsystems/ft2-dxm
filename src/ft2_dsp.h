@@ -41,7 +41,7 @@ typedef struct
     float gain; /* 0.0 (mute) .. 2.0 (+6dB) */
 } dspGainerParams_t;
 
-/* Placeholder structs for future effects – parameters TBD */
+/* Serialized parameter layouts for the implemented effects. */
 typedef struct { float thresholdDb; float ratio; float attackMs; float releaseMs; float makeupDb; } dspCompressorParams_t;
 typedef struct { float thresholdDb; float releaseMs; } dspLimiterParams_t;
 typedef struct { float timeMs; float feedback; float tone; float mix; float diffusionMs; float diffusionMix; float pingPong; float character; float sync; float width; } dspDelayParams_t;

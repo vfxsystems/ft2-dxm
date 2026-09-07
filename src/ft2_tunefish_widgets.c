@@ -710,7 +710,6 @@ static TunefishWidgetRenderer g_ft2WidgetRenderer = {
     .drawLabel = tf_draw_label_ft2,
     .drawToggleButton = tf_draw_toggle_button_ft2,
     .drawParameterControl = tf_draw_parameter_control_ft2,
-    .drawEnvelopeDisplay = NULL, // TODO: Implement if needed
     .drawGroupBox = tf_draw_group_box_ft2,
     .drawWaveformView = tf_draw_waveform_view_ft2
 };

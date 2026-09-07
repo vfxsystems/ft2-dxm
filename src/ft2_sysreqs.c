@@ -10,6 +10,7 @@
 #include "ft2_sysreqs.h"
 #include "ft2_structs.h"
 #include "ft2_events.h"
+#include "ft2_midi.h"
 #include "ft2_smpfx.h"
 
 #define SYSTEM_REQUEST_H 67
@@ -277,6 +278,9 @@ int16_t okBox(int16_t type, const char *headline, const char *text, void (*check
 	int16_t returnVal = 0;
 	while (ui.sysReqShown)
 	{
+#ifdef HAS_MIDI
+		processMidiInput();
+#endif
 		beginFPSCounter();
 		readMouseXY();
 		setSyncedReplayerVars();
@@ -501,6 +505,9 @@ int16_t inputBox(int16_t type, const char *headline, char *edText, uint16_t maxS
 	int16_t returnVal = 0;
 	while (ui.sysReqShown)
 	{
+#ifdef HAS_MIDI
+		processMidiInput();
+#endif
 		beginFPSCounter();
 		readMouseXY();
 		readKeyModifiers();

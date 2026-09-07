@@ -83,18 +83,22 @@ static int8_t detectModule(FILE *f)
 {
 	uint8_t D[256], I[4];
 
-	fseek(f, 0, SEEK_END);
-	uint32_t fileLength = (uint32_t)ftell(f);
+	if (fseek(f, 0, SEEK_END) != 0)
+		return FORMAT_UNKNOWN;
+	const long fileLengthLong = ftell(f);
+	if (fileLengthLong < 0 || (uint64_t)fileLengthLong > UINT32_MAX)
+		return FORMAT_UNKNOWN;
+	uint32_t fileLength = (uint32_t)fileLengthLong;
 	rewind(f);
 
 	memset(D, 0, sizeof (D));
-	fread(D, 1, sizeof (D), f);
-	fseek(f, 1080, SEEK_SET); // MOD ID
+	const size_t headerBytes = fread(D, 1, sizeof (D), f);
 	I[0] = I[1] = I[2] = I[3] = 0;
-	fread(I, 1, 4, f);
+	if (fileLength >= 1084 && fseek(f, 1080, SEEK_SET) == 0)
+		(void)!fread(I, 1, 4, f);
 	rewind(f);
 
-	if (D[0] == 'D' && D[1] == 'X' && D[2] == 'M' && D[3] == '0')
+	if (headerBytes >= 4 && D[0] == 'D' && D[1] == 'X' && D[2] == 'M' && D[3] == '0')
 		return FORMAT_DXM;
 
 	// BEM ("UN05", from XM only, MikMod)
@@ -137,9 +141,11 @@ static int8_t detectModule(FILE *f)
 		return FORMAT_UNKNOWN;
 
 	// test STK numOrders+BPM for illegal values
-	fseek(f, 470, SEEK_SET);
+	if (fseek(f, 470, SEEK_SET) != 0)
+		return FORMAT_UNKNOWN;
 	D[0] = D[1] = 0;
-	fread(D, 1, 2, f);
+	if (fread(D, 1, 2, f) != 2)
+		return FORMAT_UNKNOWN;
 	rewind(f);
 
 	if (D[0] <= 128 && D[1] <= 220)
@@ -584,16 +590,22 @@ bool handleModuleLoadFromArg(int argc, char **argv)
 #endif
 
 	// store old path
-	UNICHAR_GETCWD(tmpPathU, PATH_MAX);
+	if (UNICHAR_GETCWD(tmpPathU, PATH_MAX) == NULL)
+	{
+		free(filenameU);
+		free(tmpPathU);
+		okBox(0, "System message", "Couldn't determine the current directory!", NULL);
+		return false;
+	}
 
 	// set path to where the main executable is
-	UNICHAR_CHDIR(editor.binaryPathU);
+	(void)!UNICHAR_CHDIR(editor.binaryPathU);
 
 	const int32_t filesize = getFileSize(filenameU);
 	if (filesize == -1 || filesize >= 512L*1024*1024) // 1) >=2GB   2) >=512MB
 	{
 		free(filenameU);
-		UNICHAR_CHDIR(tmpPathU); // set old path back
+		(void)!UNICHAR_CHDIR(tmpPathU); // set old path back
 		free(tmpPathU);
 
 		okBox(0, "System message", "Error: The module is too big to be loaded!", NULL);
@@ -603,7 +615,7 @@ bool handleModuleLoadFromArg(int argc, char **argv)
 	bool result = loadMusicUnthreaded(filenameU, true);
 
 	free(filenameU);
-	UNICHAR_CHDIR(tmpPathU); // set old path back
+	(void)!UNICHAR_CHDIR(tmpPathU); // set old path back
 	free(tmpPathU);
 
 	return result;

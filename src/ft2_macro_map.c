@@ -469,13 +469,7 @@ void handleMacroUiSync(void)
     if (g_macroUiSyncRequested) {
         g_macroUiSyncRequested = false;
         
-        // Safety checks before calling UI sync
-        extern bool ft2_guisan_is_enabled(void);
-        extern bool ft2_guisan_is_synth_editor_shown(void);
-        
-        if (ft2_guisan_is_enabled() && ft2_guisan_is_synth_editor_shown()) {
-            ui_sync_from_instrument();
-        }
+        ui_sync_from_instrument();
     }
 }
 

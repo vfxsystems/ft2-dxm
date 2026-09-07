@@ -1,0 +1,23 @@
+name: Build and regressions
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [--release-only, --debug-only, --asan-only]
+    env:
+      FT2_OSTIRUS_ROM: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libsdl2-dev libasound2-dev
+      - name: Build and test
+        run: ./scripts/test-linux.sh ${{ matrix.phase }} -j 2
+      - name: Inspect publication source
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 scripts/export-source.py

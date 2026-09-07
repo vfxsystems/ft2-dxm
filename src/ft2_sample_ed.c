@@ -178,8 +178,12 @@ bool reallocateSmpDataPtr(smpPtr_t *sp, int32_t length, bool sample16Bit)
 
 void setSmpDataPtr(sample_t *s, smpPtr_t *sp)
 {
-	s->origDataPtr = sp->origPtr;
-	s->dataPtr = sp->ptr;
+	s->origDataPtrL = sp->origPtr;
+	s->dataPtrL = sp->ptr;
+	s->origDataPtr = s->origDataPtrL;
+	s->dataPtr = s->dataPtrL;
+	s->origDataPtrR = NULL;
+	s->dataPtrR = NULL;
 }
 
 void freeSmpDataPtr(smpPtr_t *sp)
@@ -2373,21 +2377,22 @@ static void pasteOverwrite(sample_t *s)
 	setMouseBusy(false);
 }
 
-static void pasteCopiedData(int8_t *dataPtr, int32_t offset, int32_t length, bool sample16Bit)
+static void pasteCopiedChannel(int8_t *dataPtr, const int8_t *source,
+    int32_t offset, int32_t length, bool sample16Bit)
 {
 	if (sample16Bit) // destination sample is 16-bits
 	{
 		if (smpCopyBuffer.bits == 16)
 		{
 			// src/dst bits are equal, do direct copy
-			memcpy(&dataPtr[offset<<1], smpCopyBuffer.L, length * sizeof (int16_t));
+			memcpy(&dataPtr[offset<<1], source, length * sizeof (int16_t));
 		}
 		else
 		{
 			// convert copied data to 16-bit then paste
 			int16_t *ptr16 = (int16_t *)dataPtr + offset;
 			for (int32_t i = 0; i < length; i++)
-				ptr16[i] = smpCopyBuffer.L[i] << 8;
+				ptr16[i] = (int16_t)((int16_t)source[i] * 256);
 		}
 	}
 	else // destination sample is 8-bits
@@ -2395,13 +2400,13 @@ static void pasteCopiedData(int8_t *dataPtr, int32_t offset, int32_t length, boo
 		if (smpCopyBuffer.bits == 8)
 		{
 			// src/dst bits are equal, do direct copy
-			memcpy(&dataPtr[offset], smpCopyBuffer.L, length * sizeof (int8_t));
+			memcpy(&dataPtr[offset], source, length * sizeof (int8_t));
 		}
 		else
 		{
 			// convert copied data to 8-bit then paste
 			int8_t *ptr8 = (int8_t *)&dataPtr[offset];
-			int16_t *ptr16 = (int16_t *)smpCopyBuffer.L;
+			const int16_t *ptr16 = (const int16_t *)source;
 
 			for (int32_t i = 0; i < length; i++)
 				ptr8[i] = ptr16[i] >> 8;
@@ -2409,19 +2414,9 @@ static void pasteCopiedData(int8_t *dataPtr, int32_t offset, int32_t length, boo
 	}
 }
 
-static void pasteCopiedDataStereo(sample_t *s, int32_t offset, int32_t length, bool sample16Bit)
-{
-	// Paste L
-	pasteCopiedData(s->dataPtrL, offset, length, sample16Bit);
-	// Paste R if stereo (duplicate L for now)
-	if ((s->flags & SAMPLE_STEREO) && s->dataPtrR)
-		pasteCopiedData(s->dataPtrR, offset, length, sample16Bit);
-	// TODO: If copy buffer supports stereo, paste both channels
-}
-
 static int32_t SDLCALL sampPasteThread(void *ptr)
 {
-	smpPtr_t sp;
+	smpPtr_t left = { 0 }, right = { 0 };
 
 	if (instr[editor.curInstr] == NULL && !allocateInstr(editor.curInstr))
 	{
@@ -2439,24 +2434,22 @@ static int32_t SDLCALL sampPasteThread(void *ptr)
 	bool sample16Bit = !!(s->flags & SAMPLE_16BIT);
 	bool stereo = !!(s->flags & SAMPLE_STEREO);
 
-	if (s->length+smpCopyBuffer.size > MAX_SAMPLE_LEN)
+	const int64_t newLength64 = (int64_t)s->length + smpCopyBuffer.size - (smpEd_Rx2 - smpEd_Rx1);
+	if (newLength64 <= 0)
+		return true;
+
+	if (newLength64 > MAX_SAMPLE_LEN)
 	{
 		okBoxThreadSafe(0, "System message", "Not enough room in sample!", NULL);
 		return true;
 	}
+	const int32_t newLength = (int32_t)newLength64;
 
-	int32_t newLength = s->length + smpCopyBuffer.size - (smpEd_Rx2 - smpEd_Rx1);
-	if (newLength <= 0)
-		return true;
-
-	if (newLength > MAX_SAMPLE_LEN)
+	if (!allocateSmpDataPtr(&left, newLength, sample16Bit) ||
+	    (stereo && !allocateSmpDataPtr(&right, newLength, sample16Bit)))
 	{
-		okBoxThreadSafe(0, "System message", "Not enough room in sample!", NULL);
-		return true;
-	}
-
-	if (!allocateSmpDataPtr(&sp, newLength, sample16Bit))
-	{
+		freeSmpDataPtr(&left);
+		freeSmpDataPtr(&right);
 		okBoxThreadSafe(0, "System message", "Not enough memory!", NULL);
 		return true;
 	}
@@ -2467,29 +2460,38 @@ static int32_t SDLCALL sampPasteThread(void *ptr)
 	// paste left part of original sample
 	if (smpEd_Rx1 > 0)
 	{
-		memcpy(sp.ptr, s->dataPtrL, smpEd_Rx1 << sample16Bit);
+		memcpy(left.ptr, s->dataPtrL, smpEd_Rx1 << sample16Bit);
 		if (stereo && s->dataPtrR)
-			memcpy(sp.ptr + (newLength << sample16Bit), s->dataPtrR, smpEd_Rx1 << sample16Bit);
+			memcpy(right.ptr, s->dataPtrR, smpEd_Rx1 << sample16Bit);
 	}
 
 	// paste copied data
-	pasteCopiedDataStereo(s, smpEd_Rx1, smpCopyBuffer.size, sample16Bit);
+	pasteCopiedChannel(left.ptr, smpCopyBuffer.L, smpEd_Rx1, smpCopyBuffer.size, sample16Bit);
+	if (stereo) {
+		const int8_t *rightSource = smpCopyBuffer.stereo && smpCopyBuffer.R != NULL
+			? smpCopyBuffer.R : smpCopyBuffer.L;
+		pasteCopiedChannel(right.ptr, rightSource, smpEd_Rx1, smpCopyBuffer.size, sample16Bit);
+	}
 
 	// paste right part of original sample
 	if (smpEd_Rx2 < s->length)
 	{
-		memmove(&sp.ptr[(smpEd_Rx1+smpCopyBuffer.size) << sample16Bit], &s->dataPtrL[smpEd_Rx2 << sample16Bit], (s->length-smpEd_Rx2) << sample16Bit);
+		memmove(&left.ptr[(smpEd_Rx1+smpCopyBuffer.size) << sample16Bit], &s->dataPtrL[smpEd_Rx2 << sample16Bit], (s->length-smpEd_Rx2) << sample16Bit);
 		if (stereo && s->dataPtrR)
-			memmove(&sp.ptr[(smpEd_Rx1+smpCopyBuffer.size+smpCopyBuffer.size) << sample16Bit], &s->dataPtrR[smpEd_Rx2 << sample16Bit], (s->length-smpEd_Rx2) << sample16Bit);
+			memmove(&right.ptr[(smpEd_Rx1+smpCopyBuffer.size) << sample16Bit], &s->dataPtrR[smpEd_Rx2 << sample16Bit], (s->length-smpEd_Rx2) << sample16Bit);
 	}
 
 	freeSmpData(s);
-	setSmpDataPtr(s, &sp);
+	setSmpDataPtr(s, &left);
+	if (stereo) {
+		s->origDataPtrR = right.origPtr;
+		s->dataPtrR = right.ptr;
+	}
 
 	// adjust loop points if necessary
 	if (smpEd_Rx2-smpEd_Rx1 != smpCopyBuffer.size)
 	{
-		int32_t loopAdjust = smpCopyBuffer.size - (smpEd_Rx1 - smpEd_Rx2);
+		int32_t loopAdjust = smpCopyBuffer.size - (smpEd_Rx2 - smpEd_Rx1);
 
 		if (s->loopStart > smpEd_Rx2)
 		{
@@ -4208,3 +4210,37 @@ static void drawSampleOffset(void)
     // draw text
     textOutShadow(x, y, PAL_FORGRND, PAL_DSKTOP2, txt);
 }
+
+#ifdef FT2_STABILITY_TESTS
+bool runSampleEditorRegressionTests(void)
+{
+	bool ok = true;
+	smpPtr_t allocated = { 0 };
+	sample_t sample = { 0 };
+	ok = allocateSmpDataPtr(&allocated, 4, false);
+	if (ok) {
+		setSmpDataPtr(&sample, &allocated);
+		ok = sample.dataPtrL == sample.dataPtr && sample.origDataPtrL == sample.origDataPtr &&
+			sample.dataPtrR == NULL && sample.origDataPtrR == NULL;
+		freeSmpData(&sample);
+	}
+
+	const int8_t source8[4] = { -128, -1, 1, 127 };
+	int16_t destination16[4] = { 0 };
+	smpCopyBuffer.bits = 8;
+	pasteCopiedChannel((int8_t *)destination16, source8, 0, 4, true);
+	ok = ok && destination16[0] == -32768 && destination16[1] == -256 &&
+		destination16[2] == 256 && destination16[3] == 32512;
+
+	const int16_t left16[4] = { -32768, -256, 256, 32512 };
+	const int16_t right16[4] = { 32512, 256, -256, -32768 };
+	int8_t left8[4] = { 0 }, right8[4] = { 0 };
+	smpCopyBuffer.bits = 16;
+	pasteCopiedChannel(left8, (const int8_t *)left16, 0, 4, false);
+	pasteCopiedChannel(right8, (const int8_t *)right16, 0, 4, false);
+	ok = ok && !memcmp(left8, source8, sizeof(left8));
+	const int8_t expectedRight[4] = { 127, 1, -1, -128 };
+	ok = ok && !memcmp(right8, expectedRight, sizeof(right8));
+	return ok;
+}
+#endif

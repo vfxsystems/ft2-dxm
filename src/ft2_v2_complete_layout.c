@@ -1440,6 +1440,7 @@ void v2_show_layout(V2CompleteLayout *layout)
 void v2_hide_layout(V2CompleteLayout *layout)
 {
     if (!layout) return;
+    layout->mouse_capture = NULL;
     layout->visible = false;
     if (g_active_v2_layout == layout)
         g_active_v2_layout = NULL;
@@ -1448,6 +1449,7 @@ void v2_hide_layout(V2CompleteLayout *layout)
 void v2_switch_to_page(V2CompleteLayout *layout, int page)
 {
     if (!layout) return;
+    layout->mouse_capture = NULL;
     layout->current_page = v2_clampi(page, 0, V2_PAGE_COUNT - 1);
     v2_update_widget_visibility(layout);
 }
@@ -1638,12 +1640,29 @@ bool v2_handle_layout_mouse_event(V2CompleteLayout *layout, int mouseX, int mous
 
     v2_set_active_instrument(layout);
 
+    if (!pressed)
+    {
+        /* Release the captured control even when the pointer left its bounds. */
+        if (layout->mouse_capture && layout->mouse_capture->type == TF_WIDGET_BUTTON)
+            layout->mouse_capture->pressed = false;
+        layout->mouse_capture = NULL;
+        v2_apply_page_button_state(layout);
+        return true;
+    }
+    layout->mouse_capture = NULL;
+
     for (i = layout->all_widget_count - 1; i >= 0; --i)
     {
         TunefishWidget *widget = layout->all_widgets[i];
         if (!widget || !widget->visible) continue;
-        if (tf_widget_handle_mouse_event(widget, mouseX, mouseY, pressed))
+        const int page = layout->current_page;
+        if (tf_widget_handle_mouse_event(widget, mouseX, mouseY, true))
+        {
+            if (layout->visible && widget->visible && layout->current_page == page)
+                layout->mouse_capture = widget;
+            v2_apply_page_button_state(layout);
             return true;
+        }
     }
 
     return true;
@@ -1651,23 +1670,14 @@ bool v2_handle_layout_mouse_event(V2CompleteLayout *layout, int mouseX, int mous
 
 bool v2_handle_layout_mouse_drag(V2CompleteLayout *layout, int mouseX, int mouseY)
 {
-    int i;
-
     if (!layout || !layout->visible) return false;
-
-    for (i = layout->all_widget_count - 1; i >= 0; --i)
-    {
-        TunefishWidget *widget = layout->all_widgets[i];
-        if (!widget || !widget->visible) continue;
-        if (widget->type != TF_WIDGET_ROTARY_SLIDER && widget->type != TF_WIDGET_LINEAR_SLIDER)
-            continue;
-        if (!tf_widget_is_point_inside(widget, mouseX, mouseY))
-            continue;
-        if (tf_widget_handle_mouse_event(widget, mouseX, mouseY, true))
-            return true;
-    }
-
-    return false;
+    TunefishWidget *widget = layout->mouse_capture;
+    if (!widget || !widget->visible || !widget->enabled) return false;
+    if (widget->type != TF_WIDGET_ROTARY_SLIDER && widget->type != TF_WIDGET_LINEAR_SLIDER)
+        return false;
+    mouseX = v2_clampi(mouseX, widget->x, widget->x + widget->w - 1);
+    mouseY = v2_clampi(mouseY, widget->y, widget->y + widget->h - 1);
+    return tf_widget_handle_mouse_event(widget, mouseX, mouseY, true);
 }
 
 bool v2_handle_layout_keyboard_test(V2CompleteLayout *layout, int key)

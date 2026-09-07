@@ -509,8 +509,11 @@ static int32_t SDLCALL saveSampleThread(void *ptr)
 	const UNICHAR *oldPathU = getDiskOpCurPath();
 
 	// in "save range mode", we must enter the sample directory
-	if (saveRangeFlag)
-		UNICHAR_CHDIR(getDiskOpSmpPath());
+	if (saveRangeFlag && UNICHAR_CHDIR(getDiskOpSmpPath()) != 0)
+	{
+		okBoxThreadSafe(0, "System message", "Couldn't enter the sample directory!", NULL);
+		return false;
+	}
 
 	switch (editor.sampleSaveMode)
 	{
@@ -521,7 +524,7 @@ static int32_t SDLCALL saveSampleThread(void *ptr)
 
 	// set back old working directory if we changed it
 	if (saveRangeFlag)
-		UNICHAR_CHDIR(oldPathU);
+		(void)!UNICHAR_CHDIR(oldPathU);
 
 	return true;
 

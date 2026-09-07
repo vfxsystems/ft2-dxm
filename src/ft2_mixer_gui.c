@@ -1162,8 +1162,7 @@ void hideMixerScreen(void)
         return;
 
     cacheMixerStateFromGUI();
-    // TODO: make this dynamic
-    const uint8_t numMixerChans = 16;
+    const uint8_t numMixerChans = MAX_STEREO_PAIRS;
     hideMixerWidgets(numMixerChans);
 
     hidePushButton(MIXER_EXIT_BUTTON_ID);

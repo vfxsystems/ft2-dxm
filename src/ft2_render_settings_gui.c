@@ -1,11 +1,4 @@
-/* ft2_render_settings_gui.c
- * Minimal placeholder implementation for a future fully-featured
- * advanced render settings dialog.
- *
- * Currently it just pops up an okBox so that the new Settings push-button
- * works and the codebase continues compiling. The proper modal dialog with
- * widgets can be added incrementally without blocking other work.
- */
+/* Modal settings for WAV export and render-to-sample. */
 
 #include <stdbool.h>
 #include "ft2_header.h"
@@ -20,7 +13,6 @@
 #include "ft2_mouse.h"
 
 typedef struct {
-    bool postDSP;
     bool toSlot;
     uint8_t slotIndex;
     uint8_t bitDepth;
@@ -29,18 +21,28 @@ typedef struct {
 
 static renderSettings_t renderSettingsLocal;
 
-#include "ft2_pushbuttons.h"
-#include "ft2_events.h"
-
-#define RS_PB_BASE (NUM_PUSHBUTTONS - 6) // OK/Cancel reserved
+#define RS_PB_BASE PB_RENDER_SETTINGS_FIRST
 static bool rsExitCancel;
+static radioButton_t savedRadioButtons[4];
 
 static void pbRSOk(void) { ui.sysReqShown = false; rsExitCancel = false; }
 static void pbRSCancel(void) { ui.sysReqShown = false; rsExitCancel = true; }
 static void pbRSSlotDec(void) { if (renderSettingsLocal.slotIndex > 0) renderSettingsLocal.slotIndex--; }
 static void pbRSSlotInc(void) { if (renderSettingsLocal.slotIndex < MAX_SMP_PER_INST - 1) renderSettingsLocal.slotIndex++; }
-static void pbRSRateDec(void) { if (renderSettingsLocal.sampleRate > MIN_WAV_RENDER_FREQ) renderSettingsLocal.sampleRate -= MIN_WAV_RENDER_FREQ; }
-static void pbRSRateInc(void) { if (renderSettingsLocal.sampleRate < MAX_WAV_RENDER_FREQ) renderSettingsLocal.sampleRate += MIN_WAV_RENDER_FREQ; }
+static void pbRSRateDec(void)
+{
+    if (renderSettingsLocal.sampleRate == 384000) renderSettingsLocal.sampleRate = 192000;
+    else if (renderSettingsLocal.sampleRate == 192000) renderSettingsLocal.sampleRate = 96000;
+    else if (renderSettingsLocal.sampleRate == 96000) renderSettingsLocal.sampleRate = 48000;
+    else if (renderSettingsLocal.sampleRate == 48000) renderSettingsLocal.sampleRate = 44100;
+}
+static void pbRSRateInc(void)
+{
+    if (renderSettingsLocal.sampleRate == 44100) renderSettingsLocal.sampleRate = 48000;
+    else if (renderSettingsLocal.sampleRate == 48000) renderSettingsLocal.sampleRate = 96000;
+    else if (renderSettingsLocal.sampleRate == 96000) renderSettingsLocal.sampleRate = 192000;
+    else if (renderSettingsLocal.sampleRate == 192000) renderSettingsLocal.sampleRate = 384000;
+}
 
 static void pbRSBitDepth16(void);
 static void pbRSBitDepth32(void);
@@ -66,21 +68,36 @@ static void setupRenderSettingsDialogWidgets(void)
 
     // Slot index decrement
     p = &pushButtons[RS_PB_BASE + 2]; memset(p, 0, sizeof(*p));
-    p->caption = ARROW_LEFT_STRING; p->x = x + 80; p->y = y + 80; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSSlotDec; p->visible = true;
+    p->caption = ARROW_LEFT_STRING; p->x = x + 80; p->y = y + 64; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSSlotDec; p->visible = renderSettingsLocal.toSlot;
 
     // Slot index increment
     p = &pushButtons[RS_PB_BASE + 3]; memset(p, 0, sizeof(*p));
-    p->caption = ARROW_RIGHT_STRING; p->x = x + 128; p->y = y + 80; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSSlotInc; p->visible = true;
+    p->caption = ARROW_RIGHT_STRING; p->x = x + 128; p->y = y + 64; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSSlotInc; p->visible = renderSettingsLocal.toSlot;
 
     // Sample rate decrement
     p = &pushButtons[RS_PB_BASE + 4]; memset(p, 0, sizeof(*p));
-    p->caption = ARROW_LEFT_STRING; p->x = x + 120; p->y = y + 128; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSRateDec; p->visible = true;
+    p->caption = ARROW_LEFT_STRING; p->x = x + 120; p->y = y + 112; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSRateDec; p->visible = true;
 
     // Sample rate increment
     p = &pushButtons[RS_PB_BASE + 5]; memset(p, 0, sizeof(*p));
-    p->caption = ARROW_RIGHT_STRING; p->x = x + 168; p->y = y + 128; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSRateInc; p->visible = true;
+    p->caption = ARROW_RIGHT_STRING; p->x = x + 200; p->y = y + 112; p->w = 13; p->h = 13; p->callbackFuncOnDown = pbRSRateInc; p->visible = true;
 
-    // Radio buttons for Render Settings Dialog
+    // These radio IDs are also used by the underlying WAV screen. Save and
+    // restore their complete definitions so the modal cannot corrupt it.
+    memcpy(savedRadioButtons, &radioButtons[RB_WAV_RENDER_BITDEPTH16], sizeof(savedRadioButtons));
+    radioButtons[RB_WAV_RENDER_BITDEPTH16].x = x + 120;
+    radioButtons[RB_WAV_RENDER_BITDEPTH16].y = y + 87;
+    radioButtons[RB_WAV_RENDER_BITDEPTH16].clickAreaWidth = 55;
+    radioButtons[RB_WAV_RENDER_BITDEPTH32].x = x + 185;
+    radioButtons[RB_WAV_RENDER_BITDEPTH32].y = y + 87;
+    radioButtons[RB_WAV_RENDER_BITDEPTH32].clickAreaWidth = 55;
+    radioButtons[RB_WAV_RENDER_TARGET_FILE].x = x + 120;
+    radioButtons[RB_WAV_RENDER_TARGET_FILE].y = y + 39;
+    radioButtons[RB_WAV_RENDER_TARGET_FILE].clickAreaWidth = 70;
+    radioButtons[RB_WAV_RENDER_TARGET_SLOT].x = x + 200;
+    radioButtons[RB_WAV_RENDER_TARGET_SLOT].y = y + 39;
+    radioButtons[RB_WAV_RENDER_TARGET_SLOT].clickAreaWidth = 80;
+
     // Bit depth options
     radioButtons[RB_WAV_RENDER_BITDEPTH16].callbackFunc = pbRSBitDepth16;
     radioButtons[RB_WAV_RENDER_BITDEPTH32].callbackFunc = pbRSBitDepth32;
@@ -119,33 +136,33 @@ static void drawRenderSettingsBox(void)
     textOutShadow(x+16, y+8,   PAL_FORGRND, PAL_BUTTON2, "Render Settings");
 
     // Labels
-    textOutShadow(x+16,  y+32,  PAL_FORGRND, PAL_DSKTOP2, "Signal Path:");
-    textOutShadow(x+16,  y+56,  PAL_FORGRND, PAL_DSKTOP2, "Destination:");
-    textOutShadow(x+16,  y+104, PAL_FORGRND, PAL_DSKTOP2, "Bit Depth:");
-    textOutShadow(x+16,  y+128, PAL_FORGRND, PAL_DSKTOP2, "Sample Rate:");
+    textOutShadow(x+16,  y+40,  PAL_FORGRND, PAL_DSKTOP2, "Destination:");
+    textOutShadow(x+16,  y+64,  PAL_FORGRND, PAL_DSKTOP2, "Sample Slot:");
+    textOutShadow(x+16,  y+88, PAL_FORGRND, PAL_DSKTOP2, "Bit Depth:");
+    textOutShadow(x+16,  y+112, PAL_FORGRND, PAL_DSKTOP2, "Sample Rate:");
 
     // Values
-    textOutShadow(x+120, y+32,  PAL_FORGRND, PAL_DSKTOP2,
-        renderSettingsLocal.postDSP ? "Post-DSP" : "Pre-Fade");
-    textOutShadow(x+120, y+56,  PAL_FORGRND, PAL_DSKTOP2,
-        renderSettingsLocal.toSlot ? "Sample Slot" : "Disk File");
+    textOutShadow(x+134, y+40, PAL_FORGRND, PAL_DSKTOP2, "File");
+    textOutShadow(x+214, y+40, PAL_FORGRND, PAL_DSKTOP2, "Sample");
+    textOutShadow(x+134, y+88, PAL_FORGRND, PAL_DSKTOP2, "16-bit");
+    textOutShadow(x+199, y+88, PAL_FORGRND, PAL_DSKTOP2, "32-bit float");
     char tmp[32];
-    snprintf(tmp, sizeof(tmp), "%u-bit", renderSettingsLocal.bitDepth);
-    textOutShadow(x+120, y+104, PAL_FORGRND, PAL_DSKTOP2, tmp);
     snprintf(tmp, sizeof(tmp), "%u Hz", renderSettingsLocal.sampleRate);
-    textOutShadow(x+120, y+128, PAL_FORGRND, PAL_DSKTOP2, tmp);
+    textOutShadow(x+137, y+112, PAL_FORGRND, PAL_DSKTOP2, tmp);
 
     // Buttons
     drawPushButton(RS_PB_BASE);
     drawPushButton(RS_PB_BASE + 1);
 
     // Slot controls
+    pushButtons[RS_PB_BASE + 2].visible = renderSettingsLocal.toSlot;
+    pushButtons[RS_PB_BASE + 3].visible = renderSettingsLocal.toSlot;
     if (renderSettingsLocal.toSlot)
     {
         drawPushButton(RS_PB_BASE + 2);
         char idxBuf[8];
         snprintf(idxBuf, sizeof(idxBuf), "%d", renderSettingsLocal.slotIndex);
-        textOutShadow(x + 96, y + 80, PAL_FORGRND, PAL_DSKTOP2, idxBuf);
+        textOutShadow(x + 96, y + 64, PAL_FORGRND, PAL_DSKTOP2, idxBuf);
         drawPushButton(RS_PB_BASE + 3);
     }
 
@@ -162,7 +179,6 @@ static void drawRenderSettingsBox(void)
 
 static void resetRenderSettingsLocal(void)
 {
-    renderSettingsLocal.postDSP = false;
     renderSettingsLocal.toSlot = WDRenderToSlot;
     renderSettingsLocal.slotIndex = editor.curSmp;
     renderSettingsLocal.bitDepth = WDBitDepth;
@@ -187,7 +203,9 @@ static void pbRSTargetSlot(void) { renderSettingsLocal.toSlot = true; }
 void showRenderSettingsDialog(void)
 {
     resetRenderSettingsLocal();
-    rsExitCancel = false;
+    /* Treat every non-OK exit, including Escape and application shutdown, as
+     * cancellation. The OK callback is the only path that commits settings. */
+    rsExitCancel = true;
     setupRenderSettingsDialogWidgets();
 
     // Open modal dialog
@@ -233,6 +251,7 @@ void showRenderSettingsDialog(void)
         hidePushButton(RS_PB_BASE + i);
     hideRadioButtonGroup(RB_GROUP_WAV_RENDER_BITDEPTH);
     hideRadioButtonGroup(RB_GROUP_WAV_RENDER_TARGET);
+    memcpy(&radioButtons[RB_WAV_RENDER_BITDEPTH16], savedRadioButtons, sizeof(savedRadioButtons));
     // Close modal dialog
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     mouseAnimOff();
@@ -248,3 +267,46 @@ void showRenderSettingsDialog(void)
     }
 }
 
+#ifdef FT2_STABILITY_TESTS
+bool runRenderSettingsRegressionTests(void)
+{
+    const renderSettings_t saved = renderSettingsLocal;
+
+    renderSettingsLocal.slotIndex = 0;
+    pbRSSlotDec();
+    if (renderSettingsLocal.slotIndex != 0) goto fail;
+    renderSettingsLocal.slotIndex = MAX_SMP_PER_INST - 1;
+    pbRSSlotInc();
+    if (renderSettingsLocal.slotIndex != MAX_SMP_PER_INST - 1) goto fail;
+
+    renderSettingsLocal.sampleRate = 44100;
+    pbRSRateInc();
+    pbRSRateInc();
+    pbRSRateInc();
+    pbRSRateInc();
+    pbRSRateInc();
+    if (renderSettingsLocal.sampleRate != 384000) goto fail;
+    pbRSRateDec();
+    pbRSRateDec();
+    pbRSRateDec();
+    pbRSRateDec();
+    pbRSRateDec();
+    if (renderSettingsLocal.sampleRate != 44100) goto fail;
+
+    pbRSBitDepth16();
+    if (renderSettingsLocal.bitDepth != 16) goto fail;
+    pbRSBitDepth32();
+    if (renderSettingsLocal.bitDepth != 32) goto fail;
+    pbRSTargetSlot();
+    if (!renderSettingsLocal.toSlot) goto fail;
+    pbRSTargetFile();
+    if (renderSettingsLocal.toSlot) goto fail;
+
+    renderSettingsLocal = saved;
+    return true;
+
+fail:
+    renderSettingsLocal = saved;
+    return false;
+}
+#endif

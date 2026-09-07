@@ -250,6 +250,27 @@ void ft2_dx_release_instrument(int instrID)
  * Rendering
  * ============================================================================= */
 
+/* Bounded scratch storage keeps additive rendering allocation-free at any block size. */
+static void render_dx_instance(void *inst, float *bufL, float *bufR, int nsamples, int add)
+{
+    if (!add) {
+        float *outs[2] = {bufL, bufR};
+        dx_instrument_process(g_dxSynth, inst, outs, (unsigned int)nsamples);
+        return;
+    }
+    float left[256], right[256];
+    float *outs[2] = {left, right};
+    for (int offset = 0; offset < nsamples; offset += 256) {
+        int count = nsamples - offset;
+        if (count > 256) count = 256;
+        dx_instrument_process(g_dxSynth, inst, outs, (unsigned int)count);
+        for (int i = 0; i < count; ++i) {
+            bufL[offset + i] += left[i];
+            if (bufL != bufR) bufR[offset + i] += right[i];
+        }
+    }
+}
+
 void ft2_dx_render_for_channel(int instrID, float* bufL, float* bufR, int nsamples, int add)
 {
     if (!g_dxSynthInitialized || !bufL || !bufR || nsamples <= 0) return;
@@ -263,18 +284,12 @@ void ft2_dx_render_for_channel(int instrID, float* bufL, float* bufR, int nsampl
         return;
     }
 
-    if (!add) {
-        memset(bufL, 0, nsamples * sizeof(float));
-        memset(bufR, 0, nsamples * sizeof(float));
-    }
-
-    float* outs[2] = { bufL, bufR };
-    dx_instrument_process(g_dxSynth, inst, outs, (unsigned int)nsamples);
+    render_dx_instance(inst, bufL, bufR, nsamples, add);
 }
 
 void ft2_dx_render(float* bufL, float* bufR, int nsamples, int add)
 {
-    if (!g_dxSynthInitialized || !bufL || !bufR) return;
+    if (!g_dxSynthInitialized || !bufL || !bufR || nsamples <= 0) return;
 
     if (!add) {
         memset(bufL, 0, nsamples * sizeof(float));
@@ -283,8 +298,7 @@ void ft2_dx_render(float* bufL, float* bufR, int nsamples, int add)
 
     for (int i = 0; i < MAX_INST; ++i) {
         if (!g_dxInst[i]) continue;
-        float* outs[2] = { bufL, bufR };
-        dx_instrument_process(g_dxSynth, g_dxInst[i], outs, (unsigned int)nsamples);
+        render_dx_instance(g_dxInst[i], bufL, bufR, nsamples, 1);
     }
 }
 

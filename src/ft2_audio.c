@@ -41,7 +41,7 @@ void unlockAudio(void);
 static int32_t smpShiftValue;
 static uint32_t oldAudioFreq, tickTimeLenInt;
 static uint64_t tickTimeLenFrac;
-static float fAudioNormalizeMul, fSqrtPanningTable[256+1];
+static float fAudioNormalizeMul = 1.0f, fSqrtPanningTable[256+1];
 static voice_t voice[MAX_CHANNELS  * 2];
 
 // globalized
@@ -168,10 +168,8 @@ void setAudioAmp(int16_t amp, int16_t masterVol, bool bitDepth32Flag)
 	masterVol = CLAMP(masterVol, 0, 256);
 
 	double dAmp = (amp * masterVol) / (32.0 * 256.0);
-	dAmp *= mixerMasterGain;
-	if (!bitDepth32Flag)
-		dAmp *= 32768.0;
-
+	/* Float-domain gain; PCM scaling belongs only to the output converter. */
+	(void)bitDepth32Flag;
 	fAudioNormalizeMul = (float)dAmp;
 }
 
@@ -746,7 +744,16 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
                     continue;
                 float *pairL = &pairMixBufL[pairIdx][bufferPosition];
                 float *pairR = &pairMixBufR[pairIdx][bufferPosition];
-                const float scale = (float)pairs[pairIdx] / (float)totalCount;
+                int routedChannels = 0, audibleChannels = 0;
+                for (int ch = 0; ch < song.numChannels; ch++)
+                {
+                    if (channel[ch].instrNum != instrID || channel[ch].noteNum == 0 ||
+                        CHANNEL_TO_PAIR_IDX(ch) != pairIdx) continue;
+                    routedChannels++;
+                    if (!channel[ch].channelOff) audibleChannels++;
+                }
+                const float muteScale = routedChannels ? (float)audibleChannels / routedChannels : 1.0f;
+                const float scale = ((float)pairs[pairIdx] / (float)totalCount) * muteScale;
                 for (int32_t s = 0; s < samplesToMix; s++) {
                     pairL[s] += synthL[s] * scale;
                     pairR[s] += synthR[s] * scale;
@@ -832,10 +839,23 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
         }
     }
 }
+/* Shared by device playback, WAV export and render-to-slot. */
+static void processMasterBus(uint32_t frames)
+{
+    dspProcessChain(masterEffects, audio.fMixBufferL, audio.fMixBufferR, frames);
+    const float gain = mixerMasterGain * fAudioNormalizeMul;
+    for (uint32_t i = 0; i < frames; i++)
+    {
+        audio.fMixBufferL[i] *= gain;
+        audio.fMixBufferR[i] *= gain;
+    }
+}
+
 // used for song-to-WAV renderer
 void mixReplayerTickToBuffer(uint32_t samplesToMix, void *stream, uint8_t bitDepth)
 {
 	doChannelMixing(0, samplesToMix);
+	processMasterBus(samplesToMix);
 
 	// normalize mix buffer and send to audio stream
 	if (bitDepth == 16)
@@ -1259,16 +1279,7 @@ static void SDLCALL audioCallback(void *userdata, Uint8 *stream, int len)
 		samplesLeft -= samplesToMix;
 	}
 
-	/* Apply master DSP effects (in-place) */
-	if (len > 0)
-		dspProcessChain(masterEffects, audio.fMixBufferL, audio.fMixBufferR, len);
-
-	/* Apply master fader */
-	for (uint32_t i = 0; i < len; i++)
-	{
-		audio.fMixBufferL[i] *= mixerMasterGain;
-		audio.fMixBufferR[i] *= mixerMasterGain;
-	}
+	processMasterBus((uint32_t)len);
 
 	if (config.specialFlags & BITDEPTH_16)
 		sendSamples16BitStereo(stream, len);
@@ -1652,3 +1663,7 @@ static void sendSamples32BitFloatStereo(void *stream, uint32_t sampleBlockLength
         out[(i << 1) + 1] = audio.fMixBufferR[i];
     }
 }
+
+#ifdef FT2_STABILITY_TESTS
+#include "../tests/audio_tests.inc"
+#endif

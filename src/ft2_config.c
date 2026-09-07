@@ -663,7 +663,11 @@ static void setConfigFileLocation(void) // kinda hackish
 			}
 
 			if (result == 0)
-				getcwd(editor.configFileLocationU, PATH_MAX - ft2DotCfgStrLen - 1);
+			{
+				char resolvedPath[PATH_MAX];
+				if (getcwd(resolvedPath, sizeof(resolvedPath)) != NULL)
+					strcpy(editor.configFileLocationU, resolvedPath);
+			}
 		}
 	}
 	else
