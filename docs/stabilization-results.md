@@ -39,12 +39,13 @@ master gain/export discrepancies and the stateless-gainer bypass.
 - Removed dormant Dexed plugin-host, ZIP, and unimplemented tuning shims, the unused envelope UI, and generated OsTIrus placeholder aliases. Debug event logging is compile-time opt-in.
 - Legacy S3M import now validates signed header counts, file offsets, packed event boundaries, and decoded stereo/16-bit sample sizes before reading or allocating. DIGI and MOD imports require complete pattern events and sample payloads instead of decoding stale bytes or padding truncated files.
 - BEM import now validates every metadata, instrument, track-table, track, and sample read. Track storage is sized from validated pattern references, compressed opcodes decode from bounded buffers, repeat runs cannot overrun row storage, and temporary decoded tracks are released on success and failure.
+- IT import now validates signatures, count tables, offsets, instrument/sample references, pattern bounds, loop ranges, and complete sample payloads before use. Pattern events and compressed 8/16-bit samples decode through bounded readers; invalid channel descriptors, bit-width transitions, truncated blocks, and row overruns fail cleanly. Empty instruments no longer access an uninitialized sample header.
 
 ## Validation
 
 The expanded six-test CTest suite passed in Release and Debug and under
-ASan/leak detection after the loader, saver, stereo editor, and effect-stack
-changes. Three Python exporter tests cover exclusions, nested
+ASan/leak detection after the loader, saver, stereo editor, effect-stack, and IT
+decoder changes. Three Python exporter tests cover exclusions, nested
 firmware archives, and credential-signature rejection. The suite includes
 numerical live/export checks, original unity transfer, 16-bit conversion,
 large-block DSP, synth mute/stop, input sequences, and existing V2 persistence
@@ -78,7 +79,7 @@ OsTIrus measurements without firmware.
 - Finish the realtime ownership audit: MIDI dispatch now follows the application input loop (roughly 60 Hz), adding frame-dependent latency compared with direct device-thread dispatch. Measure end-to-end latency and move audition scheduling to an audio-owned command path before making low-latency performance claims. Dexed automation writers still acquire a mutex, and other engines/control paths require review.
 - Verify physical MIDI unplug/reconnect on actual devices. Explicit device close releases owned notes, but silent hardware disappearance without a close notification is not automatically detected.
 - Validate MIDI sustain/disconnect, shared-instrument voice isolation, dense arrangements, time-dependent effects, and complete DXM/DXI project round trips. Include interrupted/failed saves and stereo sample round trips on real projects. The existing shared-instance/channel mapping is documented in the mixer contract.
-- Fuzz and finish short-read/error propagation in the legacy IT, XM, AIFF, BRR, IFF, and WAV importers before accepting untrusted files as a hardened production claim. DXM has bounded-reader coverage; S3M, DIGI, MOD, and BEM now reject truncated or structurally invalid payloads, while the remaining older importers retain unchecked-read paths.
+- Fuzz and finish short-read/error propagation in the legacy XM, AIFF, BRR, IFF, and WAV importers before accepting untrusted files as a hardened production claim. DXM has bounded-reader coverage; S3M, DIGI, MOD, BEM, and IT now reject truncated or structurally invalid payloads, while the remaining older importers retain unchecked-read paths.
 - Perform listening comparisons with representative user projects. Configuration volume and previously bypassed gainer/export controls now work, so old projects relying on those omissions may sound different; see the compatibility notes.
 - Complete asset/preset provenance review and native target/device validation before publishing. No repository upload, history rewrite, or release tag has been performed.
 

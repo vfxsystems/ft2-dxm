@@ -115,15 +115,120 @@ itSmpHdr_t;
 static uint8_t decompBuffer[65536];
 static uint8_t volPortaConv[9] = { 1, 4, 8, 16, 32, 64, 96, 128, 255 };
 
+static bool readExact(FILE *f, void *dst, size_t bytes)
+{
+	return bytes == 0 || fread(dst, 1, bytes, f) == bytes;
+}
+
+static bool fileRangeValid(uint32_t offset, uint64_t length, uint32_t filesize)
+{
+	return offset <= filesize && length <= (uint64_t)filesize - offset;
+}
+
+static bool seekTo(FILE *f, uint32_t offset, uint32_t filesize)
+{
+	return offset <= filesize && fseek(f, (long)offset, SEEK_SET) == 0;
+}
+
+static bool decodeITPattern(const uint8_t *data, size_t dataSize, note_t *patt,
+	uint16_t numRows, uint32_t *highestChannel)
+{
+	uint8_t lastMask[64] = { 0 };
+	note_t lastNote[64] = { 0 };
+	size_t pos = 0;
+	uint16_t row = 0;
+
+	while (pos < dataSize && row < numRows)
+	{
+		const uint8_t descriptor = data[pos++];
+		if (descriptor == 0)
+		{
+			row++;
+			continue;
+		}
+
+		const uint8_t encodedChannel = descriptor & 0x7F;
+		if (encodedChannel == 0 || encodedChannel > 64)
+			return false;
+		const uint8_t ch = encodedChannel - 1;
+		if (ch > *highestChannel)
+			*highestChannel = ch;
+
+		note_t discardedNote = { 0 };
+		note_t *noteOut = ch >= MAX_CHANNELS ? &discardedNote : &patt[(row * MAX_CHANNELS) + ch];
+
+		if (descriptor & 0x80)
+		{
+			if (pos >= dataSize) return false;
+			lastMask[ch] = data[pos++];
+		}
+
+		const uint8_t mask = lastMask[ch];
+		if (mask & 0x10) noteOut->note = lastNote[ch].note;
+		if (mask & 0x20) noteOut->instr = lastNote[ch].instr;
+		if (mask & 0x40) noteOut->vol = lastNote[ch].vol;
+		if (mask & 0x80)
+		{
+			noteOut->efx = lastNote[ch].efx;
+			noteOut->efxData = lastNote[ch].efxData;
+		}
+
+		if (mask & 1)
+		{
+			if (pos >= dataSize) return false;
+			uint8_t note = data[pos++];
+			if (note < 120)
+			{
+				note++;
+				if (note < 12 || note >= 96+12)
+					note = 0;
+				else
+					note -= 12;
+			}
+			else if (note != 254)
+			{
+				note = NOTE_OFF;
+			}
+
+			if (note > NOTE_OFF && note != 254)
+				note = 0;
+			noteOut->note = lastNote[ch].note = note;
+		}
+
+		if (mask & 2)
+		{
+			if (pos >= dataSize) return false;
+			uint8_t instrument = data[pos++];
+			if (instrument > MAX_INST) instrument = 0;
+			noteOut->instr = lastNote[ch].instr = instrument;
+		}
+
+		if (mask & 4)
+		{
+			if (pos >= dataSize || data[pos] == UINT8_MAX) return false;
+			noteOut->vol = lastNote[ch].vol = 1 + data[pos++];
+		}
+
+		if (mask & 8)
+		{
+			if (dataSize - pos < 2) return false;
+			noteOut->efx = lastNote[ch].efx = data[pos++];
+			noteOut->efxData = lastNote[ch].efxData = data[pos++];
+		}
+	}
+
+	return row == numRows;
+}
+
 static bool loadCompressed16BitSample(FILE *f, sample_t *s, bool deltaEncoded);
 static bool loadCompressed8BitSample(FILE *f, sample_t *s, bool deltaEncoded);
 static void setAutoVibrato(instr_t *ins, itSmpHdr_t *itSmp);
-static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp);
+static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp, uint32_t filesize);
 
 bool loadIT(FILE *f, uint32_t filesize)
 {
 	uint32_t insOffs[256], smpOffs[256], patOffs[256];
-	itSmpHdr_t *itSmp, smpHdrs[256];
+	itSmpHdr_t *itSmp, smpHdrs[256] = { 0 };
 	itHdr_t itHdr;
 
 	if (filesize < sizeof (itHdr))
@@ -132,7 +237,8 @@ bool loadIT(FILE *f, uint32_t filesize)
 		goto error;
 	}
 
-	fread(&itHdr, sizeof (itHdr), 1, f);
+	if (!readExact(f, &itHdr, sizeof (itHdr)) || memcmp(itHdr.ID, "IMPM", 4) != 0)
+		goto error;
 
 	if (itHdr.ordNum > 257 || itHdr.insNum > 256 || itHdr.smpNum > 256 || itHdr.patNum > 256)
 	{
@@ -154,15 +260,21 @@ bool loadIT(FILE *f, uint32_t filesize)
 	bool oldEffects = !!(itHdr.flags & 16);
 	bool compatGxx = !!(itHdr.flags & 32);
 
+	uint8_t orderList[257];
+	if (!readExact(f, orderList, itHdr.ordNum))
+		goto error;
+
 	// read order list
-	for (int32_t i = 0; i < MAX_ORDERS; i++)
+	for (uint16_t i = 0; i < itHdr.ordNum && i < MAX_ORDERS; i++)
 	{
-		const uint8_t patt = (uint8_t)fgetc(f);
+		const uint8_t patt = orderList[i];
 		if (patt == 254) // separator ("+++"), skip it
 			continue;
 
 		if (patt == 255) // end of pattern list
 			break;
+		if (patt >= itHdr.patNum)
+			goto error;
 
 		songTmp.orders[songTmp.songLength] = patt;
 
@@ -172,15 +284,22 @@ bool loadIT(FILE *f, uint32_t filesize)
 	}
 
 	// read file pointers
-	fseek(f, sizeof (itHdr) + itHdr.ordNum, SEEK_SET);
-	fread(insOffs, 4, itHdr.insNum, f);
-	fread(smpOffs, 4, itHdr.smpNum, f);
-	fread(patOffs, 4, itHdr.patNum, f);
+	const uint64_t offsetTableBytes = ((uint64_t)itHdr.insNum + itHdr.smpNum + itHdr.patNum) * sizeof (uint32_t);
+	const uint32_t offsetTablePos = (uint32_t)sizeof (itHdr) + itHdr.ordNum;
+	if (!fileRangeValid(offsetTablePos, offsetTableBytes, filesize) ||
+		!seekTo(f, offsetTablePos, filesize) ||
+		!readExact(f, insOffs, (size_t)itHdr.insNum * sizeof (insOffs[0])) ||
+		!readExact(f, smpOffs, (size_t)itHdr.smpNum * sizeof (smpOffs[0])) ||
+		!readExact(f, patOffs, (size_t)itHdr.patNum * sizeof (patOffs[0])))
+		goto error;
 
 	for (int32_t i = 0; i < itHdr.smpNum; i++)
 	{
-		fseek(f, smpOffs[i], SEEK_SET);
-		fread(&smpHdrs[i], sizeof (itSmpHdr_t), 1, f);
+		if (!fileRangeValid(smpOffs[i], sizeof (itSmpHdr_t), filesize) ||
+			!seekTo(f, smpOffs[i], filesize) ||
+			!readExact(f, &smpHdrs[i], sizeof (itSmpHdr_t)) ||
+			memcmp(smpHdrs[i].ID, "IMPS", 4) != 0)
+			goto error;
 	}
 
 	if (!songUsesInstruments) // read samples (as instruments)
@@ -207,7 +326,7 @@ bool loadIT(FILE *f, uint32_t filesize)
 			{
 				setAutoVibrato(ins, itSmp);
 
-				if (!loadSample(f, s, itSmp))
+				if (!loadSample(f, s, itSmp, filesize))
 				{
 					loaderMsgBox("Not enough memory!");
 					goto error;
@@ -222,8 +341,10 @@ bool loadIT(FILE *f, uint32_t filesize)
 		int32_t numIns = MIN(itHdr.insNum, MAX_INST);
 		for (int16_t i = 0; i < numIns; i++)
 		{
-			fseek(f, insOffs[i], SEEK_SET);
-			fread(&itIns, sizeof (itIns), 1, f);
+			if (!fileRangeValid(insOffs[i], sizeof (itIns), filesize) ||
+				!seekTo(f, insOffs[i], filesize) || !readExact(f, &itIns, sizeof (itIns)) ||
+				memcmp(itIns.ID, "IMPI", 4) != 0)
+				goto error;
 
 			if (!allocateTmpInstr(1 + i))
 			{
@@ -252,6 +373,8 @@ bool loadIT(FILE *f, uint32_t filesize)
 			for (int32_t j = 0; j < 96; j++)
 			{
 				uint8_t sample = itIns.smpNoteTable[12+j] >> 8;
+				if (sample > itHdr.smpNum)
+					goto error;
 				if (sample > 0 && !sampleAdded[sample-1] && numSamples < MAX_SMP_PER_INST)
 				{
 					sampleAdded[sample-1] = true;
@@ -277,7 +400,7 @@ bool loadIT(FILE *f, uint32_t filesize)
 				}
 			}
 
-			if (singleSample)
+			if (singleSample && numSamples == 1)
 				setAutoVibrato(ins, &smpHdrs[sampleList[0]]);
 
 			// create new note-to-sample table
@@ -347,7 +470,7 @@ bool loadIT(FILE *f, uint32_t filesize)
 				sample_t *s = ins->smp;
 				for (int32_t j = 0; j < ins->numSamples; j++, s++)
 				{
-					if (!loadSample(f, s, &smpHdrs[sampleList[j]]))
+					if (!loadSample(f, s, &smpHdrs[sampleList[j]], filesize))
 					{
 						loaderMsgBox("Not enough memory!");
 						goto error;
@@ -363,8 +486,10 @@ bool loadIT(FILE *f, uint32_t filesize)
 		int32_t numIns = MIN(itHdr.insNum, MAX_INST);
 		for (int16_t i = 0; i < numIns; i++)
 		{
-			fseek(f, insOffs[i], SEEK_SET);
-			fread(&itIns, sizeof (itIns), 1, f);
+			if (!fileRangeValid(insOffs[i], sizeof (itIns), filesize) ||
+				!seekTo(f, insOffs[i], filesize) || !readExact(f, &itIns, sizeof (itIns)) ||
+				memcmp(itIns.ID, "IMPI", 4) != 0)
+				goto error;
 
 			if (!allocateTmpInstr(1 + i))
 			{
@@ -393,6 +518,8 @@ bool loadIT(FILE *f, uint32_t filesize)
 			for (int32_t j = 0; j < 96; j++)
 			{
 				uint8_t sample = itIns.smpNoteTable[12+j] >> 8;
+				if (sample > itHdr.smpNum)
+					goto error;
 				if (sample > 0 && !sampleAdded[sample-1] && numSamples < MAX_SMP_PER_INST)
 				{
 					sampleAdded[sample-1] = true;
@@ -418,7 +545,7 @@ bool loadIT(FILE *f, uint32_t filesize)
 				}
 			}
 
-			if (singleSample)
+			if (singleSample && numSamples == 1)
 				setAutoVibrato(ins, &smpHdrs[sampleList[0]]);
 
 			// create new note-to-sample table
@@ -523,7 +650,7 @@ bool loadIT(FILE *f, uint32_t filesize)
 				sample_t *s = ins->smp;
 				for (int32_t j = 0; j < ins->numSamples; j++, s++)
 				{
-					if (!loadSample(f, s, &smpHdrs[sampleList[j]]))
+					if (!loadSample(f, s, &smpHdrs[sampleList[j]], filesize))
 					{
 						loaderMsgBox("Not enough memory!");
 						goto error;
@@ -540,125 +667,46 @@ bool loadIT(FILE *f, uint32_t filesize)
 	{
 		if (patOffs[i] == 0)
 			continue;
-	
-		fseek(f, patOffs[i], SEEK_SET);
+		if (!fileRangeValid(patOffs[i], 8, filesize) || !seekTo(f, patOffs[i], filesize))
+			goto error;
 
 		uint16_t length, numRows;
-		fread(&length, 2, 1, f);
-		fread(&numRows, 2, 1, f);
-		fseek(f, 4, SEEK_CUR);
+		uint8_t reserved[4];
+		if (!readExact(f, &length, sizeof (length)) || !readExact(f, &numRows, sizeof (numRows)) ||
+			!readExact(f, reserved, sizeof (reserved)) ||
+			!fileRangeValid(patOffs[i] + 8, length, filesize))
+			goto error;
 
-		numRows = MIN(numRows, MAX_PATT_LEN);
+		if (numRows > MAX_PATT_LEN)
+			goto error;
 		if (numRows == 0)
 			continue;
+		if (length == 0)
+			goto error;
 
-		if (!allocateTmpPatt(i, numRows))
+		uint8_t *packedPattern = (uint8_t *)malloc(length);
+		if (packedPattern == NULL)
 		{
 			loaderMsgBox("Not enough memory!");
 			goto error;
 		}
-
-		uint8_t lastMask[64];
-		memset(lastMask, 0, sizeof (lastMask));
-
-		note_t lastNote[64];
-		memset(lastNote, 0, sizeof (lastNote));
-
-		note_t *patt = patternTmp[i];
-
-		int32_t bytesRead = 0;
-		int32_t row = 0;
-		while (bytesRead < length && row < numRows)
+		if (!readExact(f, packedPattern, length))
 		{
-			uint8_t byte = (uint8_t)fgetc(f);
-			bytesRead++;
-
-			if (byte == 0)
-			{
-				row++;
-				continue;
-			}
-
-			const uint8_t ch = (byte - 1) & 63;
-			if (ch > numChannels)
-				numChannels = ch;
-
-			note_t emptyNote;
-			note_t *p = (ch >= MAX_CHANNELS) ? &emptyNote : &patt[(row * MAX_CHANNELS) + ch];
-
-			if (byte & 128)
-			{
-				lastMask[ch] = (uint8_t)fgetc(f);
-				bytesRead++;
-			}
-
-			if (lastMask[ch] & 16)
-				p->note = lastNote[ch].note;
-
-			if (lastMask[ch] & 32)
-				p->instr = lastNote[ch].instr;
-
-			if (lastMask[ch] & 64)
-				p->vol = lastNote[ch].vol;
-
-			if (lastMask[ch] & 128)
-			{
-				p->efx = lastNote[ch].efx;
-				p->efxData = lastNote[ch].efxData;
-			}
-
-			if (lastMask[ch] & 1)
-			{
-				uint8_t note = (uint8_t)fgetc(f);
-				bytesRead++;
-
-				if (note < 120)
-				{
-					note++;
-					if (note < 12 || note >= 96+12)
-						note = 0;
-					else
-						note -= 12;
-				}
-				else if (note != 254)
-				{
-					note = NOTE_OFF;
-				}
-
-				if (note > NOTE_OFF && note != 254)
-					note = 0; // remove note
-
-				// 254 (note cut) is handled later!
-
-				p->note = lastNote[ch].note = note;
-			}
-
-			if (lastMask[ch] & 2)
-			{
-				uint8_t ins = (uint8_t)fgetc(f);
-				bytesRead++;
-
-				if (ins > MAX_INST)
-					ins = 0;
-
-				p->instr = lastNote[ch].instr = ins;
-			}
-
-			if (lastMask[ch] & 4)
-			{
-				p->vol = lastNote[ch].vol = 1 + (uint8_t)fgetc(f);
-				bytesRead++;
-			}
-
-			if (lastMask[ch] & 8)
-			{
-				p->efx = lastNote[ch].efx = (uint8_t)fgetc(f);
-				bytesRead++;;
-
-				p->efxData = lastNote[ch].efxData = (uint8_t)fgetc(f);
-				bytesRead++;
-			}
+			free(packedPattern);
+			goto error;
 		}
+
+		if (!allocateTmpPatt(i, numRows))
+		{
+			free(packedPattern);
+			loaderMsgBox("Not enough memory!");
+			goto error;
+		}
+
+		const bool decoded = decodeITPattern(packedPattern, length, patternTmp[i], numRows, &numChannels);
+		free(packedPattern);
+		if (!decoded)
+			goto error;
 	}
 	numChannels++;
 
@@ -1206,183 +1254,155 @@ error:
 	return false;
 }
 
-static void decompress16BitData(int16_t *dst, const uint8_t *src, uint32_t blockLength)
+typedef struct itBitReader_t
 {
-	uint8_t byte8, bitDepth, bitDepthInv, bitsRead;
-	uint16_t bytes16, lastVal;
-	uint32_t bytes32;
+	const uint8_t *data;
+	size_t size, bitPosition;
+}
+itBitReader_t;
 
-	lastVal = 0;
-	bitDepth = 17;
-	bitDepthInv = bitsRead = 0;
+static bool readBits(itBitReader_t *reader, uint8_t count, uint32_t *value)
+{
+	const size_t availableBits = reader->size * 8;
+	if (count == 0 || count > 24 || count > availableBits ||
+		reader->bitPosition > availableBits - count)
+		return false;
 
-	blockLength >>= 1;
-	while (blockLength != 0)
+	uint32_t result = 0;
+	for (uint8_t bit = 0; bit < count; bit++)
 	{
-		bytes32 = (*(uint32_t *)src) >> bitsRead;
+		const size_t sourceBit = reader->bitPosition + bit;
+		result |= ((reader->data[sourceBit >> 3] >> (sourceBit & 7)) & 1u) << bit;
+	}
+	reader->bitPosition += count;
+	*value = result;
+	return true;
+}
 
-		bitsRead += bitDepth;
-		src += bitsRead >> 3;
-		bitsRead &= 7;
+static int32_t signExtend(uint32_t value, uint8_t width)
+{
+	const uint32_t signBit = 1u << (width - 1);
+	return (value & signBit) ? (int32_t)(value - (1u << width)) : (int32_t)value;
+}
 
-		if (bitDepth <= 6)
+static bool decompress16BitData(int16_t *dst, uint32_t sampleCount,
+	const uint8_t *src, size_t srcSize)
+{
+	itBitReader_t reader = { src, srcSize, 0 };
+	uint16_t lastValue = 0;
+	uint8_t bitDepth = 17;
+
+	while (sampleCount > 0)
+	{
+		uint32_t value;
+		if (!readBits(&reader, bitDepth, &value))
+			return false;
+
+		if (bitDepth <= 6 && value == (1u << (bitDepth - 1)))
 		{
-			bytes32 <<= bitDepthInv & 0x1F;
-
-			bytes16 = (uint16_t)bytes32;
-			if (bytes16 != 0x8000)
-			{
-				lastVal += (int16_t)bytes16 >> (bitDepthInv & 0x1F); // arithmetic shift
-				*dst++ = lastVal;
-				blockLength--;
-			}
-			else
-			{
-				byte8 = ((bytes32 >> 16) & 0xF) + 1;
-				if (byte8 >= bitDepth)
-					byte8++;
-				bitDepth = byte8;
-
-				bitDepthInv = 16;
-				if (bitDepthInv < bitDepth)
-					bitDepthInv++;
-				bitDepthInv -= bitDepth;
-
-				bitsRead += 4;
-			}
-
+			uint32_t widthCode;
+			if (!readBits(&reader, 4, &widthCode)) return false;
+			uint8_t newDepth = 1 + (uint8_t)widthCode;
+			if (newDepth >= bitDepth) newDepth++;
+			if (newDepth == 0 || newDepth > 17) return false;
+			bitDepth = newDepth;
 			continue;
 		}
-
-		bytes16 = (uint16_t)bytes32;
 
 		if (bitDepth <= 16)
 		{
-			uint16_t tmp16 = 0xFFFF >> (bitDepthInv & 0x1F);
-			bytes16 &= tmp16;
-			tmp16 = (tmp16 >> 1) - 8;
-
-			if (bytes16 > tmp16+16 || bytes16 <= tmp16)
+			if (bitDepth > 6)
 			{
-				bytes16 <<= bitDepthInv & 0x1F;
-				bytes16 = (int16_t)bytes16 >> (bitDepthInv & 0x1F); // arithmetic shift
-				lastVal += bytes16;
-				*dst++ = lastVal;
-				blockLength--;
-				continue;
+				const uint32_t border = (1u << (bitDepth - 1)) - 9;
+				if (value > border && value <= border + 16)
+				{
+					uint8_t newDepth = (uint8_t)(value - border);
+					if (newDepth >= bitDepth) newDepth++;
+					if (newDepth == 0 || newDepth > 17) return false;
+					bitDepth = newDepth;
+					continue;
+				}
 			}
 
-			byte8 = (uint8_t)(bytes16 - tmp16);
-			if (byte8 >= bitDepth)
-				byte8++;
-			bitDepth = byte8;
+			lastValue += (uint16_t)signExtend(value, bitDepth);
+		}
+		else if (value & 0x10000)
+		{
+			const uint32_t newDepth = (value & 0xFFFF) + 1;
+			if (newDepth == 0 || newDepth > 17) return false;
+			bitDepth = (uint8_t)newDepth;
+			continue;
+		}
+		else
+		{
+			lastValue += (uint16_t)value;
+		}
 
-			bitDepthInv = 16;
-			if (bitDepthInv < bitDepth)
-				bitDepthInv++;
-			bitDepthInv -= bitDepth;
+		*dst++ = (int16_t)lastValue;
+		sampleCount--;
+	}
+
+	return true;
+}
+
+static bool decompress8BitData(int8_t *dst, uint32_t sampleCount,
+	const uint8_t *src, size_t srcSize)
+{
+	itBitReader_t reader = { src, srcSize, 0 };
+	uint8_t lastValue = 0;
+	uint8_t bitDepth = 9;
+
+	while (sampleCount > 0)
+	{
+		uint32_t value;
+		if (!readBits(&reader, bitDepth, &value))
+			return false;
+
+		if (bitDepth <= 6 && value == (1u << (bitDepth - 1)))
+		{
+			uint32_t widthCode;
+			if (!readBits(&reader, 3, &widthCode)) return false;
+			uint8_t newDepth = 1 + (uint8_t)widthCode;
+			if (newDepth >= bitDepth) newDepth++;
+			if (newDepth == 0 || newDepth > 9) return false;
+			bitDepth = newDepth;
 			continue;
 		}
 
-		if (bytes32 & 0x10000)
+		if (bitDepth <= 8)
 		{
-			bitDepth = (uint8_t)(bytes16 + 1);
-			bitDepthInv = 16 - bitDepth;
+			if (bitDepth > 6)
+			{
+				const uint32_t border = (0xFFu >> (9 - bitDepth)) - 4;
+				if (value > border && value <= border + 8)
+				{
+					uint8_t newDepth = (uint8_t)(value - border);
+					if (newDepth >= bitDepth) newDepth++;
+					if (newDepth == 0 || newDepth > 9) return false;
+					bitDepth = newDepth;
+					continue;
+				}
+			}
+
+			lastValue += (uint8_t)signExtend(value, bitDepth);
+		}
+		else if (value & 0x100)
+		{
+			const uint32_t newDepth = (value & 0xFF) + 1;
+			if (newDepth == 0 || newDepth > 9) return false;
+			bitDepth = (uint8_t)newDepth;
+			continue;
 		}
 		else
 		{
-			lastVal += bytes16;
-			*dst++ = lastVal;
-			blockLength--;
+			lastValue += (uint8_t)value;
 		}
+
+		*dst++ = (int8_t)lastValue;
+		sampleCount--;
 	}
-}
 
-static void decompress8BitData(int8_t *dst, const uint8_t *src, uint32_t blockLength)
-{
-	uint8_t lastVal, byte8, bitDepth, bitDepthInv, bitsRead;
-	uint16_t bytes16;
-
-	lastVal = 0;
-	bitDepth = 9;
-	bitDepthInv = bitsRead = 0;
-
-	while (blockLength != 0)
-	{
-		bytes16 = (*(uint16_t *)src) >> bitsRead;
-
-		bitsRead += bitDepth;
-		src += (bitsRead >> 3);
-		bitsRead &= 7;
-
-		byte8 = bytes16 & 0xFF;
-
-		if (bitDepth <= 6)
-		{
-			bytes16 <<= (bitDepthInv & 0x1F);
-			byte8 = bytes16 & 0xFF;
-
-			if (byte8 != 0x80)
-			{
-				lastVal += (int8_t)byte8 >> (bitDepthInv & 0x1F); // arithmetic shift
-				*dst++ = lastVal;
-				blockLength--;
-				continue;
-			}
-
-			byte8 = (bytes16 >> 8) & 7;
-			bitsRead += 3;
-			src += (bitsRead >> 3);
-			bitsRead &= 7;
-		}
-		else
-		{
-			if (bitDepth == 8)
-			{
-				if (byte8 < 0x7C || byte8 > 0x83)
-				{
-					lastVal += byte8;
-					*dst++ = lastVal;
-					blockLength--;
-					continue;
-				}
-				byte8 -= 0x7C;
-			}
-			else if (bitDepth < 8)
-			{
-				byte8 <<= 1;
-				if (byte8 < 0x78 || byte8 > 0x86)
-				{
-					lastVal += (int8_t)byte8 >> (bitDepthInv & 0x1F); // arithmetic shift
-					*dst++ = lastVal;
-					blockLength--;
-					continue;
-				}
-				byte8 = (byte8 >> 1) - 0x3C;
-			}
-			else
-			{
-				bytes16 &= 0x1FF;
-				if ((bytes16 & 0x100) == 0)
-				{
-					lastVal += byte8;
-					*dst++ = lastVal;
-					blockLength--;
-					continue;
-				}
-			}
-		}
-
-		byte8++;
-		if (byte8 >= bitDepth)
-			byte8++;
-		bitDepth = byte8;
-
-		bitDepthInv = 8;
-		if (bitDepthInv < bitDepth)
-			bitDepthInv++;
-		bitDepthInv -= bitDepth;
-	}
+	return true;
 }
 
 static bool loadCompressed16BitSample(FILE *f, sample_t *s, bool deltaEncoded)
@@ -1397,10 +1417,12 @@ static bool loadCompressed16BitSample(FILE *f, sample_t *s, bool deltaEncoded)
 			bytesToUnpack = i;
 
 		uint16_t packedLen;
-		fread(&packedLen, sizeof (uint16_t), 1, f);
-		fread(decompBuffer, 1, packedLen, f);
+		if (!readExact(f, &packedLen, sizeof (packedLen)) || packedLen == 0 ||
+			!readExact(f, decompBuffer, packedLen))
+			return false;
 
-		decompress16BitData((int16_t *)dstPtr, decompBuffer, bytesToUnpack);
+		if (!decompress16BitData((int16_t *)dstPtr, bytesToUnpack >> 1, decompBuffer, packedLen))
+			return false;
 
 		if (deltaEncoded) // convert from delta values to PCM
 		{
@@ -1434,10 +1456,12 @@ static bool loadCompressed8BitSample(FILE *f, sample_t *s, bool deltaEncoded)
 			bytesToUnpack = i;
 
 		uint16_t packedLen;
-		fread(&packedLen, sizeof (uint16_t), 1, f);
-		fread(decompBuffer, 1, packedLen, f);
+		if (!readExact(f, &packedLen, sizeof (packedLen)) || packedLen == 0 ||
+			!readExact(f, decompBuffer, packedLen))
+			return false;
 
-		decompress8BitData(dstPtr, decompBuffer, bytesToUnpack);
+		if (!decompress8BitData(dstPtr, bytesToUnpack, decompBuffer, packedLen))
+			return false;
 
 		if (deltaEncoded) // convert from delta values to PCM
 		{
@@ -1480,7 +1504,7 @@ static void setAutoVibrato(instr_t *ins, itSmpHdr_t *itSmp)
 		ins->autoVibDepth = 15;
 }
 
-static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp)
+static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp, uint32_t filesize)
 {
 	bool sampleIs16Bit = !!(itSmp->flags & 2);
 	bool compressed = !!(itSmp->flags & 8);
@@ -1495,9 +1519,13 @@ static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp)
 	if (hasLoop)
 		s->flags |= bidiLoop ? LOOP_BIDI : LOOP_FWD;
 
-	s->length = itSmp->length;
-	s->loopStart = itSmp->loopBegin;
-	s->loopLength = itSmp->loopEnd - itSmp->loopBegin;
+	if (itSmp->length > MAX_SAMPLE_LEN || itSmp->loopBegin > itSmp->length ||
+		itSmp->loopEnd < itSmp->loopBegin || itSmp->loopEnd > itSmp->length)
+		return false;
+
+	s->length = (int32_t)itSmp->length;
+	s->loopStart = (int32_t)itSmp->loopBegin;
+	s->loopLength = (int32_t)(itSmp->loopEnd - itSmp->loopBegin);
 	s->volume = itSmp->vol;
 
 	s->panning = 128;
@@ -1515,26 +1543,39 @@ static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp)
 
 	setSampleC4Hz(s, itSmp->c5Speed);
 
-	if (s->length <= 0 || itSmp->offsetInFile == 0)
+	if (s->length == 0)
 		return true; // empty sample, skip data loading
+	if (itSmp->offsetInFile == 0)
+		return false;
+
+	const uint64_t sampleBytes = (uint64_t)s->length << sampleIs16Bit;
+	if ((!compressed && !fileRangeValid(itSmp->offsetInFile, sampleBytes, filesize)) ||
+		(compressed && !fileRangeValid(itSmp->offsetInFile, sizeof (uint16_t), filesize)))
+		return false;
 
 	if (!allocateSmpData(s, s->length, sampleIs16Bit, false))
 		return false;
 
 	// begin sample loading
 
-	fseek(f, itSmp->offsetInFile, SEEK_SET);
+	if (!seekTo(f, itSmp->offsetInFile, filesize))
+		return false;
 
 	if (compressed)
 	{
 		if (sampleIs16Bit)
-			loadCompressed16BitSample(f, s, deltaEncoded);
-		else
-			loadCompressed8BitSample(f, s, deltaEncoded);
+		{
+			if (!loadCompressed16BitSample(f, s, deltaEncoded)) return false;
+		}
+		else if (!loadCompressed8BitSample(f, s, deltaEncoded))
+		{
+			return false;
+		}
 	}
 	else
 	{
-		fread(s->dataPtr, 1+(size_t)sampleIs16Bit, s->length, f);
+		if (!readExact(f, s->dataPtr, (size_t)sampleBytes))
+			return false;
 
 		if (!signedSamples)
 		{
@@ -1555,3 +1596,60 @@ static bool loadSample(FILE *f, sample_t *s, itSmpHdr_t *itSmp)
 
 	return true;
 }
+
+#ifdef FT2_STABILITY_TESTS
+bool runITLoaderRegressionTests(void)
+{
+	note_t pattern[MAX_CHANNELS] = { 0 };
+	uint32_t highestChannel = 0;
+	const uint8_t validPattern[] = { 0x81, 0x03, 59, 2, 0 };
+	if (!decodeITPattern(validPattern, sizeof (validPattern), pattern, 1, &highestChannel) ||
+		pattern[0].note != 48 || pattern[0].instr != 2 || highestChannel != 0)
+		return false;
+
+	const uint8_t truncatedPattern[] = { 0x81, 0x03, 59 };
+	const uint8_t invalidChannel[] = { 0xC1, 0, 0 };
+	if (decodeITPattern(truncatedPattern, sizeof (truncatedPattern), pattern, 1, &highestChannel) ||
+		decodeITPattern(invalidChannel, sizeof (invalidChannel), pattern, 1, &highestChannel))
+		return false;
+
+	int8_t sample8 = 1;
+	const uint8_t zero8[] = { 0, 0 };
+	const uint8_t invalidWidth8[] = { 0xFF, 0x01 };
+	const uint8_t widthChange8[] = { 0x07, 0x03, 0x00 }; // 9-bit width marker, then an 8-bit +1 delta
+	if (!decompress8BitData(&sample8, 1, zero8, sizeof (zero8)) || sample8 != 0 ||
+		decompress8BitData(&sample8, 1, zero8, 1) ||
+		decompress8BitData(&sample8, 1, invalidWidth8, sizeof (invalidWidth8)) ||
+		!decompress8BitData(&sample8, 1, widthChange8, sizeof (widthChange8)) || sample8 != 1)
+		return false;
+
+	int16_t sample16 = 1;
+	const uint8_t zero16[] = { 0, 0, 0 };
+	const uint8_t widthChange16[] = { 0x0F, 0x00, 0x03, 0x00, 0x00 }; // 17-bit marker, then 16-bit +1
+	if (!decompress16BitData(&sample16, 1, zero16, sizeof (zero16)) || sample16 != 0 ||
+		decompress16BitData(&sample16, 1, zero16, 2) ||
+		!decompress16BitData(&sample16, 1, widthChange16, sizeof (widthChange16)) || sample16 != 1)
+		return false;
+
+	uint32_t randomState = 0x49544C44;
+	uint8_t fuzzData[8];
+	for (int32_t iteration = 0; iteration < 256; iteration++)
+	{
+		for (size_t i = 0; i < sizeof (fuzzData); i++)
+		{
+			randomState = (randomState * 1664525) + 1013904223;
+			fuzzData[i] = (uint8_t)(randomState >> 24);
+		}
+
+		note_t fuzzPattern[2 * MAX_CHANNELS] = { 0 };
+		int8_t fuzzSample8[4] = { 0 };
+		int16_t fuzzSample16[4] = { 0 };
+		highestChannel = 0;
+		(void)decodeITPattern(fuzzData, sizeof (fuzzData), fuzzPattern, 2, &highestChannel);
+		(void)decompress8BitData(fuzzSample8, 4, fuzzData, sizeof (fuzzData));
+		(void)decompress16BitData(fuzzSample16, 4, fuzzData, sizeof (fuzzData));
+	}
+
+	return true;
+}
+#endif
