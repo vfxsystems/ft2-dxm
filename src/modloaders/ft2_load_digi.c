@@ -44,7 +44,7 @@ digiHdr_t;
 #pragma pack(pop)
 #endif
 
-static void readPatternNote(FILE *f, note_t *p);
+static bool readPatternNote(FILE *f, note_t *p);
 
 bool loadDIGI(FILE *f, uint32_t filesize)
 {
@@ -73,10 +73,9 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 		return false;
 	}
 
-	hdr.numOrders++;
-	hdr.numPatterns++;
-
-	if (hdr.numOrders < 1 || hdr.numOrders > 128)
+	const uint16_t numOrders = (uint16_t)hdr.numOrders + 1u;
+	const uint16_t numPatterns = (uint16_t)hdr.numPatterns + 1u;
+	if (numOrders > 128 || numPatterns > MAX_PATTERNS)
 	{
 		loaderMsgBox("Error: This file is either not a module, or is not supported.");
 		return false;
@@ -85,12 +84,12 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 	memcpy(songTmp.orders, hdr.orders, 128);
 	memcpy(songTmp.name, hdr.name, 20);
 	songTmp.numChannels = hdr.numChannels;
-	songTmp.songLength = hdr.numOrders;
+	songTmp.songLength = numOrders;
 	songTmp.BPM = 125;
 	songTmp.speed = 6;
 
 	// load pattern data
-	for (i = 0; i < hdr.numPatterns; i++)
+	for (i = 0; i < numPatterns; i++)
 	{
 		if (!allocateTmpPatt(i, 64))
 		{
@@ -103,8 +102,14 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 			uint16_t pattSize;
 			uint8_t bitMasks[64];
 
-			fread(&pattSize, 2, 1, f); pattSize = SWAP16(pattSize);
-			fread(bitMasks, 1, 64, f);
+			if (fread(&pattSize, sizeof (pattSize), 1, f) != 1 ||
+				fread(bitMasks, 1, sizeof (bitMasks), f) != sizeof (bitMasks))
+			{
+				loaderMsgBox("Error loading DIGI: Truncated pattern data!");
+				return false;
+			}
+			pattSize = SWAP16(pattSize);
+			(void)pattSize; /* Event reads below establish the actual truncation boundary. */
 
 			for (j = 0; j < 64; j++)
 			{
@@ -112,8 +117,11 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 				for (k = 0; k < songTmp.numChannels; k++, bit >>= 1)
 				{
 					note_t *p = &patternTmp[i][(j * MAX_CHANNELS) + k];
-					if (bitMasks[j] & bit)
-						readPatternNote(f, p);
+					if ((bitMasks[j] & bit) && !readPatternNote(f, p))
+					{
+						loaderMsgBox("Error loading DIGI: Truncated pattern event!");
+						return false;
+					}
 				}
 			}
 		}
@@ -122,7 +130,11 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 			for (j = 0; j < songTmp.numChannels; j++)
 			{
 				for (k = 0; k < 64; k++)
-					readPatternNote(f, &patternTmp[i][(k * MAX_CHANNELS) + j]);
+					if (!readPatternNote(f, &patternTmp[i][(k * MAX_CHANNELS) + j]))
+					{
+						loaderMsgBox("Error loading DIGI: Truncated pattern event!");
+						return false;
+					}
 			}
 		}
 
@@ -137,7 +149,7 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 	}
 
 	// pattern command handling
-	for (i = 0; i < hdr.numPatterns; i++)
+	for (i = 0; i < numPatterns; i++)
 	{
 		if (patternTmp[i] == NULL)
 			continue;
@@ -225,21 +237,21 @@ bool loadDIGI(FILE *f, uint32_t filesize)
 			return false;
 		}
 
-		int32_t bytesRead = (int32_t)fread(s->dataPtr, 1, s->length, f);
-		if (bytesRead < s->length)
+		if (fread(s->dataPtr, 1, s->length, f) != (size_t)s->length)
 		{
-			int32_t bytesToClear = s->length - bytesRead;
-			memset(&s->dataPtr[bytesRead], 0, bytesToClear);
+			loaderMsgBox("Error loading DIGI: Truncated sample data!");
+			return false;
 		}
 	}
 
 	return true;
 }
 
-static void readPatternNote(FILE *f, note_t *p)
+static bool readPatternNote(FILE *f, note_t *p)
 {
 	uint8_t bytes[4];
-	fread(bytes, 1, 4, f);
+	if (fread(bytes, 1, sizeof (bytes), f) != sizeof (bytes))
+		return false;
 
 	// period to note
 	uint16_t period = ((bytes[0] & 0x0F) << 8) | bytes[1];
@@ -255,4 +267,20 @@ static void readPatternNote(FILE *f, note_t *p)
 	p->instr = (bytes[0] & 0xF0) | (bytes[2] >> 4);
 	p->efx = bytes[2] & 0x0F;
 	p->efxData = bytes[3];
+	return true;
 }
+
+#ifdef FT2_STABILITY_TESTS
+bool runDigiLoaderRegressionTests(void)
+{
+	FILE *f = tmpfile();
+	if (f == NULL) return false;
+	const uint8_t truncatedEvent[3] = { 0, 0, 0 };
+	bool ok = fwrite(truncatedEvent, 1, sizeof (truncatedEvent), f) == sizeof (truncatedEvent) &&
+		fseek(f, 0, SEEK_SET) == 0;
+	note_t note = { 0 };
+	ok = ok && !readPatternNote(f, &note);
+	fclose(f);
+	return ok;
+}
+#endif
