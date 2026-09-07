@@ -145,6 +145,7 @@ case "$build_dir" in
         ;;
     *)
         build_dir="${repo_root}/${build_dir}"
+        build_dir_arg="$build_dir"
         ;;
 esac
 
@@ -199,4 +200,5 @@ if [ "$install" -eq 1 ]; then
     cmake --install "$build_dir_arg"
 fi
 
+ft2_report_ostirus_rom "${build_dir}/bin"
 printf 'Done. Binary: %s\n' "${build_dir}/bin/ft2-dxm"

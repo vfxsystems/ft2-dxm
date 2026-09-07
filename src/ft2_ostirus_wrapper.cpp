@@ -586,6 +586,49 @@ static bool load_rom_if_needed(void)
         return false;
     }
 
+    static const char *kRomCandidates[] = {
+        "OsTIrus/rom.bin",
+        "src/gearmulator/assets/OsTIrus/roms/rom.bin",
+        "src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware - Copy.bin",
+        "src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware.bin",
+        "OsTIrus/roms/rom.bin",
+        "OsTIrus/roms/Access Virus TI firmware - Copy.bin",
+        "OsTIrus/roms/Access Virus TI firmware.bin",
+        "rom.bin"
+    };
+
+    const std::vector<std::string> roots = build_asset_roots();
+    for (const std::string &root : roots)
+    {
+        for (const char *candidate : kRomCandidates)
+        {
+            const std::string path = join_dir_file(root, candidate);
+            std::vector<uint8_t> data;
+            if (!read_file(path, data))
+                continue;
+
+            static const virusLib::DeviceModel models[] = {
+                virusLib::DeviceModel::TI,
+                virusLib::DeviceModel::TI2,
+                virusLib::DeviceModel::Snow
+            };
+
+            for (virusLib::DeviceModel model : models)
+            {
+                virusLib::ROMFile rom(data, path, model);
+                if (!rom.isValid())
+                    continue;
+
+                g_romData = std::move(data);
+                g_romPath = path;
+                g_romModel = model;
+                OSTI_DEBUG("Loaded ROM '%s' as model %s (%zu bytes)", path.c_str(),
+                    virusLib::getModelName(model).c_str(), g_romData.size());
+                return true;
+            }
+        }
+    }
+
     std::vector<uint8_t> zipRom;
     std::vector<uint8_t> zipCache;
     std::string zipRomPath;
@@ -607,48 +650,8 @@ static bool load_rom_if_needed(void)
             g_patchDbData = std::move(zipCache);
             g_romPath = zipRomPath;
             g_romModel = model;
-            OSTI_DEBUG("Loaded ROM '%s' as model %s (%zu bytes)", zipRomPath.c_str(), virusLib::getModelName(model).c_str(), g_romData.size());
-            return true;
-        }
-    }
-
-    static const char *kRomCandidates[] = {
-        "src/gearmulator/assets/OsTIrus/roms/rom.bin",
-        "src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware - Copy.bin",
-        "src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware.bin",
-        "../src/gearmulator/assets/OsTIrus/roms/rom.bin",
-        "../src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware - Copy.bin",
-        "../src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware.bin",
-        "../../src/gearmulator/assets/OsTIrus/roms/rom.bin",
-        "../../src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware - Copy.bin",
-        "../../src/gearmulator/assets/OsTIrus/roms/Access Virus TI firmware.bin",
-        "OsTIrus/roms/rom.bin",
-        "OsTIrus/roms/Access Virus TI firmware - Copy.bin",
-        "OsTIrus/roms/Access Virus TI firmware.bin"
-    };
-
-    for (const char *path : kRomCandidates)
-    {
-        std::vector<uint8_t> data;
-        if (!read_file(path, data))
-            continue;
-
-        static const virusLib::DeviceModel models[] = {
-            virusLib::DeviceModel::TI,
-            virusLib::DeviceModel::TI2,
-            virusLib::DeviceModel::Snow
-        };
-
-        for (virusLib::DeviceModel model : models)
-        {
-            virusLib::ROMFile rom(data, path, model);
-            if (!rom.isValid())
-                continue;
-
-            g_romData = std::move(data);
-            g_romPath = path;
-            g_romModel = model;
-            OSTI_DEBUG("Loaded ROM '%s' as model %s (%zu bytes)", path, virusLib::getModelName(model).c_str(), g_romData.size());
+            OSTI_DEBUG("Loaded ROM '%s' as model %s (%zu bytes)", zipRomPath.c_str(),
+                virusLib::getModelName(model).c_str(), g_romData.size());
             return true;
         }
     }

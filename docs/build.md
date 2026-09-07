@@ -111,6 +111,19 @@ FT2_JOBS=8 ./build-linux.sh --test
 
 The Linux script detects stale `CMakeCache.txt` files that were generated for a different checkout path and refreshes the build directory automatically when it is safe to do so.
 
+## Optional OsTIrus ROM
+
+OsTIrus is compiled on every supported target, but its Virus ROM is supplied by the user at runtime. Put `rom.bin` in an `OsTIrus` directory beside the executable, for example:
+
+```text
+build-linux/bin/OsTIrus/rom.bin
+build-windows-mingw64/bin/OsTIrus/rom.bin
+```
+
+Alternatively, set `FT2_OSTIRUS_ROM` to a readable ROM path when launching the application. The explicit environment path takes precedence; setting it to an empty value disables ROM discovery for firmware-free tests. Invalid ROM data leaves OsTIrus unavailable without disabling Tunefish4, Dexed, V2, or sample playback.
+
+The build wrappers report the expected runtime path after each build. They do not copy or embed firmware. Private builds can explicitly enable the legacy archive embedding path with `-DFT2_EMBED_OSTIRUS_ASSETS=ON`, but those artifacts are excluded from source publication and must not be distributed with firmware.
+
 ## Linux Test Matrix
 
 Run native Release, Debug, and ASan/leak detection:

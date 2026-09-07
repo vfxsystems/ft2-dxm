@@ -19,11 +19,19 @@ The executable is `build-linux/bin/ft2-dxm`. See [build instructions](docs/build
 
 Virus firmware is not part of the source publication. OsTIrus requires a compatible ROM supplied separately by the user. This project does not provide permission to use or redistribute firmware.
 
+Place the file in an `OsTIrus` directory beside the executable:
+
+```text
+build-linux/bin/OsTIrus/rom.bin
+```
+
+The same layout applies beside the Windows, macOS, and Raspberry Pi executable. An explicit path can be used instead:
+
 ```sh
 FT2_OSTIRUS_ROM=/path/to/your/rom.bin ./build-linux/bin/ft2-dxm
 ```
 
-An invalid explicit path leaves OsTIrus unavailable; the other engines remain usable. Existing local ROM search paths remain supported. Normal builds do not embed local ROM archives. Public tests run without Virus firmware.
+An invalid explicit path leaves OsTIrus unavailable; the other engines remain usable. Existing local development search paths remain supported. Build scripts report whether the runtime folder or environment path is ready, but never copy firmware. Normal builds do not embed local ROM archives. Public tests run without Virus firmware.
 
 ## Documentation and status
 

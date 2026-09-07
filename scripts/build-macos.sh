@@ -119,4 +119,5 @@ if [ "$run_tests" -eq 1 ]; then
     ctest --test-dir "$build_dir" --output-on-failure --parallel "$jobs"
 fi
 
+ft2_report_ostirus_rom "$build_path/bin"
 printf 'Done. macOS binary dir: %s/bin\n' "$build_path"

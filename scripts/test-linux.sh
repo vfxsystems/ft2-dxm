@@ -124,6 +124,7 @@ run_phase() {
     cmake -S "$repo_root" -B "$build_path" "$@"
     cmake --build "$build_path" --target ft2-dxm --parallel "$jobs"
     ctest --test-dir "$build_path" --output-on-failure --parallel "$jobs" "${ctest_args[@]}"
+    ft2_report_ostirus_rom "$build_path/bin"
 }
 
 if [ "$run_release" -eq 1 ]; then
