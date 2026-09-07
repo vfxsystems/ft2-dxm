@@ -35,6 +35,10 @@
 #define PROPERTY_PANEL_WIDTH 200
 #define CANVAS_WIDTH 632
 #define CANVAS_HEIGHT 400
+#define PAGE_SELECTOR_BUTTON_WIDTH 20
+#define PAGE_SELECTOR_BUTTON_GAP 2
+#define CUBE_VIEWPORT_SIZE 180
+#define CUBE_VIEWPORT_RIGHT_MARGIN 4
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -470,9 +474,14 @@ static int toolbar_info_y(void)
     if (g_tool_count <= 0)
         return 390;
 
-    int x, y, w, h;
-    tool_button_rect(g_tool_count - 1, &x, &y, &w, &h);
-    return y + h + 8;
+    int lowest_edge = 0;
+    for (int tool = 0; tool < g_tool_count; tool++) {
+        int x, y, w, h;
+        tool_button_rect(tool, &x, &y, &w, &h);
+        if (y + h > lowest_edge)
+            lowest_edge = y + h;
+    }
+    return lowest_edge + 8;
 }
 
 static void toolbar_page_selector_rect(int *x, int *y, int *w, int *h)
@@ -486,9 +495,21 @@ static void toolbar_page_selector_rect(int *x, int *y, int *w, int *h)
 static void toolbar_theme_dropdown_rect(int *x, int *y, int *w, int *h)
 {
     *x = 6;
-    *y = toolbar_info_y() + 132;
+    *y = toolbar_info_y() + 138;
     *w = TOOLBAR_WIDTH - 12;
     *h = 18;
+}
+
+static void toolbar_page_button_rects(int *minus_x, int *plus_x, int *y, int *w, int *h)
+{
+    int selector_x, selector_y, selector_w, selector_h;
+    toolbar_page_selector_rect(&selector_x, &selector_y, &selector_w, &selector_h);
+
+    *minus_x = selector_x + selector_w - (PAGE_SELECTOR_BUTTON_WIDTH * 2) - PAGE_SELECTOR_BUTTON_GAP;
+    *plus_x = *minus_x + PAGE_SELECTOR_BUTTON_WIDTH + PAGE_SELECTOR_BUTTON_GAP;
+    *y = selector_y;
+    *w = PAGE_SELECTOR_BUTTON_WIDTH;
+    *h = selector_h;
 }
 
 // Function declarations
@@ -1731,10 +1752,17 @@ void handle_mouse_down(int x, int y, int button) {
             int drop_x, drop_y, drop_w, drop_h;
 
             toolbar_page_selector_rect(&drop_x, &drop_y, &drop_w, &drop_h);
-            const int arrow_w = 20;
-            if (x >= drop_x + drop_w - arrow_w && x < drop_x + drop_w &&
-                y >= drop_y && y < drop_y + drop_h) {
-                step_page_selector(y < drop_y + drop_h / 2 ? 1 : -1);
+            int minus_x, plus_x, button_y, button_w, button_h;
+            toolbar_page_button_rects(&minus_x, &plus_x, &button_y, &button_w, &button_h);
+            if (x >= minus_x && x < minus_x + button_w &&
+                y >= button_y && y < button_y + button_h) {
+                step_page_selector(-1);
+                app.theme_dropdown_open = false;
+                return;
+            }
+            if (x >= plus_x && x < plus_x + button_w &&
+                y >= button_y && y < button_y + button_h) {
+                step_page_selector(1);
                 app.theme_dropdown_open = false;
                 return;
             }
@@ -2097,7 +2125,8 @@ void render_frame(void) {
     // Switch to 3D perspective projection for cube
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glViewport(830, 10, 180, 180); // Bottom-left corner
+    glViewport(WINDOW_WIDTH - CUBE_VIEWPORT_SIZE - CUBE_VIEWPORT_RIGHT_MARGIN, 10,
+               CUBE_VIEWPORT_SIZE, CUBE_VIEWPORT_SIZE);
     gluPerspective(45.0f, 1.0f, 0.1f, 100.0f);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
@@ -2225,16 +2254,16 @@ void draw_toolbar(void) {
     char page_buf[16];
     toolbar_page_selector_rect(&drop_x, &drop_y, &drop_w, &drop_h);
     font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "View Page (0=All):", get_palette_color(PAL_FORGRND));
-    const int arrow_w = 20;
-    const int arrow_h = drop_h / 2;
-    draw_designer_button(drop_x, drop_y, drop_w - arrow_w - 1, drop_h, false);
+    int minus_x, plus_x, button_y, button_w, button_h;
+    toolbar_page_button_rects(&minus_x, &plus_x, &button_y, &button_w, &button_h);
+    draw_designer_button(drop_x, drop_y, minus_x - drop_x - 1, drop_h, false);
     snprintf(page_buf, sizeof(page_buf), "%d", page_selector_value());
     font_draw_text(&g_designer.font_system, drop_x + 5, drop_y + 5,
                    page_buf, get_palette_color(PAL_BTNTEXT));
-    draw_designer_button(drop_x + drop_w - arrow_w, drop_y, arrow_w, arrow_h, false);
-    draw_designer_button(drop_x + drop_w - arrow_w, drop_y + arrow_h, arrow_w, drop_h - arrow_h, false);
-    font_draw_text(&g_designer.font_system, drop_x + drop_w - 14, drop_y + 1, "^", get_palette_color(PAL_FORGRND));
-    font_draw_text(&g_designer.font_system, drop_x + drop_w - 14, drop_y + arrow_h, "v", get_palette_color(PAL_FORGRND));
+    draw_designer_button(minus_x, button_y, button_w, button_h, false);
+    draw_designer_button(plus_x, button_y, button_w, button_h, false);
+    font_draw_text(&g_designer.font_system, minus_x + 7, button_y + 5, "-", get_palette_color(PAL_FORGRND));
+    font_draw_text(&g_designer.font_system, plus_x + 7, button_y + 5, "+", get_palette_color(PAL_FORGRND));
 
     toolbar_theme_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
     font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "Theme:", get_palette_color(PAL_FORGRND));
