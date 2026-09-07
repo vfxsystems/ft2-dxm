@@ -1472,7 +1472,7 @@ TunefishWidget *v2_find_widget_by_name(V2CompleteLayout *layout, const char *nam
 
 static void v2_draw_env_pixel(int x, int y, uint8_t color)
 {
-    if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) return;
+    if (video.frameBuffer == NULL || x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) return;
     video.frameBuffer[(size_t)y * SCREEN_W + (size_t)x] = video.palette[color];
 }
 
@@ -1486,10 +1486,11 @@ static void v2_draw_line(int x0, int y0, int x1, int y1, uint8_t color)
 
     for (;;)
     {
+        const int e2 = err * 2;
         v2_draw_env_pixel(x0, y0, color);
         if (x0 == x1 && y0 == y1) break;
-        if ((err * 2) >= dy) { err += dy; x0 += sx; }
-        if ((err * 2) <= dx) { err += dx; y0 += sy; }
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
 

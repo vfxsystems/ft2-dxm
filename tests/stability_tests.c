@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "ft2_header.h"
 #include "ft2_structs.h"
@@ -8,10 +9,12 @@
 #include "ft2_keyboard.h"
 #include "ft2_events.h"
 #include "ft2_audio.h"
+#include "ft2_bmp.h"
 #include "ft2_v2.h"
 #include "ft2_dexed.h"
 #include "ft2_unified_synth.h"
 #include "ft2_v2_complete_layout.h"
+#include "ft2_video.h"
 
 static int failures;
 static int retriggerCount;
@@ -172,10 +175,17 @@ bool runStabilityTests(void)
 #ifdef HAS_MIDI
     CHECK(runMidiRegressionTests(), "MIDI input ownership and queue regression suite");
 #endif
+    CHECK(ft2_v2_load_factory_preset_for_instrument(1, 2),
+        "load French Horn V2 page-render fixture");
     V2CompleteLayout *layout = v2_create_complete_layout();
     CHECK(layout != NULL, "create V2 layout");
     if (layout)
     {
+        uint32_t *const previousFrameBuffer = video.frameBuffer;
+        const bool bitmapsLoaded = loadBMPs();
+        video.frameBuffer = calloc((size_t)SCREEN_W * SCREEN_H, sizeof (*video.frameBuffer));
+        CHECK(bitmapsLoaded, "load V2 layout regression graphics");
+        CHECK(video.frameBuffer != NULL, "allocate V2 layout regression framebuffer");
         v2_show_layout(layout);
         ui.synthEditorShown = true;
         TunefishWidget *buttons[] = {layout->page_voice_button, layout->page_filter_button,
@@ -189,6 +199,8 @@ bool runStabilityTests(void)
             v2_handle_layout_mouse_event(layout, b->x + 2, b->y + 2, true);
             v2_handle_layout_mouse_event(layout, b->x + 2, b->y + 2, false);
             CHECK(layout->current_page == page, "mouse selects requested page");
+            if (bitmapsLoaded && video.frameBuffer != NULL)
+                v2_render_complete_layout(layout);
             for (int j = 0; j < V2_PAGE_COUNT; j++)
                 CHECK(buttons[j]->pressed == (j == page), "selected page survives mouse-up");
         }
@@ -217,7 +229,12 @@ bool runStabilityTests(void)
         }
         ui.synthEditorShown = false;
         v2_destroy_complete_layout(layout);
+        free(video.frameBuffer);
+        video.frameBuffer = previousFrameBuffer;
+        if (bitmapsLoaded)
+            freeBMPs();
     }
+    ft2_v2_set_param_for_instrument(1, 36, 0.0f); /* restore short release */
 
     /* A held physical key still owns its original note after UI state changes. */
     for (int scenario = 0; scenario < 5; scenario++)
