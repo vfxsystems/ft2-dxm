@@ -773,14 +773,6 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
                 if (scLen < SYNTH_SCOPE_LEN)
                     memset(&synthScopeBufL[ch][scLen], 0, (SYNTH_SCOPE_LEN - scLen) * sizeof(int16_t));
 
-                float maxLevel = 0.0f;
-                for (int32_t s = 0; s < scLen; s++)
-                {
-                    float level = fabsf(synthL[s]) + fabsf(synthR[s]);
-                    if (level > maxLevel) maxLevel = level;
-                }
-                uint8_t scopeVol = (uint8_t)CLAMP((int)(maxLevel * (SCOPE_HEIGHT * 4.0f) + 0.5f), 0, 255);
-
                 volatile scope_t *sc = &scope[ch];
                 if (!sc->active)
                 {
@@ -796,7 +788,10 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
                     sc->positionFrac  = 0;
                 }
                 sc->delta  = ((uint64_t)scLen << SCOPE_FRAC_BITS) / SCOPE_HZ;
-                sc->volume = scopeVol;
+                /* The captured PCM already contains the synth's amplitude. Applying
+                 * its peak as scope volume would scale it twice; in-phase stereo
+                 * signals could then exceed the 36-pixel scope bounds. */
+                sc->volume = SCOPE_HEIGHT * 4;
             }
         }
     }

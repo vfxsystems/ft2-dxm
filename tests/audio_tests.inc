@@ -12,6 +12,12 @@ bool runSynthMuteRegressionTest(void)
     float peak = 0.0f;
     for (int i = 0; i < 512; i++) peak = MAX(peak, fabsf(output[i]));
     bool ok = peak > 0.0f;
+    if (scope[0].volume != SCOPE_HEIGHT * 4)
+    {
+        fprintf(stderr, "synth scope regression: volume=%u expected=%u\n",
+            scope[0].volume, SCOPE_HEIGHT * 4);
+        ok = false;
+    }
     /* Routing must advance the engine, while a muted route contributes silence. */
     channel[0].channelOff = true;
     mixReplayerTickToBuffer(256, output, 32);

@@ -248,40 +248,56 @@
 	position += positionFrac >> 32; \
 	positionFrac &= UINT32_MAX;
 
+#define SCOPE_CLAMP_SAMPLE \
+{ \
+	if (sample < -(SCOPE_HEIGHT / 2)) \
+		sample = -(SCOPE_HEIGHT / 2); \
+	else if (sample > ((SCOPE_HEIGHT - 1) / 2)) \
+		sample = (SCOPE_HEIGHT - 1) / 2; \
+}
+
 #define SCOPE_DRAW_SMP \
+	SCOPE_CLAMP_SAMPLE \
 	video.frameBuffer[((lineY - sample) * SCREEN_W) + x] = color;
 
 #define LINED_SCOPE_PREPARE_SMP8 \
 	SCOPE_GET_INTERPOLATED_SMP8 \
+	SCOPE_CLAMP_SAMPLE \
 	smpY1 = lineY - sample; \
 	SCOPE_UPDATE_READPOS
 
 #define LINED_SCOPE_PREPARE_SMP16 \
 	SCOPE_GET_INTERPOLATED_SMP16 \
+	SCOPE_CLAMP_SAMPLE \
 	smpY1 = lineY - sample; \
 	SCOPE_UPDATE_READPOS
 
 #define LINED_SCOPE_PREPARE_SMP8_LOOP \
 	SCOPE_GET_INTERPOLATED_SMP8_LOOP \
+	SCOPE_CLAMP_SAMPLE \
 	smpY1 = lineY - sample; \
 	SCOPE_UPDATE_READPOS
 
 #define LINED_SCOPE_PREPARE_SMP16_LOOP \
 	SCOPE_GET_INTERPOLATED_SMP16_LOOP \
+	SCOPE_CLAMP_SAMPLE \
 	smpY1 = lineY - sample; \
 	SCOPE_UPDATE_READPOS
 
 #define LINED_SCOPE_PREPARE_SMP8_BIDI \
 	SCOPE_GET_INTERPOLATED_SMP8_BIDI \
+	SCOPE_CLAMP_SAMPLE \
 	smpY1 = lineY - sample; \
 	SCOPE_UPDATE_READPOS
 
 #define LINED_SCOPE_PREPARE_SMP16_BIDI \
 	SCOPE_GET_INTERPOLATED_SMP16_BIDI \
+	SCOPE_CLAMP_SAMPLE \
 	smpY1 = lineY - sample; \
 	SCOPE_UPDATE_READPOS
 
 #define LINED_SCOPE_DRAW_SMP \
+	SCOPE_CLAMP_SAMPLE \
 	smpY2 = lineY - sample; \
 	scopeLine(x, smpY1, smpY2, color); \
 	smpY1 = smpY2;
