@@ -79,7 +79,7 @@ Done when: the exact tree and history proposed for upload pass the inventory, de
 - Keep firmware-dependent tests opt-in and report skips visibly. Public CI must have meaningful coverage of the other engines and mixer.
 - Run the final matrix once on the release candidate, including actual UI/input and audio-device smoke checks, DXM/DXI round trips, old-project playback, WAV export, and an extended playback/navigation session.
 - Record results, supported/untested platforms, remaining non-blocking issues, and any compatibility changes in release notes.
-- Review the publication candidate and destination before upload. Replacing a pre-sanitation remote branch requires an explicit force-with-lease publication step.
+- Review the publication candidate and destination before upload. Replacing a pre-sanitation remote branch requires an explicit force-with-lease publication step. Repoint or remove any tag that still reaches the excluded history; the existing `pre-alpha` tag currently follows the unsanitized branch and must move with the sanitized release candidate.
 
 Release gate: no reproducible stuck notes or broken V2 navigation; mixer/gain contracts verified; no unexplained live/export mismatch; no unresolved release-blocking sanitizer failures; source/history audit complete; clean build and documentation validated. Cosmetic improvements can remain tracked issues.
 
