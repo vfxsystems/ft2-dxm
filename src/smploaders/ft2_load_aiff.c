@@ -1,658 +1,404 @@
-/* Apple AIFF sample loader
+/* Apple AIFF/AIFC sample loader
 **
-** Note: Vol/loop sanitation is done in the last stage
-** of sample loading, so you don't need to do that here.
-** Do NOT close the file handle!
+** Volume and loop sanitation is performed by the common sample-loading path.
+** Do not close the file handle here.
 */
 
-#include <stdio.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include "../ft2_header.h"
 #include "../ft2_audio.h"
 #include "../ft2_sample_ed.h"
 #include "../ft2_sysreqs.h"
 #include "../ft2_sample_loader.h"
 
-static double getAIFFSampleRate(uint8_t *in);
-static bool aiffIsStereo(FILE *f); // only ran on files that are confirmed to be AIFFs
+static bool readExact(FILE *f, void *dst, size_t bytes)
+{
+	return bytes == 0 || fread(dst, 1, bytes, f) == bytes;
+}
+
+static bool seekTo(FILE *f, uint64_t offset, uint32_t filesize)
+{
+	return offset <= filesize && fseek(f, (long)offset, SEEK_SET) == 0;
+}
+
+static uint16_t readBE16(const uint8_t *src)
+{
+	return (uint16_t)((src[0] << 8) | src[1]);
+}
+
+static uint32_t readBE32(const uint8_t *src)
+{
+	return ((uint32_t)src[0] << 24) | ((uint32_t)src[1] << 16) |
+		((uint32_t)src[2] << 8) | src[3];
+}
+
+static uint64_t readInteger(const uint8_t *src, uint32_t bytes, bool littleEndian)
+{
+	uint64_t value = 0;
+	if (littleEndian)
+	{
+		for (uint32_t i = 0; i < bytes; i++)
+			value |= (uint64_t)src[i] << (i * 8);
+	}
+	else
+	{
+		for (uint32_t i = 0; i < bytes; i++)
+			value = (value << 8) | src[i];
+	}
+	return value;
+}
+
+static double decodeExtended80(const uint8_t *src)
+{
+	const bool negative = (src[0] & 0x80) != 0;
+	const uint16_t exponent = (uint16_t)(((src[0] & 0x7F) << 8) | src[1]);
+	const uint64_t mantissa = readInteger(src + 2, 8, false);
+	if (negative || exponent == 0x7FFF || mantissa == 0)
+		return 0.0;
+
+	const int unbiasedExponent = (exponent == 0 ? 1 : exponent) - 16383;
+	const double value = ldexp((double)mantissa, unbiasedExponent - 63);
+	return isfinite(value) && value > 0.0 ? value : 0.0;
+}
+
+static double decodeIntegerSample(const uint8_t *src, uint16_t bitDepth,
+	bool littleEndian, bool signedSample)
+{
+	const uint64_t raw = readInteger(src, bitDepth / 8, littleEndian);
+	const uint64_t signBit = UINT64_C(1) << (bitDepth - 1);
+	if (!signedSample)
+		return (double)raw - (double)signBit;
+
+	if (raw & signBit)
+		return (double)((int64_t)raw - (int64_t)(signBit << 1));
+	return (double)raw;
+}
+
+static double decodeFloatSample(const uint8_t *src, uint16_t bitDepth, bool littleEndian)
+{
+	if (bitDepth == 32)
+	{
+		const uint32_t bits = (uint32_t)readInteger(src, 4, littleEndian);
+		float value;
+		memcpy(&value, &bits, sizeof (value));
+		return isfinite(value) ? value : 0.0;
+	}
+
+	const uint64_t bits = readInteger(src, 8, littleEndian);
+	double value;
+	memcpy(&value, &bits, sizeof (value));
+	return isfinite(value) ? value : 0.0;
+}
+
+static int16_t scaleToSigned16(double sample, double gain)
+{
+	double scaled = sample * gain;
+	if (scaled > INT16_MAX) scaled = INT16_MAX;
+	if (scaled < INT16_MIN) scaled = INT16_MIN;
+	return (int16_t)scaled;
+}
 
 bool loadAIFF(FILE *f, uint32_t filesize)
 {
-	char compType[4];
-	int8_t *audioDataS8;
-	uint8_t sampleRateBytes[10], *audioDataU8;
-	int16_t *audioDataS16, smp16;
-	uint16_t numChannels, bitDepth;
-	int32_t *audioDataS32;
-	uint32_t i, blockName, blockSize;
-	uint32_t offset, len32;
-	sample_t *s = &tmpSmp;
-
-	fseek(f, 8, SEEK_SET);
-	fread(compType, 1, 4, f);
-	rewind(f);
-
 	if (filesize < 12)
 	{
 		loaderMsgBox("Error loading sample: The sample is not supported or is invalid!");
 		return false;
 	}
 
-	uint32_t commPtr = 0, commLen = 0;
-	uint32_t ssndPtr = 0, ssndLen = 0;
+	uint8_t formHeader[12];
+	if (!seekTo(f, 0, filesize) || !readExact(f, formHeader, sizeof (formHeader)) ||
+		memcmp(formHeader, "FORM", 4) != 0 ||
+		(memcmp(formHeader + 8, "AIFF", 4) != 0 && memcmp(formHeader + 8, "AIFC", 4) != 0))
+		return false;
 
-	fseek(f, 12, SEEK_SET);
-	while (!feof(f) && (uint32_t)ftell(f) < filesize-12)
+	const bool isAIFC = memcmp(formHeader + 8, "AIFC", 4) == 0;
+	const uint64_t formEnd = (uint64_t)readBE32(formHeader + 4) + 8;
+	if (formEnd < 12 || formEnd > filesize)
+		return false;
+
+	uint32_t commPtr = 0, commLen = 0, ssndPtr = 0, ssndLen = 0;
+	if (!seekTo(f, 12, filesize)) return false;
+	while (true)
 	{
-		fread(&blockName, 4, 1, f); if (feof(f)) break;
-		fread(&blockSize, 4, 1, f); if (feof(f)) break;
+		const long headerPos = ftell(f);
+		if (headerPos < 0) return false;
+		if ((uint64_t)headerPos + 8 > formEnd) break;
 
-		blockName = SWAP32(blockName);
-		blockSize = SWAP32(blockSize);
+		uint8_t chunkHeader[8];
+		if (!readExact(f, chunkHeader, sizeof (chunkHeader))) return false;
+		const uint32_t chunkSize = readBE32(chunkHeader + 4);
+		const long payloadPos = ftell(f);
+		if (payloadPos < 0) return false;
+		const uint64_t chunkEnd = (uint64_t)payloadPos + chunkSize + (chunkSize & 1u);
+		if (chunkEnd > formEnd) return false;
 
-		switch (blockName)
+		if (memcmp(chunkHeader, "COMM", 4) == 0)
 		{
-			case 0x434F4D4D: // "COMM"
-			{
-				commPtr = ftell(f);
-				commLen = blockSize;
-			}
-			break;
-
-			case 0x53534E44: // "SSND"
-			{
-				ssndPtr = ftell(f);
-				ssndLen = blockSize;
-			}
-			break;
-
-			default: break;
+			commPtr = (uint32_t)payloadPos;
+			commLen = chunkSize;
+		}
+		else if (memcmp(chunkHeader, "SSND", 4) == 0)
+		{
+			ssndPtr = (uint32_t)payloadPos;
+			ssndLen = chunkSize;
 		}
 
-		fseek(f, blockSize + (blockSize & 1), SEEK_CUR);
+		if (!seekTo(f, chunkEnd, filesize)) return false;
 	}
 
-	if (commPtr == 0 || commLen < 18 || ssndPtr == 0)
+	if (commPtr == 0 || commLen < (isAIFC ? 22u : 18u) || ssndPtr == 0 || ssndLen < 8)
 	{
 		loaderMsgBox("Error loading sample: The sample is not supported or is invalid!");
 		return false;
 	}
 
-	// kludge for strange AIFFs
-	if (ssndLen == 0)
-		ssndLen = filesize - ssndPtr;
+	uint8_t common[22];
+	const size_t commonBytes = isAIFC ? sizeof (common) : 18;
+	if (!seekTo(f, commPtr, filesize) || !readExact(f, common, commonBytes))
+		return false;
 
-	if (ssndPtr+ssndLen > (uint32_t)filesize)
-		ssndLen = filesize - ssndPtr;
-
-	fseek(f, commPtr, SEEK_SET);
-	fread(&numChannels, 2, 1, f); numChannels = SWAP16(numChannels);
-	fseek(f, 4, SEEK_CUR);
-	fread(&bitDepth, 2, 1, f); bitDepth = SWAP16(bitDepth);
-	fread(sampleRateBytes, 1, 10, f);
-
-	if (numChannels != 1 && numChannels != 2)
+	const uint16_t numChannels = readBE16(common);
+	const uint32_t sampleLength = readBE32(common + 2);
+	const uint16_t bitDepth = readBE16(common + 6);
+	const double sampleRate = decodeExtended80(common + 8);
+	if ((numChannels != 1 && numChannels != 2) || sampleLength == 0 ||
+		sampleLength > MAX_SAMPLE_LEN || sampleRate <= 0.0)
 	{
-		loaderMsgBox("Error loading sample: Unsupported amounts of channels!");
+		loaderMsgBox("Error loading sample: The sample is not supported or is invalid!");
 		return false;
 	}
 
-	// read compression type (if present)
-	bool signedSample = true;
-	bool floatSample = false;
-	if (commLen > 18)
+	bool floatSample = false, signedSample = true, littleEndian = false;
+	if (isAIFC)
 	{
-		fread(&compType, 1, 4, f);
-
-		if (!memcmp(compType, "raw ", 4))
+		const uint8_t *compression = common + 18;
+		if (memcmp(compression, "NONE", 4) == 0 || memcmp(compression, "twos", 4) == 0)
+			signedSample = true;
+		else if (memcmp(compression, "sowt", 4) == 0)
 		{
-			signedSample = false;
+			signedSample = true;
+			littleEndian = true;
 		}
-		else if (!memcmp(compType, "FL32", 4) || !memcmp(compType, "fl32", 4) || !memcmp(compType, "FL64", 4) || !memcmp(compType, "fl64", 4))
+		else if (memcmp(compression, "raw ", 4) == 0)
+			signedSample = false;
+		else if (memcmp(compression, "FL32", 4) == 0 || memcmp(compression, "fl32", 4) == 0)
 		{
 			floatSample = true;
+			if (bitDepth != 32) return false;
+		}
+		else if (memcmp(compression, "FL64", 4) == 0 || memcmp(compression, "fl64", 4) == 0)
+		{
+			floatSample = true;
+			if (bitDepth != 64) return false;
 		}
 		else
 		{
-			loaderMsgBox("Error loading sample: Unsupported AIFF type!");
+			loaderMsgBox("Error loading sample: Unsupported AIFF compression type!");
 			return false;
 		}
 	}
 
-	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32 &&
-		!(floatSample && bitDepth == 64) && !(floatSample && bitDepth == 32))
+	if ((!floatSample && bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32) ||
+		(floatSample && bitDepth != 32 && bitDepth != 64))
 	{
-		loaderMsgBox("Error loading sample: Unsupported AIFF type!");
+		loaderMsgBox("Error loading sample: Unsupported AIFF bit depth!");
 		return false;
 	}
 
-	double dSampleRate = getAIFFSampleRate(sampleRateBytes);
+	uint8_t soundHeader[8];
+	if (!seekTo(f, ssndPtr, filesize) || !readExact(f, soundHeader, sizeof (soundHeader)))
+		return false;
+	const uint32_t dataOffset = readBE32(soundHeader);
+	if ((uint64_t)dataOffset + 8 > ssndLen)
+		return false;
 
-	// sample data chunk
+	const uint32_t bytesPerSample = bitDepth / 8;
+	const uint32_t bytesPerFrame = bytesPerSample * numChannels;
+	const uint64_t dataBytes = (uint64_t)sampleLength * bytesPerFrame;
+	const uint64_t availableBytes = ssndLen - 8u - dataOffset;
+	const uint64_t dataPtr = (uint64_t)ssndPtr + 8 + dataOffset;
+	if (dataBytes == 0 || dataBytes > availableBytes || dataPtr + dataBytes > filesize)
+		return false;
 
-	fseek(f, ssndPtr, SEEK_SET);
-
-	fread(&offset, 4, 1, f);
-	if (offset > 0)
+	int16_t stereoMode = -1;
+	if (numChannels == 2)
 	{
-		loaderMsgBox("Error loading sample: The sample is not supported or is invalid!");
+		stereoMode = loaderSysReq(4, "System request", "This is a stereo sample.", NULL);
+		if (stereoMode != STEREO_SAMPLE_READ_LEFT && stereoMode != STEREO_SAMPLE_READ_RIGHT &&
+			stereoMode != STEREO_SAMPLE_CONVERT)
+			return false;
+	}
+	const bool stereoOutput = numChannels == 2 && stereoMode == STEREO_SAMPLE_CONVERT;
+	const uint32_t selectedChannel = stereoMode == STEREO_SAMPLE_READ_RIGHT ? 1 : 0;
+	const bool output16Bit = bitDepth != 8 || floatSample;
+
+	uint8_t *sourceData = (uint8_t *)malloc((size_t)dataBytes);
+	if (sourceData == NULL)
+	{
+		loaderMsgBox("Not enough memory!");
+		return false;
+	}
+	if (!seekTo(f, dataPtr, filesize) || !readExact(f, sourceData, (size_t)dataBytes))
+	{
+		free(sourceData);
+		loaderMsgBox("General I/O error during loading! Is the file in use?");
 		return false;
 	}
 
-	fseek(f, 4, SEEK_CUR);
-
-	ssndLen -= 8; // don't include offset and blockSize datas
-
-	uint32_t sampleLength = ssndLen;
-
-	int16_t stereoSampleLoadMode = -1;
-	stereoSampleLoadMode = loaderSysReq(4, "System request", "This is a stereo sample.\nChoose how to load:\n1. Load Left Only\n2. Load Right Only\n3. Load Stereo (true stereo)", NULL);
-
-	// read sample data
-
-	if (!floatSample && bitDepth == 8) // 8-BIT INTEGER SAMPLE
+	sample_t *s = &tmpSmp;
+	if (!allocateSmpData(s, sampleLength, output16Bit, stereoOutput))
 	{
-		if (!allocateSmpData(s, sampleLength, false, false))
+		free(sourceData);
+		loaderMsgBox("Not enough memory!");
+		return false;
+	}
+
+	if (!output16Bit)
+	{
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(s->dataPtr, sampleLength, 1, f) != 1)
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		audioDataS8 = (int8_t *)s->dataPtr;
-		if (!signedSample)
-		{
-			for (i = 0; i < sampleLength; i++)
-				audioDataS8[i] ^= 0x80;
-		}
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					for (i = 1; i < sampleLength; i++)
-						audioDataS8[i] = audioDataS8[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						audioDataS8[i] = audioDataS8[(i * 2) + 1];
-
-					audioDataS8[i] = 0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-					{
-						smp16 = (audioDataS8[(i * 2) + 0] + audioDataS8[(i * 2) + 1]) >> 1;
-						audioDataS8[i] = (int8_t)smp16;
-					}
-
-					audioDataS8[i] = 0;
-				}
-				break;
-			}
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			s->dataPtrL[i] = (int8_t)decodeIntegerSample(frame + selectedChannel, 8, false, signedSample);
+			if (stereoOutput)
+				s->dataPtrR[i] = (int8_t)decodeIntegerSample(frame + 1, 8, false, signedSample);
 		}
 	}
-	else if (!floatSample && bitDepth == 16) // 16-BIT INTEGER SAMPLE
+	else if (!floatSample && bitDepth == 16)
 	{
-		sampleLength /= sizeof (int16_t);
-		if (!allocateSmpData(s, sampleLength * sizeof (int16_t), false, false))
+		int16_t *left = (int16_t *)s->dataPtrL;
+		int16_t *right = (int16_t *)s->dataPtrR;
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			loaderMsgBox("Not enough memory!");
-			return false;
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			left[i] = (int16_t)decodeIntegerSample(frame + (selectedChannel * 2), 16, littleEndian, signedSample);
+			if (stereoOutput)
+				right[i] = (int16_t)decodeIntegerSample(frame + 2, 16, littleEndian, signedSample);
 		}
-
-		if (fread(s->dataPtr, sampleLength, sizeof (int16_t), f) != sizeof (int16_t))
+	}
+	else
+	{
+		double peak = 0.0;
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		// change endianness
-		audioDataS16 = (int16_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-			audioDataS16[i] = SWAP16(audioDataS16[i]);
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-
-			switch (stereoSampleLoadMode)
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			const double left = floatSample
+				? decodeFloatSample(frame + (selectedChannel * bytesPerSample), bitDepth, littleEndian)
+				: decodeIntegerSample(frame + (selectedChannel * bytesPerSample), bitDepth, littleEndian, signedSample);
+			if (fabs(left) > peak) peak = fabs(left);
+			if (stereoOutput)
 			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					for (i = 1; i < sampleLength; i++)
-						audioDataS16[i] = audioDataS16[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						audioDataS16[i] = audioDataS16[(i * 2) + 1];
-
-					audioDataS16[i] = 0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-					{
-						int32_t smp32 = (audioDataS16[(i * 2) + 0] + audioDataS16[(i * 2) + 1]) >> 1;
-						audioDataS16[i] = (int16_t)smp32;
-					}
-
-					audioDataS16[i] = 0;
-				}
-				break;
+				const double right = floatSample
+					? decodeFloatSample(frame + bytesPerSample, bitDepth, littleEndian)
+					: decodeIntegerSample(frame + bytesPerSample, bitDepth, littleEndian, signedSample);
+				if (fabs(right) > peak) peak = fabs(right);
 			}
 		}
 
-		s->flags |= SAMPLE_16BIT;
-	}
-	else if (!floatSample && bitDepth == 24) // 24-BIT INTEGER SAMPLE
-	{
-		sampleLength /= 3;
-		if (!allocateSmpData(s, sampleLength * sizeof (int32_t), false, false))
+		const double gain = peak > 0.0 ? (double)INT16_MAX / peak : 0.0;
+		int16_t *leftOut = (int16_t *)s->dataPtrL;
+		int16_t *rightOut = (int16_t *)s->dataPtrR;
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(&s->dataPtr[sampleLength], sampleLength, 3, f) != 3)
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		audioDataS32 = (int32_t *)s->dataPtr;
-
-		// convert to 32-bit
-		audioDataU8 = (uint8_t *)s->dataPtr + sampleLength;
-		for (i = 0; i < sampleLength; i++)
-		{
-			audioDataS32[i] = (audioDataU8[0] << 24) | (audioDataU8[1] << 16) | (audioDataU8[2] << 8);
-			audioDataU8 += 3;
-		}
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-
-			switch (stereoSampleLoadMode)
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			const double left = floatSample
+				? decodeFloatSample(frame + (selectedChannel * bytesPerSample), bitDepth, littleEndian)
+				: decodeIntegerSample(frame + (selectedChannel * bytesPerSample), bitDepth, littleEndian, signedSample);
+			leftOut[i] = scaleToSigned16(left, gain);
+			if (stereoOutput)
 			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					for (i = 1; i < sampleLength; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 1];
-
-					audioDataS32[i] = 0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-					{
-						int64_t smp64 = audioDataS32[(i * 2) + 0];
-						smp64 += audioDataS32[(i * 2) + 1];
-						smp64 >>= 1;
-
-						audioDataS32[i] = (int32_t)smp64;
-					}
-
-					audioDataS32[i] = 0;
-				}
-				break;
+				const double right = floatSample
+					? decodeFloatSample(frame + bytesPerSample, bitDepth, littleEndian)
+					: decodeIntegerSample(frame + bytesPerSample, bitDepth, littleEndian, signedSample);
+				rightOut[i] = scaleToSigned16(right, gain);
 			}
 		}
-
-		normalizeSigned32Bit(audioDataS32, sampleLength);
-
-		audioDataS16 = (int16_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-			audioDataS16[i] = audioDataS32[i] >> 16;
-
-		s->flags |= SAMPLE_16BIT;
 	}
-	else if (!floatSample && bitDepth == 32) // 32-BIT INTEGER SAMPLE
-	{
-		sampleLength /= sizeof (int32_t);
-		if (!allocateSmpData(s, sampleLength * sizeof (int32_t), false, false))
-		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
+	free(sourceData);
 
-		if (fread(s->dataPtr, sampleLength, sizeof (int32_t), f) != sizeof (int32_t))
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		// change endianness
-		audioDataS32 = (int32_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-			audioDataS32[i] = SWAP32(audioDataS32[i]);
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					for (i = 1; i < sampleLength; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 1];
-
-					audioDataS32[i] = 0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-					{
-						int64_t smp64 = audioDataS32[(i * 2) + 0];
-						smp64 += audioDataS32[(i * 2) + 1];
-						smp64 >>= 1;
-
-						audioDataS32[i] = (int32_t)smp64;
-					}
-
-					audioDataS32[i] = 0;
-				}
-				break;
-			}
-		}
-
-		normalizeSigned32Bit(audioDataS32, sampleLength);
-
-		audioDataS16 = (int16_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-			audioDataS16[i] = audioDataS32[i] >> 16;
-
-		s->flags |= SAMPLE_16BIT;
-	}
-	else if (floatSample && bitDepth == 32) // 32-BIT FLOAT SAMPLE
-	{
-		sampleLength /= sizeof (float);
-		if (!allocateSmpData(s, sampleLength * sizeof (float), false, false))
-		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(s->dataPtr, sampleLength, sizeof (float), f) != sizeof (float))
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		// change endianness
-		audioDataS32 = (int32_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-			audioDataS32[i] = SWAP32(audioDataS32[i]);
-
-		float *fAudioDataFloat = (float *)s->dataPtr;
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					// remove right channel data
-					for (i = 1; i < sampleLength; i++)
-						fAudioDataFloat[i] = fAudioDataFloat[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					// remove left channel data
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						fAudioDataFloat[i] = fAudioDataFloat[(i * 2) + 1];
-
-					fAudioDataFloat[i] = 0.0f;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					// mix stereo to mono
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						fAudioDataFloat[i] = (fAudioDataFloat[(i * 2) + 0] + fAudioDataFloat[(i * 2) + 1]) * 0.5f;
-
-					fAudioDataFloat[i] = 0.0f;
-				}
-				break;
-			}
-		}
-
-		normalize32BitFloatToSigned16Bit(fAudioDataFloat, sampleLength);
-
-		int16_t *ptr16 = (int16_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-		{
-			const int32_t smp32 = (const int32_t)fAudioDataFloat[i];
-			ptr16[i] = (int16_t)smp32;
-		}
-
-		s->flags |= SAMPLE_16BIT;
-	}
-	else if (floatSample && bitDepth == 64) // 64-BIT FLOAT SAMPLE
-	{
-		sampleLength /= sizeof (double);
-		if (!allocateSmpData(s, sampleLength * sizeof (double), false, false))
-		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(s->dataPtr, sampleLength, sizeof (double), f) != sizeof (double))
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		// change endianness
-		int64_t *audioDataS64 = (int64_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-			audioDataS64[i] = SWAP64(audioDataS64[i]);
-
-		double *dAudioDataDouble = (double *)s->dataPtr;
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					// remove right channel data
-					for (i = 1; i < sampleLength; i++)
-						dAudioDataDouble[i] = dAudioDataDouble[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					// remove left channel data
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						dAudioDataDouble[i] = dAudioDataDouble[(i * 2) + 1];
-
-					dAudioDataDouble[i] = 0.0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					// mix stereo to mono
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						dAudioDataDouble[i] = (dAudioDataDouble[(i * 2) + 0] + dAudioDataDouble[(i * 2) + 1]) * 0.5;
-
-					dAudioDataDouble[i] = 0.0;
-				}
-				break;
-			}
-		}
-
-		normalize64BitFloatToSigned16Bit(dAudioDataDouble, sampleLength);
-
-		int16_t *ptr16 = (int16_t *)s->dataPtr;
-		for (i = 0; i < sampleLength; i++)
-		{
-			const int32_t smp32 = (const int32_t)dAudioDataDouble[i];
-			ptr16[i] = (int16_t)smp32;
-		}
-
-		s->flags |= SAMPLE_16BIT;
-	}
-
-	if (sampleLength > MAX_SAMPLE_LEN)
-		sampleLength = MAX_SAMPLE_LEN;
-
-	bool sample16Bit = !!(s->flags & SAMPLE_16BIT);
-	reallocateSmpData(s, sampleLength, sample16Bit); // readjust memory needed
-
+	s->flags = (output16Bit ? SAMPLE_16BIT : 0) | (stereoOutput ? SAMPLE_STEREO : 0);
 	s->length = sampleLength;
 	s->volume = 64;
 	s->panning = 128;
-
-	setSampleC4Hz(s, dSampleRate);
-
+	setSampleC4Hz(s, sampleRate);
 	return true;
 }
 
-static double getAIFFSampleRate(uint8_t *in)
+#ifdef FT2_STABILITY_TESTS
+static void ignoreAIFFLoaderMessage(const char *message, ...)
 {
-	/* 80-bit IEEE-754 to unsigned double-precision float.
-	** Sign bit is ignored.
-	*/
-
-#define EXP_BIAS 16383
-
-	const uint16_t exp15 = ((in[0] & 0x7F) << 8) | in[1];
-	const uint64_t mantissaBits = *(uint64_t *)&in[2];
-	const uint64_t mantissa63 = SWAP64(mantissaBits) & INT64_MAX;
-
-	double dExp = exp15 - EXP_BIAS;
-	double dMantissa = mantissa63 / (INT64_MAX+1.0);
-
-	return (1.0 + dMantissa) * exp2(dExp);
+	(void)message;
 }
 
-static bool aiffIsStereo(FILE *f) // only ran on files that are confirmed to be AIFFs
+static int16_t chooseAIFFStereo(int16_t type, const char *headline, const char *text, void (*callback)(void))
 {
-	uint16_t numChannels;
-	uint32_t chunkID, chunkSize;
-
-	uint32_t oldPos = ftell(f);
-
-	fseek(f, 0, SEEK_END);
-	int32_t filesize = ftell(f);
-
-	if (filesize < 12)
-	{
-		fseek(f, oldPos, SEEK_SET);
-		return false;
-	}
-
-	fseek(f, 12, SEEK_SET);
-
-	uint32_t commPtr = 0;
-	uint32_t commLen = 0;
-
-	int32_t bytesRead = 0;
-	while (!feof(f) && bytesRead < filesize-12)
-	{
-		fread(&chunkID, 4, 1, f); chunkID = SWAP32(chunkID); if (feof(f)) break;
-		fread(&chunkSize, 4, 1, f); chunkSize = SWAP32(chunkSize); if (feof(f)) break;
-
-		int32_t endOfChunk = (ftell(f) + chunkSize) + (chunkSize & 1);
-		switch (chunkID)
-		{
-			case 0x434F4D4D: // "COMM"
-			{
-				commPtr = ftell(f);
-				commLen = chunkSize;
-			}
-			break;
-
-			default: break;
-		}
-
-		bytesRead += (chunkSize + (chunkSize & 1));
-		fseek(f, endOfChunk, SEEK_SET);
-	}
-
-	if (commPtr == 0 || commLen < 2)
-	{
-		fseek(f, oldPos, SEEK_SET);
-		return false;
-	}
-
-	fseek(f, commPtr, SEEK_SET);
-	fread(&numChannels, 2, 1, f); numChannels = SWAP16(numChannels);
-	fseek(f, oldPos, SEEK_SET);
-
-	return (numChannels == 2);
+	(void)type;
+	(void)headline;
+	(void)text;
+	(void)callback;
+	return STEREO_SAMPLE_CONVERT;
 }
+
+static bool loadAIFFFixture(const uint8_t *data, size_t size, bool expectedResult)
+{
+	FILE *f = tmpfile();
+	if (f == NULL) return false;
+	void (*oldLoaderMsgBox)(const char *, ...) = loaderMsgBox;
+	int16_t (*oldLoaderSysReq)(int16_t, const char *, const char *, void (*)(void)) = loaderSysReq;
+	loaderMsgBox = ignoreAIFFLoaderMessage;
+	loaderSysReq = chooseAIFFStereo;
+	const bool result = fwrite(data, 1, size, f) == size &&
+		fseek(f, 0, SEEK_SET) == 0 && loadAIFF(f, (uint32_t)size) == expectedResult;
+	loaderMsgBox = oldLoaderMsgBox;
+	loaderSysReq = oldLoaderSysReq;
+	fclose(f);
+	return result;
+}
+
+bool runAIFFLoaderRegressionTests(void)
+{
+	const uint8_t monoAIFF[] =
+	{
+		'F','O','R','M', 0,0,0,48, 'A','I','F','F',
+		'C','O','M','M', 0,0,0,18,
+		0,1, 0,0,0,2, 0,8, 0x40,0x0B,0xFA,0,0,0,0,0,0,0,
+		'S','S','N','D', 0,0,0,10, 0,0,0,0, 0,0,0,0, 0x80,0x7F
+	};
+	bool ok = loadAIFFFixture(monoAIFF, sizeof (monoAIFF), true) &&
+		tmpSmp.length == 2 && tmpSmp.dataPtrL != NULL &&
+		tmpSmp.dataPtrL[0] == INT8_MIN && tmpSmp.dataPtrL[1] == INT8_MAX &&
+		(tmpSmp.flags & (SAMPLE_16BIT | SAMPLE_STEREO)) == 0;
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	if (!ok) return false;
+
+	const uint8_t stereo24AIFF[] =
+	{
+		'F','O','R','M', 0,0,0,58, 'A','I','F','F',
+		'C','O','M','M', 0,0,0,18,
+		0,2, 0,0,0,2, 0,24, 0x40,0x0B,0xFA,0,0,0,0,0,0,0,
+		'S','S','N','D', 0,0,0,20, 0,0,0,0, 0,0,0,0,
+		0x7F,0xFF,0xFF, 0,0,0, 0,0,0, 0x80,0,0
+	};
+	ok = loadAIFFFixture(stereo24AIFF, sizeof (stereo24AIFF), true) &&
+		tmpSmp.length == 2 &&
+		(tmpSmp.flags & (SAMPLE_16BIT | SAMPLE_STEREO)) == (SAMPLE_16BIT | SAMPLE_STEREO) &&
+		tmpSmp.dataPtrR != NULL &&
+		((int16_t *)tmpSmp.dataPtrL)[0] > 32000 && ((int16_t *)tmpSmp.dataPtrL)[1] == 0 &&
+		((int16_t *)tmpSmp.dataPtrR)[0] == 0 && ((int16_t *)tmpSmp.dataPtrR)[1] < -32000;
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	if (!ok) return false;
+
+	uint8_t truncatedAIFF[sizeof (monoAIFF)];
+	memcpy(truncatedAIFF, monoAIFF, sizeof (truncatedAIFF));
+	truncatedAIFF[45] = 12; // SSND declares more payload than FORM contains
+	ok = loadAIFFFixture(truncatedAIFF, sizeof (truncatedAIFF), false);
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	return ok;
+}
+#endif
