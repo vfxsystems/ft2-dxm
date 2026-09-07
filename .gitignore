@@ -48,3 +48,16 @@ src/release/other/
 release/macos/ft2-dxm-macos.app/Contents/MacOS/ft2-dxm-macos
 src/tunefish4/Builds/
 src/tunefish4/JuceLibraryCode/
+
+# Local Virus firmware and derived runtime data; source exports also exclude these.
+src/gearmulator/assets/
+OsTIrus/
+**/roms/
+**/otstirusdat.zip
+
+# Local assistant transcripts
+**/Codex.md
+**/_old.Codex.md
+**/gemini.md
+__pycache__/
+*.pyc

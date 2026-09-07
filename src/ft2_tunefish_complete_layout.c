@@ -23,6 +23,12 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#ifdef FT2_UI_TRACE
+#define TF_UI_TRACE(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define TF_UI_TRACE(...) ((void)0)
+#endif
+
 #ifndef CLAMP
 #define CLAMP(v, lo, hi) (((v) < (lo)) ? (lo) : (((v) > (hi)) ? (hi) : (v)))
 #endif
@@ -30,9 +36,6 @@
 // =============================================================================
 // FORWARD DECLARATIONS
 // =============================================================================
-
-// Redraw trigger stub
-static void tf_request_redraw(void) { /* TODO: Implement redraw trigger */ }
 
 // Widget management
 static void tf_update_widget_visibility(TunefishCompleteLayout* layout);
@@ -59,7 +62,7 @@ static void tf_octave_button_handler(TunefishWidget* w);
 static void tf_formant_button_handler(TunefishWidget* w);
 
 // Parameter synchronization
-static void tf_refresh_shadow_parameters_from_synth(void);
+static void tf_refresh_shadow_parameters_from_synth(TunefishCompleteLayout* layout);
 static void tf_update_modulation_rings_from_matrix(TunefishCompleteLayout* layout);
 
 // Ensure preset combo sync helper is visible before use
@@ -77,6 +80,7 @@ extern int ft2_synth_load_preset_for_instrument(int instrID, int presetIndex);
 
 // Exit button pending close (allows pressed visual before hiding)
 static bool g_tf_exit_pending = false;
+extern TunefishCompleteLayout* g_active_tunefish_layout;
 
 // Missing external variable definitions for linking
 extern bool synthLFO1Sync;
@@ -281,6 +285,14 @@ static int tf_env_save_mouse_y[2] = { 0, 0 };
 #define TF_EFFECT_9     82
 #define TF_EFFECT_10    83
 
+/* The stack chooses an effect implementation, while these controls live in
+ * Tunefish's shared per-effect parameter block. */
+#define TF_DISTORT_AMOUNT 84
+#define TF_REVERB_WET     92
+#define TF_FLANGER_WET    97
+#define TF_CHORUS_GAIN    98
+#define TF_FORMANT_WET    100
+
 #define TF_LFO1_SHAPE   38
 #define TF_LFO2_SHAPE   42
 #define TF_ADSR1_ATTACK 26
@@ -452,6 +464,31 @@ static TunefishParameterBinding* tf_find_param_binding(const char* widgetName) {
     return NULL;
 }
 
+static int tf_effect_level_param(int effectType)
+{
+    switch (effectType) {
+        case 1: return TF_DISTORT_AMOUNT;
+        case 3: return TF_CHORUS_GAIN;
+        case 4: return TF_FLANGER_WET;
+        case 5: return TF_REVERB_WET;
+        case 6: return TF_FORMANT_WET;
+        default: return -1;
+    }
+}
+
+static int tf_stack_level_slot(const char *widgetName)
+{
+    static const char prefix[] = "fxstk_wet_";
+    if (!widgetName || strncmp(widgetName, prefix, sizeof prefix - 1) != 0)
+        return -1;
+
+    const char *suffix = widgetName + sizeof prefix - 1;
+    if (suffix[0] < '0' || suffix[0] > '9' || suffix[1] != '\0')
+        return -1;
+
+    return suffix[0] - '0';
+}
+
 // Sync bool variables with int wrappers
 static void tf_sync_bool_parameters(void) {
     synthLFO1SyncInt = synthLFO1Sync ? 1 : 0;
@@ -477,49 +514,25 @@ static void tf_parameter_changed(TunefishWidget* widget, float normalizedValue) 
             if (instrID >= 0) {
                 float norm = (float)(idx - 1) / 9.0f;
                 ft2_synth_set_param(instrID, TF_GEN_UNISONO, norm);
-                printf("[UNISONO PARAM] idx=%d norm=%0.3f param=14\n", idx-1, norm);
+                TF_UI_TRACE("[UNISONO PARAM] idx=%d norm=%0.3f param=14\n", idx-1, norm);
             }
             return;
         }
-        // Special-case: LFO1 shape buttons named "lfo1shape_X"
-        if (strncmp(widget->name, "lfo1_shape_", 4) == 0) {
-            int idx = atoi(widget->name + 4);
-            if (idx < 1 || idx > 5) return;
-            int instrID = getCurrentTF4InstrumentID();
-            if (instrID >= 0) {
-                float norm = (float)(idx - 1) / 4.0f;
-                ft2_synth_set_param(instrID, TF_LFO1_SHAPE, norm);
-                printf("[LFO1 SHAPE PARAM] idx=%d norm=%0.3f param=38\n", idx-1, norm);
-            }
-            return;
-        }
-        // Special-case: LFO2 shape buttons named "lfo2_shape_X"
-        if (strncmp(widget->name, "lfo2_shape_", 4) == 0) {
-            int idx = atoi(widget->name + 4);
-            if (idx < 1 || idx > 5) return;
-            int instrID = getCurrentTF4InstrumentID();
-            if (instrID >= 0) {
-                float norm = (float)(idx - 1) / 4.0f;
-                ft2_synth_set_param(instrID, TF_LFO2_SHAPE, norm);
-                printf("[LFO2 SHAPE PARAM] idx=%d norm=%0.3f param=42\n", idx-1, norm);
-            }
-            return;
-        }
-        printf("❌ [TF_PARAM] No binding found for widget: %s\n", widget->name);
+        TF_UI_TRACE("[TF_PARAM] No binding found for widget: %s\n", widget->name);
         return;
     }
 
-    // Store old value for debug output
-    int oldValue = *(binding->valuePtr);
-
     // Convert normalized value (0.0-1.0) to parameter range
+    normalizedValue = CLAMP(normalizedValue, 0.0f, 1.0f);
     int paramValue;
     // For combo boxes we can rely on selectedIndex for accurate discrete value
     if (widget->type == TF_WIDGET_COMBO_BOX) {
         paramValue = widget->selectedIndex; // direct discrete index
     } else {
-        paramValue = (int)(normalizedValue * (binding->maxValue - binding->minValue) + binding->minValue);
+        paramValue = (int)lroundf(normalizedValue * (binding->maxValue - binding->minValue) + binding->minValue);
     }
+    paramValue = CLAMP(paramValue, binding->minValue, binding->maxValue);
+    *(binding->valuePtr) = paramValue;
 
     // ---------------------------------------------------------
     // Special scaling for Mod-Matrix SOURCE/TARGET parameters
@@ -544,15 +557,30 @@ static void tf_parameter_changed(TunefishWidget* widget, float normalizedValue) 
         }
     }
 
-    if (binding->paramId >= 0) {
+    int targetParamId = binding->paramId;
+    if (targetParamId < 0) {
+        const int slot = tf_stack_level_slot(widget->name);
+        if (slot >= 0)
+            targetParamId = tf_effect_level_param(fxSel[slot]);
+    }
+
+    if (targetParamId >= 0) {
         int instrID = getCurrentTF4InstrumentID();
         if (instrID >= 0) {
-            ft2_synth_set_param(instrID, binding->paramId, norm);
+            ft2_synth_set_param(instrID, targetParamId, norm);
         }
     }
 
-    printf("✅ [TF_PARAM] %s: %.2f → %d (norm %.3f param %d)\n",
-           widget->name, normalizedValue, paramValue, norm, binding->paramId);
+    TF_UI_TRACE("[TF_PARAM] %s: %.2f -> %d (norm %.3f param %d)\n",
+           widget->name, normalizedValue, paramValue, norm, targetParamId);
+
+    /* Changing a stack slot changes which shared level control it represents.
+     * Refresh immediately so its value and enabled state match the new effect. */
+    if (binding->paramId >= TF_EFFECT_1 && binding->paramId <= TF_EFFECT_10) {
+        extern TunefishCompleteLayout* g_active_tunefish_layout;
+        if (g_active_tunefish_layout)
+            tf_update_all_widgets_from_synth(g_active_tunefish_layout);
+    }
 }
 
 // Note: Widget event handling is now consolidated in tf_widget_handle_mouse_event
@@ -634,7 +662,6 @@ void tf_sync_widgets_with_parameters(TunefishCompleteLayout* layout) {
             layout->page2.formant_type_buttons[i]->pressed = (i == synthFormant);
 
     tf_update_modulation_rings_from_matrix(layout);
-    tf_request_redraw();
 }
 
 // Update a specific widget from parameter value
@@ -644,13 +671,8 @@ void tf_update_widget_from_parameter(TunefishCompleteLayout* layout, const char*
     TunefishParameterBinding* binding = tf_find_param_binding(widgetName);
     if (!binding) return;
 
-    float normalizedValue = (float)(value - binding->minValue) / (float)(binding->maxValue - binding->minValue);
-
-    // Update the parameter value
-    *(binding->valuePtr) = value;
-
-    // TODO: Find and update the actual widget object
-    printf("[TF_PARAM] Updated widget %s to value %d\n", widgetName, value);
+    *(binding->valuePtr) = CLAMP(value, binding->minValue, binding->maxValue);
+    tf_sync_widgets_with_parameters(layout);
 }
 
 // Update all widgets from current synth state
@@ -658,12 +680,12 @@ void tf_update_all_widgets_from_synth(TunefishCompleteLayout* layout) {
     if (!layout) return;
 
     // Pull latest parameter values from synth into shadow arrays
-    tf_refresh_shadow_parameters_from_synth();
+    tf_refresh_shadow_parameters_from_synth(layout);
 
     // Call the sync function and mark for visual refresh
     tf_sync_widgets_with_parameters(layout);
 
-    printf("[TF_PARAM] All widgets updated from synth state\n");
+    TF_UI_TRACE("[TF_PARAM] All widgets updated from synth state\n");
 }
 
 // Apply Tunefish styling and parameter connections
@@ -753,7 +775,7 @@ static void tf_connect_widget_callbacks(TunefishCompleteLayout* layout) {
         }
     }
 
-    printf("✅ [CALLBACKS] All widget value change callbacks connected to parameter system\n");
+    TF_UI_TRACE("[CALLBACKS] All widget value change callbacks connected to parameter system\n");
 }
 
 // Authentic Tunefish Layout Positions (based on original 640x400 layout)
@@ -1276,7 +1298,7 @@ TunefishCompleteLayout* tf_create_complete_layout(void) {
     layout->visible = false;
     tf_style_all_widgets_authentic(layout);
     tf_connect_widget_callbacks(layout);
-    printf("Tunefish Complete Layout created with %d total widgets\n", widgetIndex);
+    TF_UI_TRACE("Tunefish Complete Layout created with %d total widgets\n", widgetIndex);
     return layout;
 }
 
@@ -1290,7 +1312,7 @@ void tf_switch_to_page(TunefishCompleteLayout* layout, int page) {
                  "page %d", page + 1);
     }
     tf_update_widget_visibility(layout); // Ensure correct widget visibility
-    printf("Switched to Tunefish page %d\n", page + 1);
+    TF_UI_TRACE("Switched to Tunefish page %d\n", page + 1);
 }
 
 void tf_show_layout(TunefishCompleteLayout* layout) {
@@ -1313,7 +1335,7 @@ void tf_show_layout(TunefishCompleteLayout* layout) {
 
     layout->visible = true;
     tf_update_widget_visibility(layout);     // show widgets on the active page
-    printf("Tunefish Complete Layout shown\n");
+    TF_UI_TRACE("Tunefish Complete Layout shown\n");
 }
 
 void tf_hide_layout(TunefishCompleteLayout* layout) {
@@ -1327,7 +1349,7 @@ void tf_hide_layout(TunefishCompleteLayout* layout) {
     }
 
     layout->visible = false;
-    printf("Tunefish Complete Layout hidden\n");
+    TF_UI_TRACE("Tunefish Complete Layout hidden\n");
 }
 
 // Rendering Functions
@@ -1394,7 +1416,7 @@ void tf_render_complete_layout(TunefishCompleteLayout* layout) {
 bool tf_handle_layout_mouse_event(TunefishCompleteLayout* layout, int mouseX, int mouseY, bool pressed) {
     if (!layout || !layout->visible) return false;
 
-    printf("🖱️  [MOUSE] Event at (%d, %d), pressed=%s\n", mouseX, mouseY, pressed ? "YES" : "NO");
+    TF_UI_TRACE("[MOUSE] Event at (%d, %d), pressed=%s\n", mouseX, mouseY, pressed ? "YES" : "NO");
 
     if (!pressed && g_tf_exit_pending) {
         g_tf_exit_pending = false;
@@ -1406,15 +1428,15 @@ bool tf_handle_layout_mouse_event(TunefishCompleteLayout* layout, int mouseX, in
     // Check global widgets first
     for (int i = 0; i < TF_GLOBAL_WIDGETS; i++) {
         if (layout->global_widgets[i] && tf_widget_handle_mouse_event(layout->global_widgets[i], mouseX, mouseY, pressed)) {
-            printf("🎯 [WIDGET] Global widget clicked: %s\n", layout->global_widgets[i]->name);
+            TF_UI_TRACE("[WIDGET] Global widget clicked: %s\n", layout->global_widgets[i]->name);
 
             // Handle special global widget actions
             if (layout->global_widgets[i] == layout->page_toggle_button && pressed) {
                 tf_switch_to_page(layout, (layout->current_page + 1) % TF_PAGE_COUNT);
-                printf("📄 [PAGE] Switched to page %d\n", layout->current_page);
+                TF_UI_TRACE("[PAGE] Switched to page %d\n", layout->current_page);
             } else if (layout->global_widgets[i] == layout->exit_button && pressed) {
                 // Arm close on mouse-up to show pressed state
-                printf("🚪 [EXIT] Closing Tunefish synth editor\n");
+                TF_UI_TRACE("[EXIT] Closing Tunefish synth editor\n");
                 g_tf_exit_pending = true;
             } else if (layout->global_widgets[i] == layout->preset_combo && pressed) {
                 // Handle preset selection
@@ -1438,7 +1460,7 @@ bool tf_handle_layout_mouse_event(TunefishCompleteLayout* layout, int mouseX, in
         TunefishWidget* w = pageArray[i];
         if (!w) continue;
         if (tf_widget_handle_mouse_event(w, mouseX, mouseY, pressed)) {
-            printf("🎯 [WIDGET] Page %d widget clicked: %s\n", layout->current_page+1, w->name);
+            TF_UI_TRACE("[WIDGET] Page %d widget clicked: %s\n", layout->current_page+1, w->name);
             return true;
         }
     }
@@ -1450,7 +1472,7 @@ bool tf_handle_layout_mouse_event(TunefishCompleteLayout* layout, int mouseX, in
 bool tf_handle_layout_keyboard_test(TunefishCompleteLayout* layout, int key) {
     if (!layout || !layout->visible) return false;
 
-    printf("⌨️  [KEYBOARD] Test key pressed: %d\n", key);
+    TF_UI_TRACE("[KEYBOARD] Test key pressed: %d\n", key);
 
     switch (key) {
         // Use function keys that don't conflict with FT2's note playing
@@ -1458,7 +1480,7 @@ bool tf_handle_layout_keyboard_test(TunefishCompleteLayout* layout, int key) {
             if (layout->preset_combo && layout->preset_combo->comboItems && layout->preset_combo->comboItemCount > 0) {
                 int oldIndex = layout->preset_combo->selectedIndex;
                 layout->preset_combo->selectedIndex = (layout->preset_combo->selectedIndex + 1) % layout->preset_combo->comboItemCount;
-                printf("🎵 [TEST] Preset: '%s' → '%s'\n",
+                TF_UI_TRACE("[TEST] Preset: '%s' -> '%s'\n",
                        layout->preset_combo->comboItems[oldIndex],
                        layout->preset_combo->comboItems[layout->preset_combo->selectedIndex]);
             }
@@ -1466,40 +1488,40 @@ bool tf_handle_layout_keyboard_test(TunefishCompleteLayout* layout, int key) {
 
         case '\t':  // Tab key - switch pages (safe, commonly used for UI navigation)
             tf_switch_to_page(layout, (layout->current_page + 1) % TF_PAGE_COUNT);
-            printf("📄 [TEST] Switched to page %d\n", layout->current_page);
+            TF_UI_TRACE("[TEST] Switched to page %d\n", layout->current_page);
             return true;
 
         case SDLK_F5:  // F5 - Test first rotary knob on current page
             if (layout->current_page == 0 && layout->page1.gen_volume_knob) {
                 tf_parameter_changed(layout->page1.gen_volume_knob, 0.5f);
-                printf("🎛️  [TEST] Volume knob set to 50%%\n");
+                TF_UI_TRACE("[TEST] Volume knob set to 50%%\n");
             } else if (layout->current_page == 1 && layout->page2.fx1_wet_knob) {
                 tf_parameter_changed(layout->page2.fx1_wet_knob, 0.75f);
-                printf("🎛️  [TEST] FX1 wet knob set to 75%%\n");
+                TF_UI_TRACE("[TEST] FX1 wet knob set to 75%%\n");
             }
             return true;
 
         case SDLK_F6:  // F6 - Test second rotary knob on current page
             if (layout->current_page == 0 && layout->page1.gen_panning_knob) {
                 tf_parameter_changed(layout->page1.gen_panning_knob, 0.25f);
-                printf("🎛️  [TEST] Panning knob set to 25%%\n");
+                TF_UI_TRACE("[TEST] Panning knob set to 25%%\n");
             } else if (layout->current_page == 1 && layout->page2.fx2_wet_knob) {
                 tf_parameter_changed(layout->page2.fx2_wet_knob, 0.60f);
-                printf("🎛️  [TEST] FX2 wet knob set to 60%%\n");
+                TF_UI_TRACE("[TEST] FX2 wet knob set to 60%%\n");
             }
             return true;
 
         case SDLK_F7:  // F7 - Test filter knob
             if (layout->current_page == 0 && layout->page1.filter_cutoff_knob) {
                 tf_parameter_changed(layout->page1.filter_cutoff_knob, 0.80f);
-                printf("🎛️  [TEST] Filter cutoff set to 80%%\n");
+                TF_UI_TRACE("[TEST] Filter cutoff set to 80%%\n");
             }
             return true;
 
         case SDLK_F8:  // F8 - Test LFO
             if (layout->current_page == 0 && layout->page1.lfo1_freq_knob) {
                 tf_parameter_changed(layout->page1.lfo1_freq_knob, 0.65f);
-                printf("🎛️  [TEST] LFO1 frequency set to 65%%\n");
+                TF_UI_TRACE("[TEST] LFO1 frequency set to 65%%\n");
             }
             return true;
 
@@ -1567,17 +1589,26 @@ const TunefishLayoutPositions* tf_get_layout_positions(void) {
 void tf_destroy_complete_layout(TunefishCompleteLayout* layout) {
     if (!layout) return;
 
-    // Destroy all widgets
-    for (int i = 0; i < TF_GLOBAL_WIDGETS; i++) {
-        if (layout->global_widgets[i]) {
-            tf_widget_destroy(layout->global_widgets[i]);
+    if (g_active_tunefish_layout == layout)
+        g_active_tunefish_layout = NULL;
+
+    /* Every owned widget is registered in all_widgets. Page/global arrays are
+       non-owning views into this list. Guard against accidental duplicate
+       registration so teardown remains safe while layouts evolve. */
+    for (int i = 0; i < TF_TOTAL_WIDGETS; ++i) {
+        TunefishWidget *widget = layout->all_widgets[i];
+        if (widget == NULL) continue;
+        for (int previous = 0; previous < i; ++previous) {
+            if (layout->all_widgets[previous] == widget) {
+                widget = NULL;
+                break;
+            }
         }
+        if (widget != NULL)
+            tf_widget_destroy(widget);
     }
 
-    // TODO: Destroy page widgets properly
-
     free(layout);
-    printf("Tunefish Complete Layout destroyed\n");
 }
 
 // Note: Callback functions removed - event handling is now done directly in tf_handle_layout_mouse_event
@@ -1646,20 +1677,19 @@ static void tf_lfo_shape_button_handler(TunefishWidget* w, TunefishWidget** butt
         }
     }
 
-    *shapeVar = idx + 1; // 1..5
+    *shapeVar = idx; // Tunefish shape enumeration is 0..4
 
     float norm = (float)idx / 4.0f;
-    printf("[%s_HANDLER] button=%d norm=%0.3f\n", tag, idx + 1, norm);
+    TF_UI_TRACE("[%s_HANDLER] button=%d norm=%0.3f\n", tag, idx + 1, norm);
 
     // Send to synth directly
     int instrID = getCurrentTF4InstrumentID();
     if (instrID >= 0) {
         ft2_synth_set_param(instrID, paramId, norm);
-        printf("[%s PARAM] idx=%d norm=%0.3f param=%d\n", tag, idx, norm, paramId);
+        TF_UI_TRACE("[%s PARAM] idx=%d norm=%0.3f param=%d\n", tag, idx, norm, paramId);
     } else {
-        printf("[%s WARN] No active instrument to send param.\n", tag);
+        TF_UI_TRACE("[%s WARN] No active instrument to send param.\n", tag);
     }
-    tf_request_redraw();
 }
 
 static void tf_lfo1shape_button_handler(TunefishWidget* w) {
@@ -1703,18 +1733,17 @@ static void tf_unisono_button_handler(TunefishWidget* w) {
     extern int synthUnisono; synthUnisono = idx + 1; // 1..10
 
     float norm = (float)idx / 9.0f;
-    printf("[UNISONO HANDLER] button=%d norm=%0.3f\n", idx+1, norm);
+    TF_UI_TRACE("[UNISONO HANDLER] button=%d norm=%0.3f\n", idx+1, norm);
 
     // Send to synth directly
     int instrID = getCurrentTF4InstrumentID();
     if (instrID >= 0)
     {
         ft2_synth_set_param(instrID, TF_GEN_UNISONO, norm);
-        printf("[UNISONO PARAM] idx=%d norm=%0.3f param=%d\n", idx, norm, TF_GEN_UNISONO);
+        TF_UI_TRACE("[UNISONO PARAM] idx=%d norm=%0.3f param=%d\n", idx, norm, TF_GEN_UNISONO);
     } else {
-        printf("[UNISONO WARN] No active instrument to send param.\n");
+        TF_UI_TRACE("[UNISONO WARN] No active instrument to send param.\n");
     }
-    tf_request_redraw();
 }
 
 // Octave button handler
@@ -1740,7 +1769,6 @@ static void tf_octave_button_handler(TunefishWidget* w) {
         float norm = (float)(8 - idx) / 8.0f; // 0..1, where idx=0 (-4) → 1.0, idx=8 (+4) → 0.0
         ft2_synth_set_param(instrID, 8, norm); // TF_GEN_OCTAVE = 8
     }
-    tf_request_redraw();
 }
 
 // Formant button handler (radio behaviour handled externally)
@@ -1772,7 +1800,6 @@ static void tf_formant_button_handler(TunefishWidget* w) {
     // Update the shadow variable and request a redraw
     extern int synthFormant;
     synthFormant = idx;
-    tf_request_redraw();
 }
 
 
@@ -1970,7 +1997,7 @@ static void create_page1_widgets(TunefishCompleteLayout* l, int* allIdx, int* p1
     
     // Add waveform view widget at the end (highest Z-order) - positioned within generator group area
     l->waveform_view = tf_create_waveform_view("waveform_view", 210, 100, 400, 120);
-    printf("🌊 [LAYOUT] Created waveform view widget: %p\n", l->waveform_view);
+    TF_UI_TRACE("[LAYOUT] Created waveform view widget: %p\n", (void *)l->waveform_view);
     l->waveform_view->page = PAGE1;
     l->page1_widgets[(*p1Idx)++] = l->waveform_view;
     l->all_widgets[(*allIdx)++] = l->waveform_view;
@@ -2162,7 +2189,7 @@ static void tf_preset_combo_selected(TunefishWidget* widget, int selectedIndex) 
     TunefishCompleteLayout* layout = (TunefishCompleteLayout*)widget->comboItems[widget->comboItemCount]; // Hack: store layout pointer at end
     if (!layout) return;
 
-    printf("🎵 [PRESET] Selected preset %d: '%s'\n", selectedIndex, widget->comboItems[selectedIndex]);
+    TF_UI_TRACE("[PRESET] Selected preset %d: '%s'\n", selectedIndex, widget->comboItems[selectedIndex]);
     tf_load_preset_by_index(layout, selectedIndex);
 }
 
@@ -2218,7 +2245,7 @@ static void tf_load_preset_by_index(TunefishCompleteLayout* layout, int presetIn
     extern void updateInstrumentTextBoxNames(void);
     updateInstrumentTextBoxNames();
 
-    printf("🎵 [PRESET] Loaded factory preset %d into instrument %d\n", presetIndex, instrID);
+    TF_UI_TRACE("[PRESET] Loaded factory preset %d into instrument %d\n", presetIndex, instrID);
 }
 
 // Find widget by name across all widgets arrays
@@ -2319,16 +2346,8 @@ static void tf_update_modulation_rings_from_matrix(TunefishCompleteLayout* layou
 // Forward declaration from ft2_synth.c (not in header)
 extern void* getInstrumentInstance(int instrID);
 
-// Constants mapping to Tunefish TF_PARAM enum indices (keep in sync with tf4.hpp)
-#define TF_DISTORT_AMOUNT 84
-#define TF_DELAY_DECAY   89
-#define TF_REVERB_WET    92
-#define TF_FLANGER_WET   97
-#define TF_CHORUS_GAIN   98
-#define TF_FORMANT_WET   100
-
 // Refresh shadow parameter arrays (mmSrc/mmDst/mmAmt/fxSel/fxWet) from current instrument state
-static void tf_refresh_shadow_parameters_from_synth(void)
+static void tf_refresh_shadow_parameters_from_synth(TunefishCompleteLayout* layout)
 {
     int instrID = getCurrentTF4InstrumentID();
     if (instrID < 0) return;
@@ -2341,7 +2360,7 @@ static void tf_refresh_shadow_parameters_from_synth(void)
     // --------------------------------------------------
     for (int i = 0; i < g_paramBindingCount; i++) {
         TunefishParameterBinding* b = &g_paramBindings[i];
-        if (b->paramId < 0) continue;        // placeholder / wet knobs etc.
+        if (b->paramId < 0) continue; /* Stack level controls bind by effect type below. */
 
         float norm = tf_instrument_get_param(instr, b->paramId);
         int intVal = (int)lroundf(norm * (b->maxValue - b->minValue) + b->minValue);
@@ -2384,17 +2403,10 @@ static void tf_refresh_shadow_parameters_from_synth(void)
         if (idx >= FX_STACK_COUNT) idx = FX_STACK_COUNT - 1;
         fxSel[i] = idx;
 
-        // Derive per-slot wet levels from the global FX parameters
-        int wetParamId = -1;
-        switch (idx) {
-            case 1: /* Distortion */ wetParamId = TF_DISTORT_AMOUNT; break;
-            case 2: /* Delay      */ wetParamId = TF_DELAY_DECAY;   break; // delay has no dedicated wet – use decay as proxy
-            case 3: /* Chorus     */ wetParamId = TF_CHORUS_GAIN;   break;
-            case 4: /* Flanger    */ wetParamId = TF_FLANGER_WET;   break;
-            case 5: /* Reverb     */ wetParamId = TF_REVERB_WET;    break;
-            case 6: /* Formant    */ wetParamId = TF_FORMANT_WET;   break;
-            default: wetParamId = -1; break; // none / EQ / unknown
-        }
+        /* Delay and EQ have no single wet/level parameter in Tunefish. Their
+         * stack level knobs are disabled instead of altering an unrelated
+         * decay or band-gain parameter. */
+        const int wetParamId = tf_effect_level_param(idx);
 
         if (wetParamId >= 0) {
             float wetNorm = tf_instrument_get_param(instr, wetParamId);
@@ -2404,6 +2416,9 @@ static void tf_refresh_shadow_parameters_from_synth(void)
         } else {
             fxWet[i] = 0;
         }
+
+        if (layout && layout->page2.fx_stack_wet_knobs[i])
+            layout->page2.fx_stack_wet_knobs[i]->enabled = (wetParamId >= 0);
     }
 
     // --------------------------------------------------
@@ -2437,6 +2452,55 @@ static void tf_refresh_shadow_parameters_from_synth(void)
         synthFormant = fIdx;
     }
 }
+
+#ifdef FT2_STABILITY_TESTS
+bool runTunefishLayoutRegressionTests(void)
+{
+    bool ok = tf_effect_level_param(0) == -1 &&
+           tf_effect_level_param(1) == TF_DISTORT_AMOUNT &&
+           tf_effect_level_param(2) == -1 &&
+           tf_effect_level_param(3) == TF_CHORUS_GAIN &&
+           tf_effect_level_param(4) == TF_FLANGER_WET &&
+           tf_effect_level_param(5) == TF_REVERB_WET &&
+           tf_effect_level_param(6) == TF_FORMANT_WET &&
+           tf_effect_level_param(7) == -1 &&
+           tf_stack_level_slot("fxstk_wet_0") == 0 &&
+           tf_stack_level_slot("fxstk_wet_9") == 9 &&
+           tf_stack_level_slot("fxstk_wet_10") == -1 &&
+           tf_stack_level_slot("fxstk_wet_x") == -1;
+
+    TunefishCompleteLayout layout = { 0 };
+    TunefishWidget lfo1Buttons[5] = { 0 };
+    TunefishWidget lfo2Buttons[5] = { 0 };
+    for (int i = 0; i < 5; i++) {
+        snprintf(lfo1Buttons[i].name, sizeof(lfo1Buttons[i].name), "lfo1_shape_%d", i + 1);
+        snprintf(lfo2Buttons[i].name, sizeof(lfo2Buttons[i].name), "lfo2_shape_%d", i + 1);
+        layout.page1.lfo1_shape_buttons[i] = &lfo1Buttons[i];
+        layout.page1.lfo2_shape_buttons[i] = &lfo2Buttons[i];
+    }
+
+    TunefishCompleteLayout *savedLayout = g_active_tunefish_layout;
+    const int savedInstr = editor.curInstr;
+    const int savedLfo1Shape = synthLFO1Shape;
+    const int savedLfo2Shape = synthLFO2Shape;
+    g_active_tunefish_layout = &layout;
+    editor.curInstr = 0; /* Exercise UI state without touching a synth instance. */
+    tf_lfo1shape_button_value_handler(&lfo1Buttons[4], 1.0f);
+    tf_lfo2shape_button_value_handler(&lfo2Buttons[0], 1.0f);
+    ok = ok && synthLFO1Shape == 4 && synthLFO2Shape == 0 &&
+         lfo1Buttons[4].pressed && lfo2Buttons[0].pressed;
+    for (int i = 0; i < 4; i++)
+        ok = ok && !lfo1Buttons[i].pressed;
+    for (int i = 1; i < 5; i++)
+        ok = ok && !lfo2Buttons[i].pressed;
+
+    synthLFO1Shape = savedLfo1Shape;
+    synthLFO2Shape = savedLfo2Shape;
+    editor.curInstr = savedInstr;
+    g_active_tunefish_layout = savedLayout;
+    return ok;
+}
+#endif
 
 // Live meter extern for output peak
 extern volatile float g_audioOutPeak;
@@ -2799,30 +2863,9 @@ static void tf_sync_preset_combo_with_instrument(TunefishCompleteLayout* layout)
     layout->preset_combo->selectedIndex = curPreset;
 }
 
-// =============================================================================
-// MISSING FUNCTION IMPLEMENTATIONS (GUISAN COMPATIBILITY STUBS)
-// =============================================================================
-
-// Legacy compatibility functions
 void ui_sync_from_instrument(void) {
-    // Stub implementation - UI sync from instrument
-    // This was used to sync UI elements when instrument parameters changed
-    printf("[UI] Sync from instrument (stub)\n");
-}
-
-bool ft2_guisan_is_enabled(void) {
-    // Stub implementation - always return false since Guisan is disabled
-    return false;
-}
-
-bool ft2_guisan_is_synth_editor_shown(void) {
-    // Stub implementation - always return false since Guisan is disabled
-    return false;
-}
-
-void ft2_guisan_hide_synth_editor(void) {
-    // Stub implementation - hide synth editor
-    printf("[GUI] Hide synth editor (stub)\n");
+    if (g_active_tunefish_layout != NULL && g_active_tunefish_layout->visible)
+        tf_update_all_widgets_from_synth(g_active_tunefish_layout);
 }
 
 // Missing external variable definitions

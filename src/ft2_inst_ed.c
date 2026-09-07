@@ -3728,7 +3728,8 @@ static int32_t SDLCALL loadInstrThread(void *ptr)
 	memset(&pat_h, 0, sizeof (pat_h));
 	memset(&patWave_h, 0, sizeof (patWave_h));
 
-	fread(&xi_h, INSTR_XI_HEADER_SIZE, 1, f);
+	if (fread(&xi_h, INSTR_XI_HEADER_SIZE, 1, f) != 1)
+		goto loadDone;
 	if (!strncmp(xi_h.ID, "Extended Instrument: ", 21))
 	{
 		// XI - Extended Instrument
@@ -3954,7 +3955,8 @@ static int32_t SDLCALL loadInstrThread(void *ptr)
 	{
 		rewind(f);
 
-		fread(&pat_h, 1, sizeof (patHdr_t), f);
+		if (fread(&pat_h, 1, sizeof (patHdr_t), f) != sizeof (patHdr_t))
+			goto loadDone;
 		if (!memcmp(pat_h.ID, "GF1PATCH110\0ID#000002\0", 22))
 		{
 			// PAT - Gravis Ultrasound patch
@@ -4135,10 +4137,10 @@ bool fileIsInstr(UNICHAR *filenameU)
 		return false;
 
 	char header[22];
-	fread(header, 1, sizeof (header), f);
+	const bool headerRead = fread(header, 1, sizeof (header), f) == sizeof (header);
 	fclose(f);
 
-	if (!strncmp(header, "Extended Instrument: ", 21) || !memcmp(header, "GF1PATCH110\0ID#000002\0", 22))
+	if (headerRead && (!strncmp(header, "Extended Instrument: ", 21) || !memcmp(header, "GF1PATCH110\0ID#000002\0", 22)))
 		return true;
 
 	return false;

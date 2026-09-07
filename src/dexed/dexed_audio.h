@@ -33,6 +33,7 @@ public:
     void midiNoteOn(uint8_t note, uint8_t velocity);
     void midiNoteOff(uint8_t note);
     void midiCC(uint8_t cc, uint8_t value);
+    void sendMidi(uint8_t status, uint8_t data1, uint8_t data2);
 
     // Patch management
     void panic();
@@ -57,7 +58,9 @@ public:
     // Public initialization method
     void init(float sr);
 
-    // Public patch queue method
+    // Publish patch state; multiple updates before rendering coalesce to the latest.
+    // Call patch/parameter writers from a non-realtime thread; render and MIDI
+    // processing share one audio owner and consume snapshots without waiting.
     bool queuePatchBlob(const uint8_t* data, size_t size);
 
     // Preset management

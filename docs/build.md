@@ -1,6 +1,6 @@
 # Build Instructions
 
-This project uses CMake for all supported targets. The helper scripts in the repository root and `scripts/` directory keep builds out of the source tree, refresh stale CMake caches safely, and provide a consistent command surface for Linux, Windows, macOS, and Raspberry Pi Linux ALSA targets.
+This project requires CMake 3.16 or newer for all supported targets. The helper scripts in the repository root and `scripts/` directory keep builds out of the source tree, refresh stale CMake caches safely, and provide a consistent command surface for Linux, Windows, macOS, and Raspberry Pi Linux ALSA targets.
 
 Build outputs are written under each build directory's `bin/` subdirectory, for example `build-linux/bin/ft2-dxm`.
 
@@ -79,6 +79,10 @@ Build and run CTest:
 
 CTest currently covers:
 
+- `ft2_stability`: V2 page/input regressions, note ownership, synth mute/stop,
+  live/export gain, bounded DXM chunks, sample ownership/stereo conversion,
+  Tunefish effect-stack routing, and render-settings bounds.
+- `ft2_synth_levels`: finite-output checks and level measurements for available factory presets, with explicit ROM/preset skips.
 - `ft2_version`: command-line startup/version smoke test.
 - `ft2_self_test`: core table setup/teardown self-test.
 - `ft2_v2_stress`: V2 preset, patch, MIDI, render, panic, and state serialization stress test.

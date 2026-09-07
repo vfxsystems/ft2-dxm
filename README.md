@@ -1,51 +1,40 @@
 # ft2-dxm
-Fasttracker II clone for Windows/macOS/Linux
 
-Aims to be a highly accurate clone of the classic Fasttracker II software for MS-DOS. \
-The XM player itself has been directly ported from the original source code, for maximum accuracy. \
-The code is partly my own, partly based on the original FT2 code.
+A work-in-progress Fasttracker II derivative for Windows, macOS, and Linux, combining tracker samples with embedded Tunefish4, Dexed, V2, and OsTIrus synth engines.
 
-*What is Fasttracker II? Read about it on [Wikipedia](https://en.wikipedia.org/wiki/FastTracker_2).*
+The project builds on the FT2 clone and retains its tracker workflow. Extensions include DXM modules with synth state, DXI instrument patches, synth editors, macro mapping, stereo mixer strips, DSP effects, and WAV/render-to-sample workflows.
 
-# Releases
-Windows/macOS binary releases can always be found at [16-bits.org](https://16-bits.org/ft2.php).
+## Build and test
 
-Linux binaries can be found [here](https://repology.org/project/fasttracker2/versions). \
-If these don't work for you, you'll have to compile the code manually.
-
-# Improvements over original DOS version
-- New sample editor features, like waveform generators and resonant filters
-- The channel resampler/mixer uses floating-point arithmetics for less errors, and has extra interpolation options (3-point quadratic spline, 4-point cubic spline, 8-point/16-point windowed-sinc)
-- The sample loader supports FLAC/AIFF/BRR (SNES) samples and more WAV types than original FT2. It will also attempt to tune the sample (finetune and rel. note) to its playback frequency on load.
-- It contains a new "Trim" feature, which will remove unused stuff to potentially make the module smaller
-- Drag n' drop of modules/samples
-- The waveform display in the sample editor shows peak based data when zoomed out
-- Text boxes has a text marking option, where you can cut/copy/paste
-- MOD/STM/S3M import has been slightly improved (S3M import is still not ideal, as it's not compatible with XM)
-- Supports loading DIGI Booster (non-Pro) modules
-- Supports loading Impulse Tracker modules (Awful support! Don't use this for playback)
-- It supports loading XMs with stereo samples, uneven amount of channels, more than 32 channels, more than 16 samples per instrument, more than 128 patterns etc. The unsupported data will be mixed to mono/truncated.
-- It has some small additions to make life easier (C4/middle-C Hz display in Instr. Ed., envelope point coordinate display, etc).
-
-# Screenshots
-
-![Example #1](https://16-bits.org/ft2-dxm-3.png)
-![Example #2](https://16-bits.org/ft2-dxm-4.png)
-
-# Compiling the code
-Current build instructions are in [docs/build.md](docs/build.md).
-
-The maintained build entry points are:
+On Linux, install CMake, a C/C++17 toolchain, SDL2 development files, and ALSA development files, then run:
 
 ```sh
-./build-linux.sh --fresh --test
-./scripts/test-linux.sh --fresh
-./scripts/test-target-builds.sh --fresh
+./build-linux.sh --test -j 4
+./scripts/test-linux.sh -j 4
 ```
 
-Target-specific wrappers are available for Windows MinGW, macOS, and Raspberry Pi Linux ALSA builds under `scripts/`.
+The executable is `build-linux/bin/ft2-dxm`. See [build instructions](docs/build.md) for dependencies, Windows/macOS/Raspberry Pi wrappers, optional UI features, and tests. Cross-compilation alone does not verify native audio-device behavior.
 
-PS: The source code is quite hackish and hardcoded. \
-My first priority is to make an accurate clone, and not to make flexible and easily modifiable code.
+## External Virus firmware
 
-Big parts of the code (except GUI) are directly ported from the original FT2 source code, with permission to use a BSD 3-Clause license.
+Virus firmware is not part of the source publication. OsTIrus requires a compatible ROM supplied separately by the user. This project does not provide permission to use or redistribute firmware.
+
+```sh
+FT2_OSTIRUS_ROM=/path/to/your/rom.bin ./build-linux/bin/ft2-dxm
+```
+
+An invalid explicit path leaves OsTIrus unavailable; the other engines remain usable. Existing local ROM search paths remain supported. Normal builds do not embed local ROM archives. Public tests run without Virus firmware.
+
+## Documentation and status
+
+- [Documentation index](docs/README.md)
+- [DXM modules](docs/dxm.md) and [DXI patches](docs/dxi.md)
+- [Mixer behavior and compatibility](docs/mixer-contract.md)
+- [Stabilization results and remaining work](docs/stabilization-results.md)
+- [Source publication procedure](docs/publication.md)
+
+This is a development project. Release availability and platform verification are recorded for this derivative; upstream FT2 downloads are not ft2-dxm releases.
+
+## Attribution and licenses
+
+Original FT2/FT2-clone attribution is retained in the source notices. This repository contains components under several licenses, including BSD, GPL, Apache, and asset-specific terms. See [LICENSES.txt](LICENSES.txt) and the component notices; the original FT2 license does not describe every bundled component.

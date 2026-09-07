@@ -692,7 +692,7 @@ static void osti_update_browser_labels(OsTirusCompleteLayout *layout)
         const int bank = (selectedIndex >= 0) ? ft2_ostirus_get_factory_preset_bank(selectedIndex) : -1;
         const int program = (selectedIndex >= 0) ? ft2_ostirus_get_factory_preset_program(selectedIndex) : -1;
         osti_format_bank_name(bank, bankName, sizeof(bankName));
-        if (program >= 0)
+        if (program >= 0 && program < 128)
             snprintf(programText, sizeof(programText), "%02d", program + 1);
         else
             snprintf(programText, sizeof(programText), "--");
@@ -713,7 +713,7 @@ static void osti_update_browser_labels(OsTirusCompleteLayout *layout)
         char currentText[192];
         char programText[8];
         osti_format_bank_name(bank, bankName, sizeof(bankName));
-        if (program >= 0)
+        if (program >= 0 && program < 128)
             snprintf(programText, sizeof(programText), "%02d", program + 1);
         else
             snprintf(programText, sizeof(programText), "--");
@@ -800,7 +800,7 @@ static bool osti_step_browser_preset(OsTirusCompleteLayout *layout, int delta)
     return osti_load_browser_selection(layout);
 }
 
-static bool osti_is_placeholder_widget(const TunefishWidget *widget)
+static bool osti_should_skip_widget(const TunefishWidget *widget)
 {
     if (!widget) return true;
     if (widget->name[0] == '\0') return true;
@@ -825,7 +825,7 @@ static void osti_register_widget(OsTirusCompleteLayout *layout, TunefishWidget *
         return;
     }
 
-    if (osti_is_placeholder_widget(widget))
+    if (osti_should_skip_widget(widget))
     {
         tf_widget_destroy(widget);
         return;

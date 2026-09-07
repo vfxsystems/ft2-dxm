@@ -13,6 +13,7 @@
 #include "ft2_popup_list.h"
 #include "ft2_synth.h"
 #include "ft2_dexed.h"
+#include "ft2_v2_complete_layout.h"
 #include "ft2_about.h"
 #include "ft2_video.h"
 #include "ft2_edit.h"
@@ -84,6 +85,8 @@ void readKeyModifiers(void)
 
 void keyUpHandler(SDL_Scancode scancode, SDL_Keycode keycode)
 {
+	/* Release only keys that actually started notes, before any UI filtering. */
+	testNoteKeysRelease(scancode);
 	if (editor.editTextFlag || (ui.sysReqShown && !ui.mixerScreenShown))
 		return; // kludge: don't handle key up! (XXX: Is this hack really needed anymore?)
 
@@ -95,9 +98,6 @@ void keyUpHandler(SDL_Scancode scancode, SDL_Keycode keycode)
 		keyb.ignoreCurrKeyUp = false;
 		return;
 	}
-
-	if (cursor.object == CURSOR_NOTE && !keyb.keyModifierDown)
-		testNoteKeysRelease(scancode);
 
 	if (scancode == SDL_SCANCODE_KP_PLUS)
 		keyb.numPadPlusPressed = false;
@@ -157,6 +157,10 @@ void keyDownHandler(SDL_Scancode scancode, SDL_Keycode keycode, bool keyWasRepea
 		nibblesKeyAdministrator(scancode);
 		return;
 	}
+
+	if (ui.synthEditorShown && g_active_v2_layout != NULL &&
+	    v2_handle_layout_keyboard_test(g_active_v2_layout, keycode))
+		return;
 
 	if (keycode == SDLK_ESCAPE)
 	{

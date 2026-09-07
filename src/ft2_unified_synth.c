@@ -84,7 +84,7 @@ static void tunefish4_send_midi(int instrID, const MidiMessage* message) {
 }
 
 static void tunefish4_panic(void) {
-    // TODO: Implement panic for Tunefish4
+    ft2_synth_panic();
 }
 
 static void tunefish4_set_param(int instrID, int paramId, float value) {
@@ -95,55 +95,10 @@ static float tunefish4_get_param(int instrID, int paramId) {
     return ft2_synth_get_persistent_param(instrID, paramId);
 }
 
-// Tunefish4 parameter ranges (based on tf4.hpp)
-static const ParameterRange tunefish4_param_ranges[128] = {
-    // Global parameters
-    {0.0f, 1.0f, 0.5f}, // TF_GLOBAL_GAIN
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_VOLUME
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_PANNING
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_DETUNE
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_SPREAD
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_SCALE
-    
-    // Generator parameters
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_BANDWIDTH
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_NUMHARMONICS
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_DAMP
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_MODULATION
-    {0.0f, 1.0f, 0.5f}, // TF_GEN_DRIVE
-    
-    // Filter parameters
-    {0.0f, 1.0f, 0.5f}, // TF_LP_FILTER_CUTOFF
-    {0.0f, 1.0f, 0.5f}, // TF_LP_FILTER_RESONANCE
-    {0.0f, 1.0f, 0.5f}, // TF_HP_FILTER_CUTOFF
-    {0.0f, 1.0f, 0.5f}, // TF_HP_FILTER_RESONANCE
-    
-    // LFO parameters
-    {0.0f, 1.0f, 0.5f}, // TF_LFO1_RATE
-    {0.0f, 1.0f, 0.5f}, // TF_LFO1_DEPTH
-    {0.0f, 1.0f, 0.5f}, // TF_LFO2_RATE
-    {0.0f, 1.0f, 0.5f}, // TF_LFO2_DEPTH
-    
-    // ADSR parameters
-    {0.0f, 1.0f, 0.5f}, // TF_ADSR1_ATTACK
-    {0.0f, 1.0f, 0.5f}, // TF_ADSR1_DECAY
-    {0.0f, 1.0f, 0.5f}, // TF_ADSR1_SUSTAIN
-    {0.0f, 1.0f, 0.5f}, // TF_ADSR1_RELEASE
-    
-    // FX parameters
-    {0.0f, 1.0f, 0.5f}, // FX_FLANGER_FREQ
-    {0.0f, 1.0f, 0.5f}, // FX_REVERB_ROOM_SZ
-    {0.0f, 1.0f, 0.5f}, // FX_DELAY_LEFT
-    {0.0f, 1.0f, 0.5f}, // FX_CHORUS_FREQ
-    
-    // ... more parameters would be defined here
-};
-
+/* TF4's wrapper accepts normalized values for every exposed parameter. */
 static const ParameterRange* tunefish4_get_param_range(int paramId) {
-    if (paramId >= 0 && paramId < 128) {
-        return &tunefish4_param_ranges[paramId];
-    }
-    return NULL;
+    static const ParameterRange normalized = {0.0f, 1.0f, 0.5f};
+    return paramId >= 0 && paramId < tf4_param_count() ? &normalized : NULL;
 }
 
 static int tunefish4_get_param_count(void) {
@@ -155,18 +110,36 @@ static const char* tunefish4_get_param_name(int paramId) {
 }
 
 static int tunefish4_load_patch(int instrID, const uint8_t* data, size_t size) {
-    // TODO: Implement patch loading for Tunefish4
-    return 0;
+    /* TFP1: magic followed by 128 little-endian IEEE-754 normalized parameters. */
+    if (instrID < 1 || instrID > 128 || !data || size != 516 || memcmp(data, "TFP1", 4)) return 0;
+    float params[128];
+    for (int i = 0; i < 128; ++i) {
+        const uint8_t *p = data + 4 + i * 4;
+        uint32_t bits = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+        memcpy(&params[i], &bits, 4);
+        if (!isfinite(params[i]) || params[i] < 0 || params[i] > 1) return 0;
+    }
+    ft2_synth_set_all_persistent_params(instrID, params, 128);
+    return 1;
 }
 
 static int tunefish4_save_patch(int instrID, uint8_t* buffer, size_t bufferSize) {
-    // TODO: Implement patch saving for Tunefish4
-    return 0;
+    if (instrID < 1 || instrID > 128 || !buffer || bufferSize < 516) return 0;
+    float params[128];
+    ft2_synth_store_instrument_state(instrID);
+    ft2_synth_get_all_persistent_params(instrID, params, 128);
+    memcpy(buffer, "TFP1", 4);
+    for (int i = 0; i < 128; ++i) {
+        uint32_t bits;
+        memcpy(&bits, &params[i], 4);
+        for (int byte = 0; byte < 4; ++byte) buffer[4 + i * 4 + byte] = (uint8_t)(bits >> (byte * 8));
+    }
+    return 516;
 }
 
 static int tunefish4_get_patch_size(int instrID) {
-    // TODO: Return actual patch size for Tunefish4
-    return 0;
+    return instrID >= 1 && instrID <= 128 ? 516 : 0;
 }
 
 static int tunefish4_get_preset_count(void) {
@@ -349,27 +322,34 @@ static int dexed_load_preset(int instrID, int presetIndex) {
     return ft2_dx_load_factory_preset_for_instrument(instrID, presetIndex);
 }
 
+static uint8_t dexed_saved_patches[129][155];
+static bool dexed_saved_patch_valid[129];
+
 static void dexed_store_state(int instrID) {
-    // TODO: Implement state persistence for Dexed
-    // For now, we'll just store the current parameter values
+    if (instrID < 1 || instrID > 128) return;
+    dexed_saved_patch_valid[instrID] = ft2_dx_get_patch_data(instrID,
+        dexed_saved_patches[instrID], 155) == 155;
 }
 
 static void dexed_restore_state(int instrID) {
-    // TODO: Implement state restoration for Dexed
+    if (instrID < 1 || instrID > 128 || !dexed_saved_patch_valid[instrID]) return;
+    ft2_dx_load_patch_for_instrument(instrID, dexed_saved_patches[instrID], 155);
 }
 
 static bool dexed_has_state(int instrID) {
-    // TODO: Check if state exists for instrument
-    return false;
+    return instrID >= 1 && instrID <= 128 && dexed_saved_patch_valid[instrID];
 }
 
 static void dexed_clear_state(int instrID) {
+    if (instrID >= 1 && instrID <= 128) {
+        dexed_saved_patch_valid[instrID] = false;
+        memset(dexed_saved_patches[instrID], 0, 155);
+    }
     ft2_dx_release_instrument(instrID);
 }
 
 static int dexed_get_active_voices(int instrID) {
-    // TODO: Implement voice counting for Dexed
-    return 0;
+    return ft2_dx_get_active_voice_count(instrID);
 }
 
 // =============================================================================
@@ -866,12 +846,17 @@ SynthEngineType ft2_unified_synth_get_active_engine(int instrID) {
 }
 
 void ft2_unified_synth_render_all(float* bufL, float* bufR, int nsamples, int add) {
+    if (!bufL || !bufR || nsamples <= 0) return;
+    if (!add) {
+        memset(bufL, 0, nsamples * sizeof(float));
+        memset(bufR, 0, nsamples * sizeof(float));
+    }
     if (!g_initialized) return;
     
     // Render each active engine
     for (int i = 0; i < SYNTH_TYPE_COUNT; i++) {
         if (g_engines[i].render) {
-            g_engines[i].render(bufL, bufR, nsamples, add);
+            g_engines[i].render(bufL, bufR, nsamples, 1);
         }
     }
 }
@@ -884,6 +869,20 @@ void ft2_unified_synth_render_channel(int instrID, float* bufL, float* bufR, int
     
     const UnifiedSynthInterface* engine = ft2_unified_synth_get_engine(engineType);
     if (engine && engine->render_for_channel) {
+        if (engineType == SYNTH_TYPE_TUNEFISH4 && add && bufL && bufR && nsamples > 0) {
+            float left[256], right[256];
+            for (int offset = 0; offset < nsamples; offset += 256) {
+                int count = nsamples - offset;
+                if (count > 256) count = 256;
+                engine->render_for_channel(instrID, left, right, count, 0);
+                applyTf4SoftLimiter(left, right, count);
+                for (int i = 0; i < count; ++i) {
+                    bufL[offset + i] += left[i];
+                    if (bufL != bufR) bufR[offset + i] += right[i];
+                }
+            }
+            return;
+        }
         engine->render_for_channel(instrID, bufL, bufR, nsamples, add);
         if (engineType == SYNTH_TYPE_TUNEFISH4) {
             applyTf4SoftLimiter(bufL, bufR, nsamples);

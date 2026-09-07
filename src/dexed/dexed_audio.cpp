@@ -19,9 +19,11 @@
 #include <mutex>
 #include <memory>
 #include <vector>
-#include <queue>
+#include <atomic>
 #include <stdio.h>
-#include <pmmintrin.h> // Keep this for __SSE__ if needed, otherwise remove
+#ifdef __SSE__
+#include <pmmintrin.h>
+#endif
 #include <cmath>
 
 // Global initialization
@@ -50,6 +52,7 @@ struct ProcessorVoice {
     int mpePitchBend;
     Dx7Note *dx7_note;
     uint32_t age;
+    uint64_t patchRevision;
 };
 
 class DexedAudio::Impl {
@@ -59,10 +62,8 @@ public:
     int currentNote;
     uint32_t noteCounter;
     Lfo lfo;
-    bool sustain;
+    bool sustain[16] = {};
     bool monoMode;
-    float extra_buf[512]; // Keep this if needed by DexedAudioProcessor, otherwise remove
-    int extra_buf_size;   // Keep this if needed by DexedAudioProcessor, otherwise remove
     int currentProgram;
     int currentPreset;
     Controllers controllers;
@@ -71,20 +72,24 @@ public:
     float sampleRate;
     int samplesPerBlock;
     std::mutex patchMutex;
-    std::queue<std::vector<uint8_t>> patchQueue;
+    // Atomic words avoid data races even when publication overlaps a read.
+    static_assert(ATOMIC_INT_LOCK_FREE == 2, "Dexed patch delivery needs lock-free 32-bit atomics");
+    std::atomic<uint32_t> publishedPatch[39]{};
+    std::atomic<uint32_t> publishedRevision{0};
+    uint8_t renderPatch[156]{};
+    uint32_t renderRevision = 0;
     std::shared_ptr<TuningState> synthTuningState;
     MTSClient *mtsClient;
     EngineMkI engineMkI; // The FM core instance
-    bool voicesNeedUpdate; // Flag to signal that voices need updating
     bool patchInitialized;
     float blockBuf[N];
     int blockPos;
     int lastActiveVoice;
 
     Impl() : sampleRate(44100.0f), samplesPerBlock(512), currentNote(-1),
-             sustain(false), monoMode(false), extra_buf_size(0),
+             monoMode(false),
              currentProgram(0), currentPreset(-1), mtsClient(nullptr),
-             voicesNeedUpdate(false), patchInitialized(false) {
+             patchInitialized(false) {
         std::lock_guard<std::mutex> lock(g_initMutex);
         if (!g_initialized) {
             Exp2::init();
@@ -100,6 +105,7 @@ public:
         for (int note = 0; note < MAX_ACTIVE_NOTES; ++note) {
             voices[note].dx7_note = new Dx7Note(synthTuningState, nullptr); // Pass mtsClient if available
             voices[note].midi_note = -1;
+            voices[note].channel = 0;
             voices[note].keydown = false;
             voices[note].sustained = false;
             voices[note].live = false;
@@ -163,15 +169,13 @@ public:
         controllers.portamento_cc = 0;
         controllers.refresh(); // Important: Call refresh after setting values
 
-        sustain = false;
-        extra_buf_size = 0; // Reset extra buffer size
+        std::fill(std::begin(sustain), std::end(sustain), false);
         currentNote = 0;    // Reset current note
 
         if (!patchInitialized) {
             resetToSafePatch();
-        } else {
-            lfo.reset(data + 137);
         }
+        applyPendingPatch();
     }
 
     void releaseResources() {
@@ -224,10 +228,10 @@ public:
                 controllers.portamento_cc = value;
                 break;
             case 64:
-                sustain = value > 63;
-                if (!sustain) {
+                sustain[channel - 1] = value > 63;
+                if (!sustain[channel - 1]) {
                     for (int note = 0; note < MAX_ACTIVE_NOTES; note++) {
-                        if (voices[note].sustained && !voices[note].keydown) {
+                        if (voices[note].channel == channel && voices[note].sustained && !voices[note].keydown) {
                             voices[note].dx7_note->keyup();
                             voices[note].sustained = false;
                         }
@@ -238,11 +242,16 @@ public:
                 controllers.portamento_enable_cc = value >= 64;
                 break;
             case 120:
-                panic();
+                for (auto &voice : voices) {
+                    if (voice.channel == channel) {
+                        voice.live = voice.keydown = voice.sustained = false;
+                    }
+                }
+                blockPos = N;
                 break;
             case 123:
                 for (int note = 0; note < MAX_ACTIVE_NOTES; note++) {
-                    if (voices[note].keydown)
+                    if (voices[note].channel == channel && voices[note].keydown)
                         keyup(channel, voices[note].midi_note, 0);
                 }
                 break;
@@ -262,6 +271,7 @@ public:
     }
 
     void keydown(uint8_t channel, uint8_t pitch, uint8_t velo) {
+        applyPendingPatch();
         if (velo == 0) {
             keyup(channel, pitch, velo);
             return;
@@ -302,20 +312,14 @@ public:
         voices[note].channel = channel;
         voices[note].midi_note = pitch;
         voices[note].velocity = velo;
-        voices[note].sustained = sustain;
+        voices[note].sustained = false;
         voices[note].keydown = true;
         voices[note].live = true;
         voices[note].age = ++noteCounter;
 
-        // Initialize voice with current patch data (mutex already handled by caller or processPatchQueue)
-        // Mutex is needed here to protect access to 'data' which is shared with loadPatchBlob.
-        {
-            std::lock_guard<std::mutex> lock(patchMutex);
-            voices[note].dx7_note->init(data, pitch, velo, channel, &controllers);
-        }
-
-        if (data[136]) // Check for Osc Sync flag in patch
-            voices[note].dx7_note->oscSync();
+        voices[note].dx7_note->init(renderPatch, pitch, velo, channel, &controllers);
+        voices[note].patchRevision = renderRevision;
+        if (renderPatch[136]) voices[note].dx7_note->oscSync();
 
         if (lastActiveVoice >= 0 &&
             controllers.portamento_enable_cc &&
@@ -344,7 +348,7 @@ public:
     void keyup(uint8_t chan, uint8_t pitch, uint8_t velo) {
         int note;
         for (note = 0; note < MAX_ACTIVE_NOTES; ++note) {
-            if (voices[note].midi_note == pitch && voices[note].keydown) {
+            if (voices[note].channel == chan && voices[note].midi_note == pitch && voices[note].keydown) {
                 voices[note].keydown = false;
                 break;
             }
@@ -371,7 +375,7 @@ public:
             }
         }
 
-        if (sustain) {
+        if (sustain[chan - 1]) {
             voices[note].sustained = true; // Mark as sustained instead of immediately keying up
         } else {
             // Only call keyup if not sustained, keep voice alive for release
@@ -382,25 +386,14 @@ public:
     }
 
     void render(float* leftOut, float* rightOut, int frameCount) {
+        if (!leftOut || !rightOut || frameCount <= 0) return;
         // Prevent denormalized floats (can crash FPU)
         #ifdef __SSE__
         _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
         _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
         #endif
 
-        processPatchQueue();
-
-        // If a parameter has changed, update all active voices
-        if (voicesNeedUpdate) {
-            std::lock_guard<std::mutex> lock(patchMutex);
-            for (int note = 0; note < MAX_ACTIVE_NOTES; ++note) {
-                if (voices[note].live && voices[note].dx7_note != nullptr) {
-                    voices[note].dx7_note->update(data, voices[note].midi_note,
-                                                 voices[note].velocity, voices[note].channel);
-                }
-            }
-            voicesNeedUpdate = false;
-        }
+        applyPendingPatch();
 
         for (int i = 0; i < frameCount; i++) {
             if (blockPos >= N) {
@@ -420,7 +413,7 @@ public:
                         for (int j = 0; j < N; ++j) {
                             int32_t val = audiobuf[j];
                             val = val >> 4;
-                            int clip_val = val < -(1 << 24) ? 0x8000 : val >= (1 << 24) ? 0x7fff : val >> 9;
+                            int clip_val = val < -(1 << 24) ? -0x8000 : val >= (1 << 24) ? 0x7fff : val >> 9;
                             float f = static_cast<float>(clip_val) / static_cast<float>(0x8000);
                             if (f > 1.0f) f = 1.0f;
                             if (f < -1.0f) f = -1.0f;
@@ -455,24 +448,37 @@ public:
         }
     }
 
-    void processPatchQueue() {
-        std::lock_guard<std::mutex> lock(patchMutex);
-        while (!patchQueue.empty()) {
-            auto& patch = patchQueue.front();
-            if (patch.size() >= 156) {
-                // Apply patch to all voices (use 156 bytes for Dx7Note compatibility)
-                for (int i = 0; i < 156 && i < (int)patch.size(); i++) {
-                    data[i] = patch[i];
-                }
-                for (int note = 0; note < MAX_ACTIVE_NOTES; ++note) {
-                    if (voices[note].live && voices[note].dx7_note != nullptr) {
-                        voices[note].dx7_note->update(data, voices[note].midi_note,
-                                                     voices[note].velocity, voices[note].channel);
-                    }
-                }
-                lfo.reset(data + 137);
+    // Called with patchMutex held by writers. Sequentially
+    // consistent words and sequence prevent a reader accepting a torn snapshot.
+    void publishPatch() {
+        publishedRevision.fetch_add(1);
+        for (size_t i = 0; i < 39; ++i) {
+            uint32_t word;
+            std::memcpy(&word, data + i * 4, 4);
+            publishedPatch[i].store(word);
+        }
+        publishedRevision.fetch_add(1);
+    }
+
+    // Audio owner only: one bounded attempt, never wait or retry on a writer.
+    // A concurrent publication is picked up on the next note/render call.
+    void applyPendingPatch() {
+        const uint32_t revision = publishedRevision.load();
+        if ((revision & 1) || revision == renderRevision) return;
+        uint8_t snapshot[156];
+        for (size_t i = 0; i < 39; ++i) {
+            const uint32_t word = publishedPatch[i].load();
+            std::memcpy(snapshot + i * 4, &word, 4);
+        }
+        if (publishedRevision.load() != revision) return;
+        std::memcpy(renderPatch, snapshot, sizeof(renderPatch));
+        renderRevision = revision;
+        lfo.reset(renderPatch + 137);
+        for (auto &voice : voices) {
+            if (voice.live && voice.patchRevision != renderRevision) {
+                voice.dx7_note->update(renderPatch, voice.midi_note, voice.velocity, voice.channel);
+                voice.patchRevision = renderRevision;
             }
-            patchQueue.pop();
         }
     }
 
@@ -492,9 +498,14 @@ public:
     }
 
     void panic() {
+        std::fill(std::begin(sustain), std::end(sustain), false);
+        blockPos = N;
+        lastActiveVoice = -1;
+        fx.init(static_cast<int>(sampleRate));
         for (int i = 0; i < MAX_ACTIVE_NOTES; i++) {
             voices[i].midi_note = -1;
             voices[i].keydown = false;
+            voices[i].sustained = false;
             voices[i].live = false;
             if (voices[i].dx7_note != nullptr) {
                 voices[i].dx7_note->oscSync();
@@ -538,7 +549,7 @@ public:
         data[105 + 16] = 99;  // Output level
         data[105 + 4] = 50;   // Level 1
 
-        lfo.reset(data + 137);
+        publishPatch();
         patchInitialized = true;
     }
 
@@ -587,13 +598,7 @@ public:
 
             data[param] = static_cast<uint8_t>(lroundf(value * (float)maxVal));
 
-            // Signal that voices need updating instead of doing it here
-            voicesNeedUpdate = true;
-
-            // LFO parameters are cached in the LFO instance; refresh on change.
-            if (param >= 136 && param <= 142) {
-                lfo.reset(data + 137);
-            }
+            publishPatch();
         }
     }
 
@@ -707,7 +712,7 @@ public:
     bool loadPatchBlob(const uint8_t* patchData, size_t size) {
         // Accept either 155 or 156 byte patches
         size_t copySize = (size >= 156) ? 156 : size;
-        if (size < 155) {
+        if (!patchData || size < 155) {
             // printf("[DEXED] loadPatchBlob: size %zu too small (need 155+)\n", size);
             return false;
         }
@@ -729,18 +734,14 @@ public:
         // printf("[DEXED] loadPatchBlob: loaded %zu bytes, data[0]=%d data[134]=%d data[135]=%d\n",
         //        copySize, data[0], data[134], data[135]);
 
-        // Update LFO with new patch
-        lfo.reset(data + 137);
-
-        // Signal that voices need updating with the new patch data
-        voicesNeedUpdate = true;
+        publishPatch();
         patchInitialized = true;
 
         return true;
     }
 
     int savePatchBlob(uint8_t* outBuf, size_t bufSize) {
-        if (bufSize < 155) return 0;
+        if (!outBuf || bufSize < 155) return 0;
         size_t copySize = (bufSize >= 156) ? 156 : 155;
 
         std::lock_guard<std::mutex> lock(patchMutex);
@@ -749,7 +750,7 @@ public:
     }
 
     size_t serializeState(uint8_t* outBuf, size_t bufSize) {
-        if (bufSize < 155) return 0;
+        if (!outBuf || bufSize < 155) return 0;
         size_t copySize = (bufSize >= 156) ? 156 : 155;
 
         std::lock_guard<std::mutex> lock(patchMutex);
@@ -789,6 +790,11 @@ void DexedAudio::midiNoteOff(uint8_t note) {
 
 void DexedAudio::midiCC(uint8_t cc, uint8_t value) {
     pImpl->midiCC(cc, value);
+}
+
+void DexedAudio::sendMidi(uint8_t status, uint8_t data1, uint8_t data2) {
+    if (data1 > 127 || data2 > 127) return;
+    pImpl->processMidiMessage(MidiMessage(status, data1, data2));
 }
 
 void DexedAudio::panic() {
@@ -844,14 +850,8 @@ void DexedAudio::init(float sr) {
 }
 
 bool DexedAudio::queuePatchBlob(const uint8_t* data, size_t size) {
-    std::lock_guard<std::mutex> lock(pImpl->patchMutex);
-    if (size < 155) return false;
-
-    // Pad to 156 bytes for Dx7Note compatibility
-    std::vector<uint8_t> patch(156, 0);
-    std::memcpy(patch.data(), data, std::min(size, (size_t)156));
-    pImpl->patchQueue.push(patch);
-    return true;
+    // Patches are state: coalesce updates until the audio owner takes a snapshot.
+    return pImpl->loadPatchBlob(data, size);
 }
 
 void DexedAudio::setCurrentPreset(int index) {

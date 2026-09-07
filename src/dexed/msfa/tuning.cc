@@ -1,4 +1,4 @@
-// JUCE-free minimal tuning implementation used for embedded build
+// Standard twelve-tone tuning used by the embedded engine.
 #include "tuning.h"
 #include <memory>
 
@@ -19,9 +19,3 @@ struct StandardTuning : public TuningState {
 std::shared_ptr<TuningState> createStandardTuning() {
     return std::make_shared<StandardTuning>();
 }
-
-// The following advanced tuning creators are not used in this embedded build.
-// Provide stubs that return nullptr to keep linkage satisfied without JUCE.
-std::shared_ptr<TuningState> createTuningFromSCLData(const std::string&) { return nullptr; }
-std::shared_ptr<TuningState> createTuningFromKBMData(const std::string&) { return nullptr; }
-std::shared_ptr<TuningState> createTuningFromSCLAndKBMData(const std::string&, const std::string&) { return nullptr; }

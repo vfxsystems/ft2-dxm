@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.16)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -13,7 +13,7 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy compatibility for bundled subprojects" FORCE)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.10 CACHE STRING "Minimum policy compatibility for bundled subprojects" FORCE)
 
 option(EXTERNAL_LIBFLAC "use external(system) flac library" OFF)
 option(FT2_ENABLE_VENDOR_TESTS "Enable tests registered by bundled third-party subprojects" OFF)
@@ -179,8 +179,6 @@ if(WITH_DEXED)
     set(DEXED_CORE_SRCS
         ${CMAKE_SOURCE_DIR}/src/dexed/EngineMkI.cpp
         ${CMAKE_SOURCE_DIR}/src/dexed/EngineOpl.cpp
-        ${CMAKE_SOURCE_DIR}/src/dexed/PluginData.cpp
-        ${CMAKE_SOURCE_DIR}/src/dexed/PluginParam.cpp
         ${CMAKE_SOURCE_DIR}/src/dexed/dexed_audio.cpp
         ${CMAKE_SOURCE_DIR}/src/dexed/PluginFx.cpp
     )
@@ -228,7 +226,8 @@ target_sources(ft2-dxm PRIVATE src/ft2_ostirus_wrapper.cpp)
 target_link_libraries(ft2-dxm PRIVATE virusLib zlibstatic)
 
 set(OSTIRUS_ASSET_ZIP "${CMAKE_SOURCE_DIR}/src/gearmulator/assets/otstirusdat.zip")
-if(EXISTS "${OSTIRUS_ASSET_ZIP}")
+option(FT2_EMBED_OSTIRUS_ASSETS "Embed local OsTIrus firmware archive (private builds only)" OFF)
+if(FT2_EMBED_OSTIRUS_ASSETS AND EXISTS "${OSTIRUS_ASSET_ZIP}")
     set(OSTIRUS_EMBED_SRC "${CMAKE_BINARY_DIR}/generated/ft2_ostirusdat_zip.cpp")
     add_custom_command(
         OUTPUT "${OSTIRUS_EMBED_SRC}"
@@ -280,9 +279,6 @@ target_include_directories(ft2-dxm PRIVATE
 )
 # end of Tunefish4 integration
 
-# Envelope UI integration: shared envelope editor code
-target_sources(ft2-dxm PRIVATE src/envelope_ui.c)
-
 # Tunefish modern widget system
 target_sources(ft2-dxm PRIVATE
     src/ft2_tunefish_widgets.c
@@ -319,6 +315,12 @@ target_sources(ft2-dxm PRIVATE src/ft2_slot_renderer.c)
 target_sources(ft2-dxm PRIVATE src/ft2_dxi.c)
 
 if(BUILD_TESTING)
+    target_sources(ft2-dxm PRIVATE tests/stability_tests.c tests/synth_levels.c tests/dexed_tests.cpp)
+    target_compile_definitions(ft2-dxm PRIVATE FT2_STABILITY_TESTS)
+    add_test(NAME ft2_stability COMMAND ft2-dxm --stability-test)
+    set_tests_properties(ft2_stability PROPERTIES ENVIRONMENT "FT2_OSTIRUS_ROM=")
+    add_test(NAME ft2_synth_levels COMMAND ft2-dxm --synth-level-test)
+    set_tests_properties(ft2_synth_levels PROPERTIES ENVIRONMENT "FT2_OSTIRUS_ROM=")
     add_test(NAME ft2_version COMMAND ft2-dxm --version)
     add_test(NAME ft2_self_test COMMAND ft2-dxm --self-test)
     if(FT2_ENABLE_VECTOR_UI)

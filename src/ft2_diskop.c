@@ -95,7 +95,13 @@ bool setupExecutablePath(void)
 	}
 
 	editor.binaryPathU[0] = 0;
-	UNICHAR_GETCWD(editor.binaryPathU, PATH_MAX);
+	if (UNICHAR_GETCWD(editor.binaryPathU, PATH_MAX) == NULL)
+	{
+		free(editor.binaryPathU);
+		editor.binaryPathU = NULL;
+		showErrorMsgBox("Couldn't determine the executable directory!");
+		return false;
+	}
 
 	return true;
 }
@@ -474,12 +480,6 @@ static void setupDiskOpDrives(void) // Windows only
 
 static void openDrive(char *str) // Windows only
 {
-	if (mouse.mode == MOUSE_MODE_DELETE)
-	{
-		okBox(0, "System message", "Drive deletion is not implemented!", NULL);
-		return;
-	}
-
 	if (str == NULL || *str == '\0')
 	{
 		okBox(0, "System message", "Couldn't open drive!", NULL);
@@ -1948,7 +1948,13 @@ static int32_t SDLCALL diskOp_ReadDirectoryThread(void *ptr)
 	// free old buffer
 	freeDirRecBuffer();
 
-	UNICHAR_GETCWD(FReq_CurPathU, PATH_MAX);
+	if (UNICHAR_GETCWD(FReq_CurPathU, PATH_MAX) == NULL)
+	{
+		okBoxThreadSafe(0, "System message", "Couldn't determine the current directory!", NULL);
+		FReq_Buffer = bufferCreateEmptyDir();
+		FReq_FileCount = FReq_Buffer != NULL ? 1 : 0;
+		return true;
+	}
 
 	// read first file
 	int8_t lastFindFileFlag = findFirst(&tmpBuffer);
@@ -2161,7 +2167,7 @@ static void setDiskOpItem(uint8_t item)
 
 			FReq_CurPathU = FReq_ModCurPathU;
 			if (FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
-				UNICHAR_CHDIR(FReq_CurPathU);
+					(void)!UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
 
@@ -2177,7 +2183,7 @@ static void setDiskOpItem(uint8_t item)
 
 			FReq_CurPathU = FReq_InsCurPathU;
 			if (FReq_CurPathU != NULL)
-				UNICHAR_CHDIR(FReq_CurPathU);
+					(void)!UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
 
@@ -2193,7 +2199,7 @@ static void setDiskOpItem(uint8_t item)
 
 			FReq_CurPathU = FReq_SmpCurPathU;
 			if (FReq_CurPathU != NULL)
-				UNICHAR_CHDIR(FReq_CurPathU);
+					(void)!UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
 
@@ -2209,7 +2215,7 @@ static void setDiskOpItem(uint8_t item)
 
 			FReq_CurPathU = FReq_PatCurPathU;
 			if (FReq_CurPathU != NULL)
-				UNICHAR_CHDIR(FReq_CurPathU);
+					(void)!UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
 
@@ -2225,7 +2231,7 @@ static void setDiskOpItem(uint8_t item)
 
 			FReq_CurPathU = FReq_TrkCurPathU;
 			if (FReq_CurPathU != NULL)
-				UNICHAR_CHDIR(FReq_CurPathU);
+					(void)!UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
 
@@ -2241,7 +2247,7 @@ static void setDiskOpItem(uint8_t item)
 
 			FReq_CurPathU = FReq_DxiCurPathU;
 			if (FReq_CurPathU != NULL)
-				UNICHAR_CHDIR(FReq_CurPathU);
+					(void)!UNICHAR_CHDIR(FReq_CurPathU);
 		}
 		break;
 	}
@@ -2347,16 +2353,17 @@ void showDiskOpScreen(void)
 			char *home = getenv("HOME");
 			if (home != NULL)
 			{
-				UNICHAR_CHDIR(home);
+					(void)!UNICHAR_CHDIR(home);
 				UNICHAR_STRCPY(FReq_ModCurPathU, home);
 
 				UNICHAR_STRCAT(FReq_ModCurPathU, "/Desktop");
 			}
 #endif
-			UNICHAR_CHDIR(FReq_ModCurPathU);
+			(void)!UNICHAR_CHDIR(FReq_ModCurPathU);
 		}
 
-		UNICHAR_GETCWD(FReq_ModCurPathU, PATH_MAX);
+		if (UNICHAR_GETCWD(FReq_ModCurPathU, PATH_MAX) == NULL)
+			FReq_ModCurPathU[0] = '\0';
 		firstTimeOpeningDiskOp = false;
 	}
 

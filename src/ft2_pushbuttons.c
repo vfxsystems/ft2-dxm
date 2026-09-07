@@ -271,9 +271,6 @@ pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 	{ 161, 155, 60, 16, 0, 0, "Resample",  NULL,    NULL,       pbSampleResample },
 	{ 222, 155, 66, 16, 0, 0, "Mix smp.",  NULL,    NULL,       pbSampleMix },
 
-	// Placeholder for PB_SAMP_EXT_SLICER (not currently used)
-	{ 0, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL },
-
 	// ------ INSTRUMENT EDITOR PUSHBUTTONS ------
 	//x,   y,   w,  h,  p, d, text #1,            text #2, funcOnDown,     funcOnUp
 	{ 200, 175, 23, 12, 0, 0, SMALL_1_STRING,     NULL,    NULL,           volPreDef1 },
@@ -646,9 +643,8 @@ bool testPushButtonMouseDown(void)
 	}
 	else if (ui.sysReqShown && ui.wavRendererShown)
 	{
-		/* Render Settings modal – only allow its own pushbuttons */
-		start = NUM_PUSHBUTTONS - 6;  // RS_PB_BASE (6 buttons)
-		end   = NUM_PUSHBUTTONS;      // last 6 IDs are reserved for Render Settings
+		start = PB_RENDER_SETTINGS_FIRST;
+		end   = PB_RENDER_SETTINGS_LAST;
 	}
 	else if (ui.sysReqShown && !ui.mixerScreenShown)
 	{

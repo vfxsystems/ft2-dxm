@@ -64,22 +64,25 @@ static int8_t detectSample(FILE *f)
 {
 	uint8_t D[512];
 
-	uint32_t oldPos = ftell(f);
+	const long oldPos = ftell(f);
+	if (oldPos < 0)
+		return FORMAT_UNKNOWN;
 	rewind(f);
 	memset(D, 0, sizeof (D));
-	fread(D, 1, sizeof (D), f);
-	fseek(f, oldPos, SEEK_SET);
+	const size_t bytesRead = fread(D, 1, sizeof (D), f);
+	if (fseek(f, oldPos, SEEK_SET) != 0)
+		return FORMAT_UNKNOWN;
 
-	if (!memcmp("fLaC", &D[0], 4)) // XXX: Kinda lousy detection...
+	if (bytesRead >= 4 && !memcmp("fLaC", &D[0], 4)) // XXX: Kinda lousy detection...
 		return FORMAT_FLAC;
 
-	if (!memcmp("FORM", &D[0], 4) && (!memcmp("8SVX", &D[8], 4) || !memcmp("16SV", &D[8], 4)))
+	if (bytesRead >= 12 && !memcmp("FORM", &D[0], 4) && (!memcmp("8SVX", &D[8], 4) || !memcmp("16SV", &D[8], 4)))
 		return FORMAT_IFF;
 
-	if (!memcmp("RIFF", &D[0], 4) && !memcmp("WAVE", &D[8], 4))
+	if (bytesRead >= 12 && !memcmp("RIFF", &D[0], 4) && !memcmp("WAVE", &D[8], 4))
 		return FORMAT_WAV;
 
-	if (!memcmp("FORM", &D[0], 4) && (!memcmp("AIFF", &D[8], 4) || !memcmp("AIFC", &D[8], 4)))
+	if (bytesRead >= 12 && !memcmp("FORM", &D[0], 4) && (!memcmp("AIFF", &D[8], 4) || !memcmp("AIFC", &D[8], 4)))
 		return FORMAT_AIFF;
 
 	if (detectBRR(f))

@@ -57,9 +57,9 @@ bool renderSelectionToSlot(uint32_t channelMask, uint16_t startPos, uint16_t sto
 
     /* Backup and apply channel mute mask */
     bool oldMute[MAX_CHANNELS];
+    memcpy(oldMute, editor.channelMuted, sizeof(oldMute));
     for (int i = 0; i < MAX_CHANNELS && i < 16; i++)
     {
-        oldMute[i] = editor.channelMuted[i];
         editor.channelMuted[i] = ((channelMask & (1U << i)) == 0);
     }
 

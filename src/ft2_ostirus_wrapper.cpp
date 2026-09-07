@@ -20,6 +20,7 @@
 #include <cmath>
 #include <exception>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -567,6 +568,23 @@ static bool load_rom_if_needed(void)
 {
     if (!g_romData.empty() && g_romModel != virusLib::DeviceModel::Invalid)
         return true;
+
+    /* Explicit external ROM selection takes precedence over legacy search paths. */
+    if (const char *externalRom = std::getenv("FT2_OSTIRUS_ROM"))
+    {
+        std::vector<uint8_t> data;
+        if (!read_file(externalRom, data)) return false;
+        for (auto model : {virusLib::DeviceModel::TI, virusLib::DeviceModel::TI2, virusLib::DeviceModel::Snow})
+        {
+            virusLib::ROMFile rom(data, externalRom, model);
+            if (!rom.isValid()) continue;
+            g_romData = std::move(data);
+            g_romPath = externalRom;
+            g_romModel = model;
+            return true;
+        }
+        return false;
+    }
 
     std::vector<uint8_t> zipRom;
     std::vector<uint8_t> zipCache;

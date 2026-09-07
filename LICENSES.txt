@@ -1,17 +1,24 @@
-This project uses the following licenses:
+Component notice inventory (retain original notices in each source tree)
 
-Source code (BSD 3-clause):
-src\LICENSE.txt
+FT2-derived source: LICENSE and src/LICENSE.txt (BSD 3-clause).
+Gearmulator: src/gearmulator/LICENSE.md (GPL v3 text). Nested dependencies
+carry their own notices; preserve source headers and LICENSE/COPYING files.
+Tunefish4: src/tunefish4/Source headers specify GPL v3 or later.
+Dexed: src/dexed/EngineMkI.cpp and other headers specify GPL v3 or later.
+Dexed MSFA: src/dexed/msfa headers include Apache License 2.0 notices.
+V2: src/v2/LICENSE.txt (public-domain dedication, with stated scope).
+Additional V2 notices: src/v2/vsti/LICENSE.txt,
+src/v2/appearances/LICENSE.txt, src/v2/v2m/LICENSE.txt.
+libFLAC: src/libflac/COPYING.txt.
+RtMidi: src/rtmidi/LICENSE.txt.
+Graphics/icons: src/gfxdata/bmp/LICENSE.txt, src/gfxdata/icon/LICENSE.txt,
+ft2_gui_designer/gfxdata/bmp/LICENSE.txt,
+ft2_gui_designer/gfxdata/icon/LICENSE.txt.
+SDL2: system build dependency on Linux/macOS; bundled header notice at
+src/SDL2/SDL_copying.h. Retain notices accompanying distributed SDL2.
+Virus firmware/local runtime databases: excluded from publication snapshots.
 
-libFLAC:
-src\libflac\COPYING.txt
-
-rtmidi:
-src\rtmidi\LICENSE.txt
-
-Graphics, except a few bitmaps: by Magnus Högdahl
-(CC BY-NC-SA 4.0):
-src\gfxdata\bmp\LICENSE.txt
-
-SDL2:
-External build dependency. See the license text supplied with your installed SDL2 development package.
+Other graphics, presets and vendor assets need individual provenance retained.
+This inventory is not a replacement license for the combined work or a blanket
+grant covering assets. Asset provenance review remains a publication gate;
+see docs/publication.md.

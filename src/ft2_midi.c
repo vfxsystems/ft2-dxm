@@ -36,30 +36,68 @@ static inline void midiInSetChannel(uint8_t status)
 	recMIDIValidChn = (config.recMIDIAllChn || (status & 0xF) == config.recMIDIChn-1);
 }
 
-static inline void midiInKeyAction(int8_t m, uint8_t mv)
+enum { MIDI_QUEUE_CAPACITY = 1024 };
+static uint8_t midiQueue[MIDI_QUEUE_CAPACITY][3];
+static SDL_atomic_t midiRead, midiWrite, midiOverflow, midiAccepting;
+static bool midiSustain[16], midiDeferredRelease[16][128];
+
+static void resetMidiInputState(void)
 {
-	int16_t vol = (mv * 64 * config.recMIDIVolSens) / (127 * 100);
-	if (vol > 64)
-		vol = 64;
+    releaseAllMidiInputNotes();
+    memset(midiSustain, 0, sizeof(midiSustain));
+    memset(midiDeferredRelease, 0, sizeof(midiDeferredRelease));
+    midi.currMIDIVibDepth = midi.currMIDIPitch = 0;
+}
 
-	// FT2 bugfix: If velocity>0, and sensitivity made vol=0, set vol to 1 (prevent key off)
-	if (mv > 0 && vol == 0)
-		vol = 1;
+static void midiInKeyAction(uint8_t wireChannel, uint8_t wireNote, uint8_t velocity)
+{
+    if (!velocity) {
+        if (midiSustain[wireChannel]) midiDeferredRelease[wireChannel][wireNote] = true;
+        else releaseMidiInputNote(wireChannel, wireNote, true);
+        return;
+    }
+    if (!recMIDIValidChn || ui.sysReqShown) return;
+    int note = (int)wireNote - 11;
+    if (config.recMIDITransp) note += config.recMIDITranspVal;
+    if (note < 1 || note > 96) return;
+    int volume = (velocity * 64 * config.recMIDIVolSens) / (127 * 100);
+    if (volume > 64) volume = 64;
+    if (volume < 1) volume = 1;
+    if (!config.recMIDIVelocity) volume = -1;
+    midiDeferredRelease[wireChannel][wireNote] = false;
+    recordMidiInputNote(wireChannel, wireNote, note, volume);
+}
 
-	if (mv > 0 && !config.recMIDIVelocity)
-		vol = -1; // don't record volume (velocity)
-
-	m -= 11;
-	if (config.recMIDITransp)
-		m += (int8_t)config.recMIDITranspVal;
-
-	if ((mv == 0 || vol != 0) && m > 0 && m < 96 && recMIDIValidChn)
-		recordNote(m, (int8_t)vol);
+static bool midiInLifecycleControl(uint8_t wireChannel, uint8_t controller, uint8_t value)
+{
+    if (controller == 64) {
+        // Always accept pedal-up so a changed input filter cannot strand notes.
+        if (value >= 64 && !recMIDIValidChn) return true;
+        midiSustain[wireChannel] = value >= 64;
+        if (!midiSustain[wireChannel]) {
+            for (int note = 0; note < 128; ++note) {
+                if (midiDeferredRelease[wireChannel][note]) releaseMidiInputNote(wireChannel, note, true);
+                midiDeferredRelease[wireChannel][note] = false;
+            }
+        }
+        return true;
+    }
+    if (controller == 120 || controller == 123) {
+        for (int note = 0; note < 128; ++note) {
+            if (controller == 123 && midiSustain[wireChannel]) midiDeferredRelease[wireChannel][note] = true;
+            else {
+                releaseMidiInputNote(wireChannel, note, controller == 123);
+                midiDeferredRelease[wireChannel][note] = false;
+            }
+        }
+        return true;
+    }
+    return false;
 }
 
 static inline void midiInControlChange(uint8_t data1, uint8_t data2)
 {
-	if (data1 != 1) // 1 = modulation wheel
+	if (!recMIDIValidChn || data1 != 1) // 1 = modulation wheel
 		return;
 
 	midi.currMIDIVibDepth = data2 << 6;
@@ -80,6 +118,7 @@ static inline void midiInControlChange(uint8_t data1, uint8_t data2)
 
 static inline void midiInPitchBendChange(uint8_t data1, uint8_t data2)
 {
+	if (!recMIDIValidChn) return;
 	int16_t pitch = (int16_t)((data2 << 7) | data1) - 8192; // -8192..8191
 	pitch >>= 6; // -128..127
 
@@ -95,37 +134,54 @@ static inline void midiInPitchBendChange(uint8_t data1, uint8_t data2)
 	}
 }
 
+/* One RtMidi producer and one application-thread consumer. No allocation,
+ * editor mutation, synth calls, logging, or waiting in the device callback. */
 static void midiInCallback(double timeStamp, const unsigned char *message, size_t messageSize, void *userData)
 {
-	uint8_t byte[3];
+    (void)timeStamp;
+    (void)userData;
+    if (!SDL_AtomicGet(&midiAccepting) || !message || messageSize != 3) return;
+    const uint8_t type = message[0] & 0xF0;
+    if ((type != 0x80 && type != 0x90 && type != 0xB0 && type != 0xE0) ||
+        message[1] > 127 || message[2] > 127 || SDL_AtomicGet(&midiOverflow)) return;
+    const int write = SDL_AtomicGet(&midiWrite);
+    const int next = (write + 1) % MIDI_QUEUE_CAPACITY;
+    if (next == SDL_AtomicGet(&midiRead)) {
+        SDL_AtomicSet(&midiOverflow, 1);
+        return;
+    }
+    memcpy(midiQueue[write], message, 3);
+    SDL_AtomicSet(&midiWrite, next);
+}
 
-	if (!midi.enable || messageSize < 2)
-		return;
-
-	midi.callbackBusy = true;
-
-	byte[0] = message[0];
-	if (byte[0] > 127 && byte[0] < 240)
-	{
-		byte[1] = message[1] & 0x7F;
-
-		if (messageSize >= 3)
-			byte[2] = message[2] & 0x7F;
-		else
-			byte[2] = 0;
-
-		midiInSetChannel(byte[0]);
-
-		     if (byte[0] >= 128 && byte[0] <= 128+15)       midiInKeyAction(byte[1], 0);
-		else if (byte[0] >= 144 && byte[0] <= 144+15)       midiInKeyAction(byte[1], byte[2]);
-		else if (byte[0] >= 176 && byte[0] <= 176+15)   midiInControlChange(byte[1], byte[2]);
-		else if (byte[0] >= 224 && byte[0] <= 224+15) midiInPitchBendChange(byte[1], byte[2]);
-	}
-
-	midi.callbackBusy = false;
-
-	(void)timeStamp;
-	(void)userData;
+void processMidiInput(void)
+{
+    if (!midi.enable || SDL_AtomicGet(&midiOverflow)) {
+        SDL_AtomicSet(&midiRead, SDL_AtomicGet(&midiWrite));
+        resetMidiInputState();
+        SDL_AtomicSet(&midiOverflow, 0);
+        return;
+    }
+    // Bound work even if the device continually sends data.
+    const int end = SDL_AtomicGet(&midiWrite);
+    int read = SDL_AtomicGet(&midiRead);
+    while (read != end) {
+        uint8_t bytes[3];
+        memcpy(bytes, midiQueue[read], 3);
+        read = (read + 1) % MIDI_QUEUE_CAPACITY;
+        SDL_AtomicSet(&midiRead, read);
+        midiInSetChannel(bytes[0]);
+        const uint8_t wireChannel = bytes[0] & 15;
+        switch (bytes[0] & 0xF0) {
+            case 0x80: midiInKeyAction(wireChannel, bytes[1], 0); break;
+            case 0x90: midiInKeyAction(wireChannel, bytes[1], bytes[2]); break;
+            case 0xB0:
+                if (!midiInLifecycleControl(wireChannel, bytes[1], bytes[2]))
+                    midiInControlChange(bytes[1], bytes[2]);
+                break;
+            case 0xE0: midiInPitchBendChange(bytes[1], bytes[2]); break;
+        }
+    }
 }
 
 static uint32_t getNumMidiInDevices(void)
@@ -150,6 +206,7 @@ static char *getMidiInDeviceName(uint32_t deviceID)
 
 void closeMidiInDevice(void)
 {
+    SDL_AtomicSet(&midiAccepting, 0);
 	if (midiDeviceOpened)
 	{
 		if (midiInDev != NULL)
@@ -160,10 +217,14 @@ void closeMidiInDevice(void)
 
 		midiDeviceOpened = false;
 	}
+    SDL_AtomicSet(&midiRead, SDL_AtomicGet(&midiWrite));
+    SDL_AtomicSet(&midiOverflow, 0);
+    resetMidiInputState();
 }
 
 void freeMidiIn(void)
 {
+    closeMidiInDevice();
 	if (midiInDev != NULL)
 	{
 		rtmidi_in_free(midiInDev);
@@ -205,6 +266,7 @@ bool openMidiInDevice(uint32_t deviceID)
 
 	rtmidi_in_ignore_types(midiInDev, true, true, true);
 
+	SDL_AtomicSet(&midiAccepting, 1);
 	midiDeviceOpened = true;
 	return true;
 }
@@ -504,6 +566,10 @@ int32_t initMidiFunc(void *ptr)
 	return true;
 	(void)ptr;
 }
+
+#ifdef FT2_STABILITY_TESTS
+#include "../tests/midi_tests.inc"
+#endif
 
 #else
 typedef int prevent_compiler_warning; // kludge: prevent warning about empty .c file if HAS_MIDI is not defined

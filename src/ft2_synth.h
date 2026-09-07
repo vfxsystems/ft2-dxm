@@ -134,8 +134,6 @@ int ft2_synth_get_adsr2_slope(int instrID);
 void ft2_synth_set_param(int instrID, int param, float value);
 float ft2_synth_get_param(int instrID, int param);
 
-void ft2_synth_set_unisono(int instrID, int value);
-void ft2_synth_set_octave(int instrID, int value);
 
 // Active voice count for an instrument (0 if none or not initialized)
 int ft2_synth_get_active_voice_count(int instrID);

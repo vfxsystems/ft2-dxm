@@ -46,8 +46,6 @@ extern void setSkipPresetOnCreate(bool skip);
 #define DXM_TF4_PARAM_COUNT 128
 
 #include "../ft2_dexed.h"
-extern int dx_unpack_program_from_storage(const uint8_t* packed128, uint8_t* outUnpacked155);
-
 // Forward declaration for XM loader
 bool loadXM(FILE *f, uint32_t filesize);
 
@@ -103,23 +101,23 @@ static void normalizeSynthFlags(instr_t *ins)
     }
 }
 
-static void restoreAllDexedStatesDXM(FILE *f, uint32_t chunkLen)
-{
-    uint8_t numDexed = 0;
-    fread(&numDexed, sizeof(uint8_t), 1, f);
-    printf("[DXM-LOAD] Dexed chunk contains %d instruments\n", numDexed);
+static bool skip_bytes(FILE *f, size_t n);
+static bool read_chunk_data(FILE *f, void *dst, size_t size, size_t *remaining);
 
-    if (!ft2_dx_is_initialized()) {
-        int sr = (audio.freq > 0) ? audio.freq : 44100;
-        ft2_dx_init(sr);
-    }
+static bool restoreAllDexedStatesDXM(FILE *f, uint32_t chunkLen)
+{
+    size_t remaining = chunkLen;
+    uint8_t numDexed = 0;
+    if (!read_chunk_data(f, &numDexed, sizeof(numDexed), &remaining) ||
+        (size_t)numDexed * 156 > remaining)
+        return false;
     
     for (uint8_t i = 0; i < numDexed; i++) {
         uint8_t instrIdx = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-
         uint8_t patchData[155];
-        fread(patchData, sizeof(uint8_t), 155, f);
+        if (!read_chunk_data(f, &instrIdx, sizeof(instrIdx), &remaining) ||
+            !read_chunk_data(f, patchData, sizeof(patchData), &remaining))
+            return false;
 
         if (instrIdx < 1 || instrIdx > 128) continue;
         instr_t *ins = instrTmp[instrIdx];
@@ -135,71 +133,27 @@ static void restoreAllDexedStatesDXM(FILE *f, uint32_t chunkLen)
         normalizeSynthFlags(ins);
         ins->isDXMInstrument = true;
         
-        // Copy patch data: sanitize feedback byte to avoid invalid shift counts in Dexed engine.
-        // DX7 feedback byte is stored at index 135. Clamp to [0..8] (FEEDBACK_BITDEPTH)
-        // before copying into the persistent instrument storage. This prevents
-        // malformed or out-of-range patch bytes from causing negative shift
-        // counts (which can trigger SIGFPE) inside the Dexed render path.
-        if (patchData[135] > 8) {
-            printf("[DXM-LOAD] Sanitizing Dexed patch feedback byte for instr %d (was=%u -> clamped=8)\n", instrIdx, (unsigned)patchData[135]);
-            patchData[135] = 8;
-        }
-
-        {
-            uint8_t tmp_unpacked[155];
-
-            /* Heuristic detection: Many DXM writers will store a full 155-byte unpacked
-             * program. However older/alternate storage might embed a 128-byte packed
-             * program inside the 155-byte slot (with the remaining bytes zeroed or unused).
-             *
-             * Simple detection:
-             * - If a relatively large number of bytes in the tail region [128..154]
-             *   are zero, we treat the incoming blob as likely-packed storage and
-             *   attempt to unpack via the plugin wrapper.
-             * - Otherwise assume the blob is already the 155-byte unpacked program
-             *   and copy directly.
-             *
-             * This avoids unnecessary unpack attempts and prevents accidental
-             * reinterpretation of valid unpacked programs.
-             */
-            int zero_count = 0;
-            for (int z = 128; z < 155; ++z) {
-                if (patchData[z] == 0) ++zero_count;
-            }
-
-            const int ZERO_THRESHOLD = 10; /* if >= 10 of 27 bytes are zero, consider packed */
-            if (zero_count >= ZERO_THRESHOLD) {
-                /* Likely packed storage: try to unpack using the plugin wrapper.
-                 * If the unpack wrapper fails for any reason, fall back to copying
-                 * the provided blob directly to avoid losing data.
-                 */
-                if (dx_unpack_program_from_storage(patchData, tmp_unpacked)) {
-                    memcpy(ins->dxParams, tmp_unpacked, 155);
-                } else {
-                    memcpy(ins->dxParams, patchData, 155);
-                }
-            } else {
-                /* Likely already-unpacked 155-byte program — copy directly. */
-                memcpy(ins->dxParams, patchData, 155);
-            }
-        }
-
-        printf("[DXM-LOAD] Restored Dexed patch for instr %d\n", instrIdx);
+        /* DXMDEX has always written the 155-byte unpacked representation. A
+         * content heuristic here corrupted legitimate patches with sparse tails. */
+        if (patchData[135] > 7) patchData[135] = 7;
+        memcpy(ins->dxParams, patchData, sizeof(ins->dxParams));
     }
 
-    // Ensure Dexed instances are created and patches are applied immediately
-    for (int i = 1; i <= 128; i++) {
-        if (instrTmp[i] && instrTmp[i]->useDexed) {
-            ft2_dx_load_patch_for_instrument(i, instrTmp[i]->dxParams, 155);
-        }
-    }
-
+    return remaining == 0 || skip_bytes(f, remaining); /* writer padding */
 }
 
 // Helper to skip bytes in a file
 static bool skip_bytes(FILE *f, size_t n)
 {
     return fseek(f, (long)n, SEEK_CUR) == 0;
+}
+
+static bool read_chunk_data(FILE *f, void *dst, size_t size, size_t *remaining)
+{
+    if (size > *remaining || fread(dst, 1, size, f) != size)
+        return false;
+    *remaining -= size;
+    return true;
 }
 
 static size_t dxm_sample_payload_size(uint32_t frames, bool sample16Bit, bool stereo)
@@ -211,231 +165,169 @@ static size_t dxm_sample_payload_size(uint32_t frames, bool sample16Bit, bool st
     return bytes;
 }
 
-// Helper: Restore DSP state from buffer
-static void restoreDSPStateDXM(FILE *f, uint32_t chunkLen)
+#define DXM_DSP_PARAM_CAPACITY (sizeof(((dspEffectInstance_t *)0)->params) / sizeof(float))
+typedef struct dxmDiskEffect_t
 {
-    // Restore mixer channel DSP chains (32 channels)
-    for (int ch = 0; ch < MAX_STEREO_PAIRS; ch++) {
-        dspEffectInstance_t *chain = stereoMixerCh[ch].effects;
-        for (int slot = 0; slot < DSP_MAX_SLOTS; slot++) {
-            dspEffectInstance_t *e = &chain[slot];
-            uint8_t type = 0, np = 0;
-            fread(&type, 1, 1, f);
-            fread(&np, 1, 1, f);
-            e->type = type;
-            if (type != DSP_TYPE_NONE) {
-                dspInitEffect(e, (dspEffectType_t)type, audio.freq);
-                dspResetEffectState(e);
-                e->enabled = true;
-            } else {
-                dspFreeEffect(e);
+    uint8_t type, numParams;
+    float params[DXM_DSP_PARAM_CAPACITY];
+} dxmDiskEffect_t;
+
+// Validate the complete DSP chunk before changing live mixer state.
+static bool restoreDSPStateDXM(FILE *f, uint32_t chunkLen)
+{
+    size_t remaining = chunkLen;
+    dxmDiskEffect_t effects[MAX_STEREO_PAIRS + 1][DSP_MAX_SLOTS] = {0};
+    float faders[MAX_STEREO_PAIRS], pans[MAX_STEREO_PAIRS], masterGain;
+
+    for (int chain = 0; chain <= MAX_STEREO_PAIRS; ++chain)
+    {
+        for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+        {
+            dxmDiskEffect_t *disk = &effects[chain][slot];
+            if (!read_chunk_data(f, &disk->type, 1, &remaining) ||
+                !read_chunk_data(f, &disk->numParams, 1, &remaining) ||
+                disk->type >= DSP_TYPE_COUNT)
+                return false;
+
+            int expectedParams = 0;
+            dspGetParamInfo((dspEffectType_t)disk->type, &expectedParams);
+            if (expectedParams < 0 || (size_t)expectedParams > DXM_DSP_PARAM_CAPACITY ||
+                disk->numParams != expectedParams ||
+                !read_chunk_data(f, disk->params, (size_t)expectedParams * sizeof(float), &remaining))
+                return false;
+
+            for (int param = 0; param < expectedParams; ++param)
+                if (!isfinite(disk->params[param])) return false;
+        }
+    }
+
+    for (int ch = 0; ch < MAX_STEREO_PAIRS; ++ch)
+    {
+        if (!read_chunk_data(f, &faders[ch], sizeof(float), &remaining) ||
+            !read_chunk_data(f, &pans[ch], sizeof(float), &remaining) ||
+            !isfinite(faders[ch]) || faders[ch] < 0.0f || faders[ch] > 2.0f ||
+            !isfinite(pans[ch]) || pans[ch] < -1.0f || pans[ch] > 1.0f)
+            return false;
+    }
+    if (!read_chunk_data(f, &masterGain, sizeof(float), &remaining) ||
+        !isfinite(masterGain) || masterGain < 0.0f || masterGain > 2.0f ||
+        (remaining != 0 && !skip_bytes(f, remaining)))
+        return false;
+
+    for (int chain = 0; chain <= MAX_STEREO_PAIRS; ++chain)
+    {
+        dspEffectInstance_t *target = chain == MAX_STEREO_PAIRS ? masterEffects : stereoMixerCh[chain].effects;
+        for (int slot = 0; slot < DSP_MAX_SLOTS; ++slot)
+        {
+            const dxmDiskEffect_t *disk = &effects[chain][slot];
+            dspEffectInstance_t *effect = &target[slot];
+            if (disk->type == DSP_TYPE_NONE) dspFreeEffect(effect);
+            else {
+                dspInitEffect(effect, (dspEffectType_t)disk->type, audio.freq);
+                memcpy(&effect->params, disk->params, (size_t)disk->numParams * sizeof(float));
+                dspResetEffectState(effect);
+                effect->enabled = true;
             }
-            float *p = (float *)&e->params;
-            for (int i = 0; i < np; i++)
-                fread(&p[i], sizeof(float), 1, f);
         }
     }
-    // Restore master chain
-    for (int slot = 0; slot < DSP_MAX_SLOTS; slot++) {
-        dspEffectInstance_t *e = &masterEffects[slot];
-        uint8_t type = 0, np = 0;
-        fread(&type, 1, 1, f);
-        fread(&np, 1, 1, f);
-        e->type = type;
-        if (type != DSP_TYPE_NONE) {
-            dspInitEffect(e, (dspEffectType_t)type, audio.freq);
-            dspResetEffectState(e);
-            e->enabled = true;
-        } else {
-            dspFreeEffect(e);
-        }
-        float *p = (float *)&e->params;
-        for (int i = 0; i < np; i++)
-            fread(&p[i], sizeof(float), 1, f);
+    for (int ch = 0; ch < MAX_STEREO_PAIRS; ++ch) {
+        stereoMixerCh[ch].fader = faders[ch];
+        stereoMixerCh[ch].pan = pans[ch];
     }
-    // Restore mixer fader and pan values
-    for (int ch = 0; ch < MAX_STEREO_PAIRS; ch++) {
-        float fader, pan;
-        fread(&fader, sizeof(float), 1, f);
-        stereoMixerCh[ch].fader = fader;
-        fread(&pan, sizeof(float), 1, f);
-        stereoMixerCh[ch].pan = pan;
-    }
-    // Restore master gain
-    fread(&mixerMasterGain, sizeof(float), 1, f);
+    mixerMasterGain = masterGain;
+    return true;
 }
 
-// Helper: Restore all sample data (including stereo) from buffer
-static void restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
+// Restore sample payloads only after their complete bytes have been read.
+static bool restoreAllSamplesDXMWAV(FILE *f, uint32_t chunkLen)
 {
-    uint16_t numSamples = 0;
-    fread(&numSamples, sizeof(uint16_t), 1, f);
-    for (uint16_t sidx = 0; sidx < numSamples; sidx++) {
-        uint8_t instrIdx = 0, smpIdx = 0, flags = 0;
-        uint32_t frames = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-        fread(&smpIdx, sizeof(uint8_t), 1, f);
-        fread(&flags, sizeof(uint8_t), 1, f);
-        fread(&frames, sizeof(uint32_t), 1, f);
-        bool sample16Bit = flags & 1;
-        bool stereo = flags & 2;
-        printf("[DXM-LOAD] instr=%d smp=%d flags=0x%02X frames=%u 16bit=%d stereo=%d\n", instrIdx, smpIdx, flags, frames, sample16Bit, stereo);
-        if (instrIdx < 1 || instrIdx > 128 || smpIdx >= 16) {
-            printf("[DXM-LOAD] Skipping sample: invalid instrument/sample index\n");
-            skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
-            continue;
+    size_t remaining = chunkLen;
+    uint16_t numSamples;
+    if (!read_chunk_data(f, &numSamples, sizeof(numSamples), &remaining) || numSamples > MAX_INST * MAX_SMP_PER_INST)
+        return false;
+
+    for (uint16_t entry = 0; entry < numSamples; ++entry)
+    {
+        uint8_t instrIdx, smpIdx, flags;
+        uint32_t frames;
+        if (!read_chunk_data(f, &instrIdx, sizeof(instrIdx), &remaining) ||
+            !read_chunk_data(f, &smpIdx, sizeof(smpIdx), &remaining) ||
+            !read_chunk_data(f, &flags, sizeof(flags), &remaining) ||
+            !read_chunk_data(f, &frames, sizeof(frames), &remaining) ||
+            (flags & ~3u) != 0 || frames == 0 || frames > MAX_SAMPLE_LEN)
+            return false;
+
+        const bool sample16Bit = (flags & 1) != 0;
+        const bool stereo = (flags & 2) != 0;
+        const size_t payloadSize = dxm_sample_payload_size(frames, sample16Bit, stereo);
+        if (payloadSize > remaining)
+            return false;
+
+        uint8_t *payload = (uint8_t *)malloc(payloadSize);
+        if (payload == NULL || !read_chunk_data(f, payload, payloadSize, &remaining)) {
+            free(payload);
+            return false;
         }
-        instr_t *ins = instrTmp[instrIdx];
-        if (!ins) {
-            printf("[DXM-LOAD] Skipping sample: instrument %d not allocated\n", instrIdx);
-            skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
-            continue;
+
+        if (instrIdx < 1 || instrIdx > MAX_INST || smpIdx >= MAX_SMP_PER_INST || instrTmp[instrIdx] == NULL) {
+            free(payload);
+            return false;
         }
-        sample_t *s = &ins->smp[smpIdx];
-        
-        // For DXM format, trust the WAV chunk format info, not the XM header flags
-        // The XM header doesn't have stereo info, it comes from DXM metadata
-        printf("[DXM-LOAD] Processing sample: 16bit=%d stereo=%d frames=%u\n", 
-               sample16Bit, stereo, frames);
-        
-        // Allocate sample data if not already allocated
-        if (s->length == 0 || s->dataPtrL == NULL) {
-            printf("[DXM-LOAD] Allocating sample data for instr=%d smp=%d (length=%d, 16bit=%d, stereo=%d)\n", 
-                   instrIdx, smpIdx, frames, sample16Bit, stereo);
-            
-                    // Set the sample length and preserve existing flags, only add stereo flag
-        s->length = frames;
-        printf("[DXM-LOAD] Setting flags: old=0x%02X, wav_flags=0x%02X (16bit=%d, stereo=%d)\n", 
-               s->flags, flags, (flags & 1) ? 1 : 0, (flags & 2) ? 1 : 0);
-        
-        // Preserve existing flags (especially 16-bit flag) and only add stereo flag
-        uint8_t newFlags = s->flags;
-        if (stereo) newFlags |= SAMPLE_STEREO;
-        s->flags = newFlags;
-        
-        printf("[DXM-LOAD] Final flags: 0x%02X (16bit=%d, stereo=%d)\n", 
-               s->flags, (s->flags & SAMPLE_16BIT) ? 1 : 0, (s->flags & SAMPLE_STEREO) ? 1 : 0);
-            
-            // Allocate the sample data
-            if (!allocateSmpData(s, frames, sample16Bit, stereo)) {
-                printf("[DXM-LOAD] Failed to allocate sample data\n");
-                skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
-                continue;
-            }
-            
-            printf("[DXM-LOAD] Sample data allocated: L=%p, R=%p\n", 
-                   (void*)s->dataPtrL, (void*)s->dataPtrR);
+
+        sample_t *sample = &instrTmp[instrIdx]->smp[smpIdx];
+        if (!allocateSmpData(sample, (int32_t)frames, sample16Bit, stereo)) {
+            free(payload);
+            return false;
         }
-        
-        // For stereo samples, ensure R channel is allocated
-        if (stereo && s->dataPtrR == NULL) {
-            printf("[DXM-LOAD] Skipping stereo sample: R channel not allocated\n");
-            skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
-            continue;
-        }
-        // Read sample data: interleaved L+R if stereo, planar L only if mono
-        if (stereo && s->dataPtrL && s->dataPtrR) {
-            // Use the same approach as WAV loader - read interleaved data and convert to planar
-            int32_t bytesPerSample = sample16Bit ? 2 : 1;
-            int32_t totalBytes = frames * bytesPerSample;
-            
-            // Allocate temporary buffer for interleaved data
-            void *tempBuffer = malloc(totalBytes * 2); // L+R interleaved
-            if (tempBuffer) {
-                fread(tempBuffer, 1, totalBytes * 2, f);
-                
-                // Deinterleave to planar format (L and R channels) - same as WAV loader
-                if (sample16Bit) {
-                    int16_t *temp16 = (int16_t *)tempBuffer;
-                    int16_t *srcL = (int16_t *)s->dataPtrL;
-                    int16_t *srcR = (int16_t *)s->dataPtrR;
-                    for (int32_t i = 0; i < frames; i++) {
-                        srcL[i] = temp16[i * 2];     // L channel
-                        srcR[i] = temp16[i * 2 + 1]; // R channel
-                    }
-                } else {
-                    int8_t *temp8 = (int8_t *)tempBuffer;
-                    int8_t *srcL = (int8_t *)s->dataPtrL;
-                    int8_t *srcR = (int8_t *)s->dataPtrR;
-                    for (int32_t i = 0; i < frames; i++) {
-                        srcL[i] = temp8[i * 2];     // L channel
-                        srcR[i] = temp8[i * 2 + 1]; // R channel
-                    }
-                }
-                
-                free(tempBuffer);
-            } else {
-                skip_bytes(f, dxm_sample_payload_size(frames, sample16Bit, stereo));
+        sample->length = (int32_t)frames;
+        sample->flags = (sample->flags & (LOOP_FWD | LOOP_BIDI)) |
+            (sample16Bit ? SAMPLE_16BIT : 0) | (stereo ? SAMPLE_STEREO : 0);
+
+        if (!stereo) {
+            memcpy(sample->dataPtrL, payload, payloadSize);
+        } else if (sample16Bit) {
+            const int16_t *source = (const int16_t *)payload;
+            int16_t *left = (int16_t *)sample->dataPtrL;
+            int16_t *right = (int16_t *)sample->dataPtrR;
+            for (uint32_t frame = 0; frame < frames; ++frame) {
+                left[frame] = source[frame * 2];
+                right[frame] = source[frame * 2 + 1];
             }
         } else {
-            // Mono sample - read planar data
-            if (sample16Bit)
-                fread(s->dataPtrL, sizeof(int16_t), frames, f);
-            else
-                fread(s->dataPtrL, sizeof(int8_t), frames, f);
-        }
-        
-        // Debug: Verify sample data after reading
-        if (stereo && s->dataPtrL && s->dataPtrR) {
-            printf("[DXM-LOAD] After reading: L[0]=%d, R[0]=%d\n", 
-                   sample16Bit ? ((int16_t*)s->dataPtrL)[0] : s->dataPtrL[0],
-                   sample16Bit ? ((int16_t*)s->dataPtrR)[0] : s->dataPtrR[0]);
-            
-            // Debug: Check if L and R are different (should be for proper stereo)
-            if (sample16Bit) {
-                int16_t *l = (int16_t *)s->dataPtrL;
-                int16_t *r = (int16_t *)s->dataPtrR;
-                bool different = false;
-                for (int32_t i = 0; i < 10 && i < frames; i++) {
-                    if (l[i] != r[i]) {
-                        different = true;
-                        break;
-                    }
-                }
-                printf("[DXM-LOAD] L and R channels are %s\n", different ? "DIFFERENT (good)" : "IDENTICAL (bad)");
+            const int8_t *source = (const int8_t *)payload;
+            for (uint32_t frame = 0; frame < frames; ++frame) {
+                sample->dataPtrL[frame] = source[frame * 2];
+                sample->dataPtrR[frame] = source[frame * 2 + 1];
             }
         }
-        
-        // Debug output for loaded sample
-        if (sample16Bit && stereo && s->dataPtrL && s->dataPtrR) {
-            int16_t *l = (int16_t *)s->dataPtrL;
-            int16_t *r = (int16_t *)s->dataPtrR;
-            printf("[DXM-LOAD] First 4 L: %d %d %d %d\n", l[0], l[1], l[2], l[3]);
-            printf("[DXM-LOAD] First 4 R: %d %d %d %d\n", r[0], r[1], r[2], r[3]);
-        }
-        
-        // Debug: Check if sample data is properly allocated
-        if (stereo && s->dataPtrL && s->dataPtrR) {
-            printf("[DXM-LOAD] Sample allocated: L=%p, R=%p, length=%d\n", 
-                   (void*)s->dataPtrL, (void*)s->dataPtrR, s->length);
-        }
-        
-        // Note: No sign conversion needed - data is already in correct format
-        // The WAV loader doesn't do sign conversion, so we don't either
-        
-        // Note: fixSample() is called later in setupLoadedModule() to avoid double-processing
+        free(payload);
     }
+
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
 // Helper: Restore all TF4 instrument states from buffer
-static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
+static bool restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
 {
-    (void)chunkLen;
+    size_t remaining = chunkLen;
     uint8_t numTF4 = 0;
-    fread(&numTF4, sizeof(uint8_t), 1, f);
-    printf("[DXM-LOAD] TF4 chunk contains %d instruments\n", numTF4);
+    if (!read_chunk_data(f, &numTF4, sizeof(numTF4), &remaining))
+        return false;
     
     for (uint8_t i = 0; i < numTF4; i++) {
         uint8_t instrIdx = 0, nameLen = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-        fread(&nameLen, sizeof(uint8_t), 1, f);
+        if (!read_chunk_data(f, &instrIdx, sizeof(instrIdx), &remaining) ||
+            !read_chunk_data(f, &nameLen, sizeof(nameLen), &remaining) || nameLen > 22)
+            return false;
         char name[23] = {0};
-        if (nameLen > 0 && nameLen < 23)
-            fread(name, sizeof(char), nameLen, f);
+        if (!read_chunk_data(f, name, nameLen, &remaining))
+            return false;
         float params[DXM_TF4_PARAM_COUNT] = {0};
-        fread(params, sizeof(float), DXM_TF4_PARAM_COUNT, f);
-        printf("[DXM-LOAD] TF4 instr=%d name='%.*s'\n", instrIdx, nameLen, name);
-        printf("[DXM-LOAD] TF4 params[0..3]: %.3f %.3f %.3f %.3f\n", params[0], params[1], params[2], params[3]);
+        if (!read_chunk_data(f, params, sizeof(params), &remaining))
+            return false;
+        for (int param = 0; param < DXM_TF4_PARAM_COUNT; ++param)
+            if (!isfinite(params[param]) || params[param] < 0.0f || params[param] > 1.0f)
+                return false;
         if (instrIdx < 1 || instrIdx > 128) continue;
         instr_t *ins = instrTmp[instrIdx];
         if (!ins) {
@@ -448,210 +340,120 @@ static void restoreAllTF4StatesDXM(FILE *f, uint32_t chunkLen)
         // Set the TF4 flag before any UI or synth refresh
         ins->useTF4 = true;
         normalizeSynthFlags(ins);
-        printf("[DXM-LOAD] Set useTF4=TRUE for instr %d, addr=%p\n", instrIdx, (void*)ins);
         strncpy(ins->smp[0].name, name, 22);
-        int tf4Idx = instrIdx;
-        if (tf4Idx < 1 || tf4Idx > 128) continue;
+        ins->smp[0].name[22] = '\0';
 
         // If you have a tf4Params pointer, copy params there:
         #ifdef FT2_TF4_PARAM_PTR
         memcpy(ins->tf4Params, params, DXM_TF4_PARAM_COUNT * sizeof(float));
         #endif
-        printf("[DXM-LOAD] After param copy, useTF4 for instr %d = %d\n", instrIdx, ins->useTF4);
     }
+
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
 // Helper: Restore all V2 instrument states from buffer
-static void restoreAllV2StatesDXM(FILE *f, uint32_t chunkLen)
+static bool restorePendingSynthStatesDXM(FILE *f, uint32_t chunkLen,
+    pendingSynthBlob_t states[MAX_INST + 1], bool osTirus)
 {
-    (void)chunkLen;
-    uint8_t numV2 = 0;
-    fread(&numV2, sizeof(uint8_t), 1, f);
-    printf("[DXM-LOAD] V2 chunk contains %d instruments\n", numV2);
+    size_t remaining = chunkLen;
+    uint8_t count = 0;
+    bool seen[MAX_INST + 1] = { false };
+    if (!read_chunk_data(f, &count, sizeof(count), &remaining) || count > MAX_INST || (size_t)count * 5u > remaining)
+        return false;
 
-    for (uint8_t i = 0; i < numV2; i++) {
+    for (uint8_t i = 0; i < count; ++i) {
         uint8_t instrIdx = 0;
         uint32_t blobLen = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-        fread(&blobLen, sizeof(uint32_t), 1, f);
-
-        if (instrIdx < 1 || instrIdx > 128 || blobLen == 0) {
-            if (blobLen > 0)
-                skip_bytes(f, blobLen);
-            continue;
-        }
-
-        if (blobLen > chunkLen || blobLen > (16u * 1024u * 1024u)) {
-            printf("[DXM-LOAD] WARNING: Invalid V2 blob length %u for instr %u\n", blobLen, instrIdx);
-            return;
-        }
+        if (!read_chunk_data(f, &instrIdx, sizeof(instrIdx), &remaining) ||
+            !read_chunk_data(f, &blobLen, sizeof(blobLen), &remaining) ||
+            instrIdx < 1 || instrIdx > MAX_INST || seen[instrIdx] ||
+            blobLen == 0 || blobLen > (16u * 1024u * 1024u) || blobLen > remaining)
+            return false;
+        seen[instrIdx] = true;
 
         uint8_t *blob = (uint8_t *)malloc(blobLen);
-        if (!blob) {
-            skip_bytes(f, blobLen);
-            continue;
-        }
-
-        if (fread(blob, 1, blobLen, f) != blobLen) {
+        if (blob == NULL || !read_chunk_data(f, blob, blobLen, &remaining)) {
             free(blob);
-            return;
+            return false;
         }
 
         instr_t *ins = instrTmp[instrIdx];
-        if (!ins) {
-            if (!allocateTmpInstr(instrIdx)) {
-                free(blob);
-                continue;
-            }
+        if (ins == NULL && allocateTmpInstr(instrIdx))
             ins = instrTmp[instrIdx];
-        }
-        if (!ins) {
+        if (ins == NULL || !store_pending_blob(&states[instrIdx], blob, blobLen)) {
             free(blob);
-            continue;
+            return false;
         }
 
-        if (store_pending_blob(&g_pendingV2States[instrIdx], blob, blobLen)) {
-            ins->useV2 = true;
-            normalizeSynthFlags(ins);
-            ins->isDXMInstrument = true;
-            printf("[DXM-LOAD] Staged V2 state for instr %d\n", instrIdx);
+        if (osTirus) {
+            ins->useOsTirus = true;
         } else {
-            printf("[DXM-LOAD] WARNING: Failed to stage V2 state for instr %d\n", instrIdx);
+            ins->useV2 = true;
         }
-
+        normalizeSynthFlags(ins);
+        ins->isDXMInstrument = true;
         free(blob);
     }
+
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
-static void restoreAllOsTirusStatesDXM(FILE *f, uint32_t chunkLen)
+static bool restoreAllV2StatesDXM(FILE *f, uint32_t chunkLen)
 {
-    (void)chunkLen;
-    uint8_t numOsTirus = 0;
-    fread(&numOsTirus, sizeof(uint8_t), 1, f);
-    printf("[DXM-LOAD] OsTIrus state chunk contains %d instruments\n", numOsTirus);
+    return restorePendingSynthStatesDXM(f, chunkLen, g_pendingV2States, false);
+}
 
-    for (uint8_t i = 0; i < numOsTirus; ++i)
-    {
-        uint8_t instrIdx = 0;
-        uint32_t blobLen = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-        fread(&blobLen, sizeof(uint32_t), 1, f);
-
-        if (instrIdx < 1 || instrIdx > 128 || blobLen == 0)
-        {
-            if (blobLen > 0)
-                skip_bytes(f, blobLen);
-            continue;
-        }
-
-        if (blobLen > chunkLen || blobLen > (16u * 1024u * 1024u))
-        {
-            printf("[DXM-LOAD] WARNING: Invalid OsTIrus blob length %u for instr %u\n", blobLen, instrIdx);
-            return;
-        }
-
-        uint8_t *blob = (uint8_t *)malloc(blobLen);
-        if (blob == NULL)
-        {
-            skip_bytes(f, blobLen);
-            continue;
-        }
-
-        if (fread(blob, 1, blobLen, f) != blobLen)
-        {
-            free(blob);
-            return;
-        }
-
-        instr_t *ins = instrTmp[instrIdx];
-        if (!ins)
-        {
-            if (!allocateTmpInstr(instrIdx))
-            {
-                free(blob);
-                continue;
-            }
-            ins = instrTmp[instrIdx];
-        }
-        if (!ins)
-        {
-            free(blob);
-            continue;
-        }
-
-        if (store_pending_blob(&g_pendingOsTirusStates[instrIdx], blob, blobLen))
-        {
-            ins->useOsTirus = true;
-            normalizeSynthFlags(ins);
-            ins->isDXMInstrument = true;
-            printf("[DXM-LOAD] Staged OsTIrus state for instr %d\n", instrIdx);
-        }
-        else
-        {
-            printf("[DXM-LOAD] WARNING: Failed to stage OsTIrus state for instr %d\n", instrIdx);
-        }
-
-        free(blob);
-    }
+static bool restoreAllOsTirusStatesDXM(FILE *f, uint32_t chunkLen)
+{
+    return restorePendingSynthStatesDXM(f, chunkLen, g_pendingOsTirusStates, true);
 }
 
 // Helper: Restore DXM instrument metadata to distinguish from XM instruments
-static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
+static bool restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
 {
-    const long chunkStart = ftell(f);
+    size_t remaining = chunkLen;
     uint8_t numDXMInstruments = 0;
-    fread(&numDXMInstruments, sizeof(uint8_t), 1, f);
-    
-    printf("[DXM-LOAD] Found %d DXM instruments\n", numDXMInstruments);
+    bool seen[MAX_INST + 1] = { false };
+    if (!read_chunk_data(f, &numDXMInstruments, sizeof(numDXMInstruments), &remaining) ||
+        numDXMInstruments > MAX_INST || (size_t)numDXMInstruments * 2u > remaining)
+        return false;
     
     // Read DXM instrument indices and flags
     for (uint8_t i = 0; i < numDXMInstruments; i++) {
         uint8_t instrIdx = 0, flags = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-        fread(&flags, sizeof(uint8_t), 1, f);
-        
-        if (instrIdx < 1 || instrIdx > 128) continue;
+        if (!read_chunk_data(f, &instrIdx, sizeof(instrIdx), &remaining) ||
+            !read_chunk_data(f, &flags, sizeof(flags), &remaining) ||
+            instrIdx < 1 || instrIdx > MAX_INST || seen[instrIdx] || (flags & ~31u) != 0)
+            return false;
+        seen[instrIdx] = true;
+
+        uint16_t osTirusPreset = 0xFFFF;
+        uint8_t osTirusSlot = 0xFF;
+        if ((flags & 16) != 0 &&
+            (!read_chunk_data(f, &osTirusPreset, sizeof(osTirusPreset), &remaining) ||
+             !read_chunk_data(f, &osTirusSlot, sizeof(osTirusSlot), &remaining)))
+            return false;
+
         instr_t *ins = instrTmp[instrIdx];
-        if (!ins) {
-            if (!allocateTmpInstr(instrIdx))
-                continue;
+        if (ins == NULL && allocateTmpInstr(instrIdx)) {
             ins = instrTmp[instrIdx];
         }
-        if (!ins) continue;
-        
-        printf("[DXM-LOAD] DXM instr %d: flags=0x%02X (TF4=%d, stereo=%d, Dexed=%d, V2=%d, OsTIrus=%d)\n",
-               instrIdx, flags, (flags & 1) ? 1 : 0, (flags & 2) ? 1 : 0, (flags & 4) ? 1 : 0, (flags & 8) ? 1 : 0, (flags & 16) ? 1 : 0);
+        if (ins == NULL)
+            return false;
         
         // Mark this as a DXM instrument (not a regular XM instrument)
         // This will be used to determine how to handle stereo samples
         ins->isDXMInstrument = true;
         
         // Set TF4 flag if indicated
-        if (flags & 1) {
-            ins->useTF4 = true;
-            printf("[DXM-LOAD] Set TF4 flag for instrument %d from metadata\n", instrIdx);
-        }
-        if (flags & 4) {
-            ins->useDexed = true;
-            printf("[DXM-LOAD] Set Dexed flag for instrument %d from metadata\n", instrIdx);
-        }
-        if (flags & 8) {
-            ins->useV2 = true;
-            printf("[DXM-LOAD] Set V2 flag for instrument %d from metadata\n", instrIdx);
-        }
+        if (flags & 1) ins->useTF4 = true;
+        if (flags & 4) ins->useDexed = true;
+        if (flags & 8) ins->useV2 = true;
         if (flags & 16) {
             ins->useOsTirus = true;
-            printf("[DXM-LOAD] Set OsTIrus flag for instrument %d from metadata\n", instrIdx);
-            long bytesRead = ftell(f) - chunkStart;
-            if (bytesRead + (long)(sizeof(uint16_t) + sizeof(uint8_t)) <= (long)chunkLen) {
-                fread(&ins->osTirusPreset, sizeof(uint16_t), 1, f);
-                fread(&ins->osTirusSlot, sizeof(uint8_t), 1, f);
-                printf("[DXM-LOAD] Restored OsTIrus preset=%u slot=%u for instrument %d\n",
-                       (unsigned)ins->osTirusPreset, (unsigned)ins->osTirusSlot, instrIdx);
-            } else {
-                ins->osTirusPreset = 0xFFFF;
-                ins->osTirusSlot = 0xFF;
-            }
+            ins->osTirusPreset = osTirusPreset;
+            ins->osTirusSlot = osTirusSlot;
         } else {
             ins->osTirusPreset = 0xFFFF;
             ins->osTirusSlot = 0xFF;
@@ -661,93 +463,76 @@ static void restoreDXMInstrumentMetadata(FILE *f, uint32_t chunkLen)
         // Note: Stereo sample flags are already set by the WAV chunk loader
         // This metadata just confirms which instruments are DXM vs XM
     }
+
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
 // Helper: Restore Macro Map chunk
-static void restoreMacroMapDXM(FILE *f, uint32_t chunkLen)
+static bool restoreMacroMapDXM(FILE *f, uint32_t chunkLen)
 {
-    uint32_t expectedLen = MAX_INST * (16 * sizeof(uint8_t) + 16 * sizeof(uint16_t) + 16 * sizeof(uint8_t));
+    const size_t recordLen = 16 * sizeof(uint8_t) + 16 * sizeof(uint16_t) + 16 * sizeof(uint8_t);
+    const size_t expectedLen = MAX_INST * recordLen;
+    size_t remaining = chunkLen;
     if (chunkLen < expectedLen) {
-        // not enough data for macro maps, skip entire chunk
-        skip_bytes(f, chunkLen);
-        return;
+        return false;
     }
     for (int instrIdx = 1; instrIdx <= MAX_INST; instrIdx++) {
+        uint8_t targets[16], scales[16];
+        uint16_t paramIDs[16];
+        if (!read_chunk_data(f, targets, sizeof(targets), &remaining) ||
+            !read_chunk_data(f, paramIDs, sizeof(paramIDs), &remaining) ||
+            !read_chunk_data(f, scales, sizeof(scales), &remaining))
+            return false;
+
         instr_t *ins = instrTmp[instrIdx];
-        if (!ins) {
-            if (allocateTmpInstr(instrIdx))
+        bool hasMapping = false;
+        for (int i = 0; i < 16; ++i)
+            hasMapping |= targets[i] != 0 || paramIDs[i] != 0 || scales[i] != 0;
+        if (ins == NULL && hasMapping && allocateTmpInstr(instrIdx))
                 ins = instrTmp[instrIdx];
-        }
-        // Read target types
-        for (int i = 0; i < 16; i++) {
-            uint8_t t;
-            fread(&t, sizeof(uint8_t), 1, f);
-            if (ins) ins->macroTargetType[i] = t;
-        }
-        // Read parameter IDs
-        for (int i = 0; i < 16; i++) {
-            uint16_t pid;
-            fread(&pid, sizeof(uint16_t), 1, f);
-            if (ins) ins->macroParamID[i] = pid;
-        }
-        // Read scales
-        for (int i = 0; i < 16; i++) {
-            uint8_t s;
-            fread(&s, sizeof(uint8_t), 1, f);
-            if (ins) ins->macroScale[i] = s;
-        }
-        if (ins)
+        if (ins != NULL) {
+            memcpy(ins->macroTargetType, targets, sizeof(targets));
+            memcpy(ins->macroParamID, paramIDs, sizeof(paramIDs));
+            memcpy(ins->macroScale, scales, sizeof(scales));
             ft2_macro_map_sanitize_instrument(ins);
+        } else if (hasMapping) {
+            return false;
+        }
     }
-    // Skip any extra bytes beyond expected
-    if (chunkLen > expectedLen) skip_bytes(f, chunkLen - expectedLen);
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
-// Helper: Restore Macro Pattern chunk (per-track macro mode + per-pattern macro data)
-static void restoreMacroPatternDXM(FILE *f, uint32_t chunkLen)
+// Restore macro cells without ever reading beyond the declared chunk.
+static bool restoreMacroPatternDXM(FILE *f, uint32_t chunkLen)
 {
-    if (chunkLen < sizeof(uint16_t) * 3)
-    {
-        skip_bytes(f, chunkLen);
-        return;
-    }
+    size_t remaining = chunkLen;
+    uint16_t pattCount, chCount, macroModeMask;
+    if (!read_chunk_data(f, &pattCount, sizeof(pattCount), &remaining) ||
+        !read_chunk_data(f, &chCount, sizeof(chCount), &remaining) ||
+        !read_chunk_data(f, &macroModeMask, sizeof(macroModeMask), &remaining))
+        return false;
 
-    uint16_t pattCount = 0;
-    uint16_t chCount = 0;
-    uint16_t macroModeMask = 0;
-    fread(&pattCount, sizeof(uint16_t), 1, f);
-    fread(&chCount, sizeof(uint16_t), 1, f);
-    fread(&macroModeMask, sizeof(uint16_t), 1, f);
-
-    if (chCount != MAX_STEREO_PAIRS)
-    {
-        // Unsupported channel count, skip remainder
-        skip_bytes(f, chunkLen - sizeof(uint16_t) * 3);
-        return;
-    }
+    if (chCount != MAX_STEREO_PAIRS || pattCount > MAX_PATTERNS)
+        return false;
 
     for (int ch = 0; ch < MAX_STEREO_PAIRS; ch++)
         editor.macroMode[ch] = (macroModeMask >> ch) & 1;
 
-    if (pattCount > MAX_PATTERNS)
-        pattCount = MAX_PATTERNS;
-
     for (uint16_t p = 0; p < pattCount; p++)
     {
-        uint16_t rows = 0;
-        fread(&rows, sizeof(uint16_t), 1, f);
-        if (rows > MAX_PATT_LEN)
-            rows = MAX_PATT_LEN;
+        uint16_t rows;
+        if (!read_chunk_data(f, &rows, sizeof(rows), &remaining) || rows > MAX_PATT_LEN)
+            return false;
 
-        if (macroPatternTmp[p] == NULL)
+        const size_t payload = (size_t)rows * MAX_STEREO_PAIRS * 3;
+        if (payload > remaining)
+            return false;
+
+        if (rows > 0 && macroPatternTmp[p] == NULL)
         {
             macroPatternTmp[p] = (macroNote_t *)malloc(MAX_PATT_LEN * MAX_STEREO_PAIRS * sizeof (macroNote_t));
             if (macroPatternTmp[p] == NULL)
-            {
-                // skip remaining data if allocation failed
-                skip_bytes(f, (chunkLen - sizeof(uint16_t) * 3) - sizeof(uint16_t));
-                return;
-            }
+                return false;
             memset(macroPatternTmp[p], 0xFF, MAX_PATT_LEN * MAX_STEREO_PAIRS * sizeof (macroNote_t));
         }
 
@@ -756,68 +541,54 @@ static void restoreMacroPatternDXM(FILE *f, uint32_t chunkLen)
             for (uint16_t ch = 0; ch < MAX_STEREO_PAIRS; ch++)
             {
                 macroNote_t *mn = &macroPatternTmp[p][(r * MAX_STEREO_PAIRS) + ch];
-                fread(&mn->slot, 1, 1, f);
-                fread(&mn->mode, 1, 1, f);
-                fread(&mn->value, 1, 1, f);
+                if (!read_chunk_data(f, &mn->slot, 1, &remaining) ||
+                    !read_chunk_data(f, &mn->mode, 1, &remaining) ||
+                    !read_chunk_data(f, &mn->value, 1, &remaining))
+                    return false;
             }
         }
     }
+
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
-static void restoreOsTirusArpStateDXM(FILE *f, uint32_t chunkLen)
+static bool restoreOsTirusArpStateDXM(FILE *f, uint32_t chunkLen)
 {
     const size_t perInstrumentBytes = sizeof(uint8_t) + (16 * sizeof(uint8_t)) + (16 * sizeof(uint8_t)) + (16 * sizeof(uint8_t));
-    if (chunkLen < sizeof(uint8_t))
-    {
-        skip_bytes(f, chunkLen);
-        return;
-    }
-
+    size_t remaining = chunkLen;
     uint8_t numArp = 0;
-    fread(&numArp, sizeof(uint8_t), 1, f);
+    bool seen[MAX_INST + 1] = { false };
+    if (!read_chunk_data(f, &numArp, sizeof(numArp), &remaining) ||
+        numArp > MAX_INST || (size_t)numArp * perInstrumentBytes > remaining)
+        return false;
 
-    const long chunkStart = ftell(f);
     for (uint8_t i = 0; i < numArp; ++i)
     {
-        if ((long)(ftell(f) - chunkStart) + (long)perInstrumentBytes > (long)(chunkLen - sizeof(uint8_t)))
-            break;
-
         uint8_t instrIdx = 0;
-        fread(&instrIdx, sizeof(uint8_t), 1, f);
-        if (instrIdx < 1 || instrIdx > 128)
-        {
-            skip_bytes(f, (uint32_t)(perInstrumentBytes - sizeof(uint8_t)));
-            continue;
-        }
+        uint8_t gate[16], velocity[16], length[16];
+        if (!read_chunk_data(f, &instrIdx, sizeof(instrIdx), &remaining) ||
+            !read_chunk_data(f, gate, sizeof(gate), &remaining) ||
+            !read_chunk_data(f, velocity, sizeof(velocity), &remaining) ||
+            !read_chunk_data(f, length, sizeof(length), &remaining) ||
+            instrIdx < 1 || instrIdx > MAX_INST || seen[instrIdx])
+            return false;
+        seen[instrIdx] = true;
 
         instr_t *ins = instrTmp[instrIdx];
-        if (!ins)
-        {
-            if (!allocateTmpInstr(instrIdx))
-            {
-                skip_bytes(f, (uint32_t)(perInstrumentBytes - sizeof(uint8_t)));
-                continue;
-            }
+        if (ins == NULL && allocateTmpInstr(instrIdx))
             ins = instrTmp[instrIdx];
-        }
+        if (ins == NULL)
+            return false;
 
-        if (!ins)
-        {
-            skip_bytes(f, (uint32_t)(perInstrumentBytes - sizeof(uint8_t)));
-            continue;
-        }
-
-        fread(ins->osTirusArpStepGate, sizeof(uint8_t), 16, f);
-        fread(ins->osTirusArpStepVelocity, sizeof(uint8_t), 16, f);
-        fread(ins->osTirusArpStepLength, sizeof(uint8_t), 16, f);
+        memcpy(ins->osTirusArpStepGate, gate, sizeof(gate));
+        memcpy(ins->osTirusArpStepVelocity, velocity, sizeof(velocity));
+        memcpy(ins->osTirusArpStepLength, length, sizeof(length));
         ins->useOsTirus = true;
         ins->isDXMInstrument = true;
+        normalizeSynthFlags(ins);
     }
 
-    const long consumed = ftell(f) - chunkStart;
-    const long expected = (long)chunkLen - (long)sizeof(uint8_t);
-    if (consumed < expected)
-        skip_bytes(f, (uint32_t)(expected - consumed));
+    return remaining == 0 || skip_bytes(f, remaining);
 }
 
 void clearPendingDXMSynthLoadState(void)
@@ -891,6 +662,9 @@ bool loadDXM(FILE *f, uint32_t filesize)
 {
     clearPendingDXMSynthLoadState();
 
+    if (f == NULL || filesize < 8)
+        return false;
+
     // 1. Read and verify DXM magic header
     char dxmMagic[4];
     if (fread(dxmMagic, 1, 4, f) != 4 || dxmMagic[0]!='D' || dxmMagic[1]!='X' || dxmMagic[2]!='M' || dxmMagic[3]!='0')
@@ -898,7 +672,7 @@ bool loadDXM(FILE *f, uint32_t filesize)
 
     // 2. Read XM data size (uint32_t)
     uint32_t xmSize = 0;
-    if (fread(&xmSize, 1, 4, f) != 4)
+    if (fread(&xmSize, 1, 4, f) != 4 || xmSize == 0 || xmSize > filesize - 8u)
         return false;
 
     // 3. Read XM data into a buffer
@@ -927,66 +701,67 @@ FILE *xmFile = NULL;
     free(xmBuf);
     if (!xmOk) return false;
     
-    // Ensure all instruments are properly allocated before restoring sample data
-    printf("[DXM-LOAD] XM loading completed, checking instrument allocation...\n");
-    for (int i = 1; i <= 128; i++) {
-        if (instrTmp[i] != NULL) {
-            printf("[DXM-LOAD] Instrument %d allocated: %p\n", i, (void*)instrTmp[i]);
-        }
-    }
-
     // 4. Read chunks (scan until EOF)
     char chunkId[8];
-    while (ftell(f) < (long)filesize) {
-        if (fread(chunkId, 1, 8, f) != 8) break;
+    bool chunksOK = true;
+    for (;;) {
+        const long chunkHeaderStart = ftell(f);
+        if (chunkHeaderStart < 0) { chunksOK = false; break; }
+        if (chunkHeaderStart == (long)filesize) break;
+        if (chunkHeaderStart > (long)filesize || (long)filesize - chunkHeaderStart < 12) {
+            chunksOK = false;
+            break;
+        }
+        if (fread(chunkId, 1, 8, f) != 8) { chunksOK = false; break; }
         uint32_t chunkLen = 0;
-        if (fread(&chunkLen, 1, 4, f) != 4) break;
+        if (fread(&chunkLen, 1, 4, f) != 4) { chunksOK = false; break; }
         if (chunkLen == 0) continue;
         const long chunkDataStart = ftell(f);
         const long chunkDataEnd = chunkDataStart + (long)chunkLen;
-        if (chunkDataEnd < chunkDataStart || chunkDataEnd > (long)filesize)
+        if (chunkDataEnd < chunkDataStart || chunkDataEnd > (long)filesize) {
+            chunksOK = false;
             break;
-
-        printf("[DXM-LOAD] Found chunk: %.6s, length=%d\n", chunkId, chunkLen);
-        if (memcmp(chunkId, "DXMDSP", 6) == 0) {
-            restoreDSPStateDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMWAV", 6) == 0) {
-            // Process WAV chunk - this contains the actual stereo sample data
-            restoreAllSamplesDXMWAV(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMTF4", 6) == 0) {
-            printf("[DXM-LOAD] Found TF4 chunk, length=%d\n", chunkLen);
-            restoreAllTF4StatesDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMDEX", 6) == 0) {
-            printf("[DXM-LOAD] Found Dexed chunk, length=%d\n", chunkLen);
-            restoreAllDexedStatesDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMV2S", 6) == 0) {
-            printf("[DXM-LOAD] Found V2 chunk, length=%d\n", chunkLen);
-            restoreAllV2StatesDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMOTS", 6) == 0) {
-            printf("[DXM-LOAD] Found OsTIrus state chunk, length=%u\n", chunkLen);
-            restoreAllOsTirusStatesDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMARP", 6) == 0) {
-            printf("[DXM-LOAD] Found OsTIrus arp chunk, length=%u\n", chunkLen);
-            restoreOsTirusArpStateDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMMAP", 6) == 0) {
-            printf("[DXM-LOAD] Found Macro Map chunk, length=%u\n", chunkLen);
-            restoreMacroMapDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMMAC", 6) == 0) {
-            printf("[DXM-LOAD] Found Macro Pattern chunk, length=%u\n", chunkLen);
-            restoreMacroPatternDXM(f, chunkLen);
-        } else if (memcmp(chunkId, "DXMMET", 6) == 0) {
-            restoreDXMInstrumentMetadata(f, chunkLen);
-        } else {
-            // Unknown chunk, skip
-            fseek(f, chunkLen, SEEK_CUR);
         }
 
-        if (ftell(f) != chunkDataEnd)
-            fseek(f, chunkDataEnd, SEEK_SET);
+        if (memcmp(chunkId, "DXMDSP", 6) == 0) {
+            chunksOK = restoreDSPStateDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMWAV", 6) == 0) {
+            chunksOK = restoreAllSamplesDXMWAV(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMTF4", 6) == 0) {
+            chunksOK = restoreAllTF4StatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMDEX", 6) == 0) {
+            chunksOK = restoreAllDexedStatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMV2S", 6) == 0) {
+            chunksOK = restoreAllV2StatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMOTS", 6) == 0) {
+            chunksOK = restoreAllOsTirusStatesDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMARP", 6) == 0) {
+            chunksOK = restoreOsTirusArpStateDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMMAP", 6) == 0) {
+            chunksOK = restoreMacroMapDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMMAC", 6) == 0) {
+            chunksOK = restoreMacroPatternDXM(f, chunkLen);
+        } else if (memcmp(chunkId, "DXMMET", 6) == 0) {
+            chunksOK = restoreDXMInstrumentMetadata(f, chunkLen);
+        } else {
+            // Unknown chunk, skip
+            chunksOK = skip_bytes(f, chunkLen);
+        }
+
+        if (!chunksOK) break;
+        if (ftell(f) != chunkDataEnd && fseek(f, chunkDataEnd, SEEK_SET) != 0) {
+            chunksOK = false;
+            break;
+        }
     }
 
-        // Cache persistent mixer/DSP state after loading DXM
-        cacheMixerStateFromData();
+    if (!chunksOK || ferror(f)) {
+        clearPendingDXMSynthLoadState();
+        return false;
+    }
+
+    // Cache persistent mixer/DSP state after loading DXM
+    cacheMixerStateFromData();
 
         // Sync mixer GUI scrollbars if screen visible
     if (ui.mixerScreenShown) {
@@ -1005,6 +780,9 @@ FILE *xmFile = NULL;
         setScrollBarPos(SB_MIX_MASTER_GAIN, masterPos, false);
     }
 
-    // If we got here, the structure is valid
     return true;
 }
+
+#ifdef FT2_STABILITY_TESTS
+#include "../../tests/dxm_tests.inc"
+#endif

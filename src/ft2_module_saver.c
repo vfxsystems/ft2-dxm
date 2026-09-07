@@ -17,6 +17,9 @@
 #include "ft2_tables.h"
 #include "ft2_structs.h"
 #include <stdint.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "ft2_mixer.h"  // for mixerCh and MAX_MIXER_CHANNELS
 #include "ft2_dsp.h"    // for dspEffectInstance_t, DSP_MAX_SLOTS, dspGetParamInfo, masterEffects
 #include "ft2_diskop.h" // for module save mode constants
@@ -25,6 +28,12 @@
 #include "ft2_v2.h"
 #include "ft2_ostirus.h"
 #include "ft2_macro_map.h"
+
+#ifdef FT2_DXM_SAVE_TRACE
+#define DXM_SAVE_TRACE(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define DXM_SAVE_TRACE(...) ((void)0)
+#endif
 // Tunefish4 synth helper
 extern void* createInstrumentInstance(int instrID);
 
@@ -41,6 +50,78 @@ static const char modIDs[32][5] =
 };
 
 static uint16_t packPatt(uint8_t *writePtr, uint8_t *pattPtr, uint16_t numRows);
+
+static UNICHAR *makeDxmTemporaryPath(const UNICHAR *destination)
+{
+    if (destination == NULL) return NULL;
+    const size_t length = UNICHAR_STRLEN(destination);
+    UNICHAR *path = (UNICHAR *)malloc((length + 5u) * sizeof(UNICHAR));
+    if (path == NULL) return NULL;
+    UNICHAR_STRCPY(path, destination);
+#ifdef _WIN32
+    UNICHAR_STRCAT(path, L".tmp");
+#else
+    UNICHAR_STRCAT(path, ".tmp");
+#endif
+    return path;
+}
+
+static bool commitDxmTemporaryFile(const UNICHAR *temporaryPath, const UNICHAR *destination)
+{
+#ifdef _WIN32
+    return MoveFileExW(temporaryPath, destination, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return UNICHAR_RENAME(temporaryPath, destination) == 0;
+#endif
+}
+
+static bool abortDxmSave(FILE *f, UNICHAR *temporaryPath, const char *message)
+{
+    if (f != NULL) fclose(f);
+    if (temporaryPath != NULL) {
+        UNICHAR_REMOVE(temporaryPath);
+        free(temporaryPath);
+    }
+    if (message != NULL)
+        okBoxThreadSafe(0, "System message", message, NULL);
+    return false;
+}
+
+static bool writeDxmU32At(FILE *f, long fieldPosition, long returnPosition, uint32_t value)
+{
+    if (f == NULL || fieldPosition < 0 || returnPosition < 0) return false;
+    if (fseek(f, fieldPosition, SEEK_SET) != 0) return false;
+    if (fwrite(&value, sizeof(value), 1, f) != 1) return false;
+    return fseek(f, returnPosition, SEEK_SET) == 0;
+}
+
+static bool finishDxmChunk(FILE *f, long lengthPosition, long dataStart,
+                           long dataEnd, uint32_t *lengthOut)
+{
+    if (dataStart < 0 || dataEnd < dataStart) return false;
+    const uint64_t length = (uint64_t)(dataEnd - dataStart);
+    if (length > UINT32_MAX) return false;
+
+    const uint32_t length32 = (uint32_t)length;
+    if (!writeDxmU32At(f, lengthPosition, dataEnd, length32)) return false;
+    if (lengthOut != NULL) *lengthOut = length32;
+    return true;
+}
+
+static void setDxmSamplesFixed(bool fixed)
+{
+    for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
+        instr_t *ins = instr[instrIdx];
+        if (!ins) continue;
+        for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
+            sample_t *s = &ins->smp[smpIdx];
+            if (s->dataPtrL != NULL) {
+                if (fixed) fixSample(s);
+                else unfixSample(s);
+            }
+        }
+    }
+}
 // Helper: Write DSP state (mixer and master chains) to FILE*, return bytes written
 static size_t writeDSPStateChunk(FILE *f)
 {
@@ -90,53 +171,53 @@ bool saveDXM(UNICHAR *filenameU);
 
 static int32_t SDLCALL saveMusicThread(void *ptr)
 {
-	printf("[DXM-SAVE-THREAD] Starting save thread...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Starting save thread...\n");
 	assert(editor.tmpFilenameU != NULL);
 	if (editor.tmpFilenameU == NULL)
 		return false;
-	printf("[DXM-SAVE-THREAD] Pausing audio...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Pausing audio...\n");
 	pauseAudio();
 	// Always save as DXM format (DXM is the primary format with stereo support)
-	printf("[DXM-SAVE-THREAD] Calling saveDXM...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Calling saveDXM...\n");
 	bool success = saveDXM(editor.tmpFilenameU);
 	if (!success)
 	{
-		printf("[DXM-SAVE-THREAD] Save failed!\n");
+		DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Save failed!\n");
 		okBoxThreadSafe(0, "System message", "Error saving module!", NULL);
 	}
 	else
 	{
-		printf("[DXM-SAVE-THREAD] Save completed successfully!\n");
+		DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Save completed successfully!\n");
 	}
-	printf("[DXM-SAVE-THREAD] Resuming audio...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Resuming audio...\n");
 	resumeAudio();
-	printf("[DXM-SAVE-THREAD] Audio resumed successfully\n");
-	printf("[DXM-SAVE-THREAD] Thread exiting...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Audio resumed successfully\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Thread exiting...\n");
 	// Turn off mouse animation when thread exits
 	mouseAnimOff();
-	printf("[DXM-SAVE-THREAD] Mouse animation turned off\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-THREAD] Mouse animation turned off\n");
 	return success;
 	(void)ptr;
 }
 
 void saveMusic(UNICHAR *filenameU)
 {
-	printf("[DXM-SAVE-MAIN] Starting save process...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Starting save process...\n");
 	UNICHAR_STRCPY(editor.tmpFilenameU, filenameU);
-	printf("[DXM-SAVE-MAIN] Turning on mouse animation...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Turning on mouse animation...\n");
 	mouseAnimOn();
-	printf("[DXM-SAVE-MAIN] Creating save thread...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Creating save thread...\n");
 	thread = SDL_CreateThread(saveMusicThread, NULL, NULL);
 	if (thread == NULL)
 	{
-		printf("[DXM-SAVE-MAIN] Failed to create thread!\n");
+		DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Failed to create thread!\n");
 		okBoxThreadSafe(0, "System message", "Couldn't create thread!", NULL);
 		return;
 	}
-	printf("[DXM-SAVE-MAIN] Detaching thread...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Detaching thread...\n");
 	SDL_DetachThread(thread);
-	printf("[DXM-SAVE-MAIN] Thread detached successfully\n");
-	printf("[DXM-SAVE-MAIN] Save process initiated...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Thread detached successfully\n");
+	DXM_SAVE_TRACE("[DXM-SAVE-MAIN] Save process initiated...\n");
 }
 
 static uint16_t packPatt(uint8_t *writePtr, uint8_t *pattPtr, uint16_t numRows)
@@ -196,118 +277,89 @@ static uint16_t packPatt(uint8_t *writePtr, uint8_t *pattPtr, uint16_t numRows)
 
 	return totalPackLen;
 }
-// Helper: Write all module sample data (including stereo) to FILE*, return bytes written
-static size_t writeAllSamplesDXMWAV(FILE *f)
+// Write module sample data without allocating from the save thread.
+static bool writeAllSamplesDXMWAV(FILE *f, size_t *bytesWrittenOut)
 {
-    printf("[DXM-SAVE] Starting WAV chunk write...\n");
     size_t bytesWritten = 0;
     uint16_t numSamples = 0;
-    // First, count all valid samples
-    printf("[DXM-SAVE] Counting samples...\n");
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
         instr_t *ins = instr[instrIdx];
         if (!ins) continue;
         for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
             sample_t *s = &ins->smp[smpIdx];
-            if (s->length > 0 && (s->dataPtrL || s->dataPtr))
+            if (s->length > 0 && s->dataPtrL != NULL)
                 numSamples++;
         }
     }
-    printf("[DXM-SAVE] Found %d samples to write\n", numSamples);
-    fwrite(&numSamples, sizeof(uint16_t), 1, f); bytesWritten += sizeof(uint16_t);
-    // Now write each sample
-    printf("[DXM-SAVE] Writing samples...\n");
+    if (fwrite(&numSamples, sizeof(numSamples), 1, f) != 1)
+        return false;
+    bytesWritten += sizeof(numSamples);
+
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
         instr_t *ins = instr[instrIdx];
         if (!ins) continue;
         for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
             sample_t *s = &ins->smp[smpIdx];
-            if (s->length <= 0 || !(s->dataPtrL || s->dataPtr))
+            if (s->length <= 0 || s->dataPtrL == NULL)
                 continue;
+
+            if (s->length > MAX_SAMPLE_LEN || ((s->flags & SAMPLE_STEREO) && s->dataPtrR == NULL))
+                return false;
+
             uint8_t flags = 0;
             bool sample16Bit = !!(s->flags & SAMPLE_16BIT);
-            bool stereo = !!(s->flags & SAMPLE_STEREO) && s->dataPtrR != NULL;
+            bool stereo = !!(s->flags & SAMPLE_STEREO);
             if (sample16Bit) flags |= 1;
             if (stereo) flags |= 2;
-            fwrite(&instrIdx, sizeof(uint8_t), 1, f); bytesWritten += 1;
-            fwrite(&smpIdx, sizeof(uint8_t), 1, f); bytesWritten += 1;
-            fwrite(&flags, sizeof(uint8_t), 1, f); bytesWritten += 1;
+            const uint8_t instrument = (uint8_t)instrIdx;
+            const uint8_t sample = (uint8_t)smpIdx;
             uint32_t frames = s->length;
-            fwrite(&frames, sizeof(uint32_t), 1, f); bytesWritten += sizeof(uint32_t);
-            // Debug output for each sample
-            printf("[DXM-SAVE] instr=%d smp=%d flags=0x%02X frames=%u 16bit=%d stereo=%d\n", instrIdx, smpIdx, flags, frames, sample16Bit, stereo);
-            if (sample16Bit && stereo && s->dataPtrL && s->dataPtrR) {
-                int16_t *l = (int16_t *)s->dataPtrL;
-                int16_t *r = (int16_t *)s->dataPtrR;
-                printf("[DXM-SAVE] First 4 L: %d %d %d %d\n", l[0], l[1], l[2], l[3]);
-                printf("[DXM-SAVE] First 4 R: %d %d %d %d\n", r[0], r[1], r[2], r[3]);
-            }
-            
-            // Debug: Check if sample data is properly allocated
-            if (stereo && s->dataPtrL && s->dataPtrR) {
-                printf("[DXM-SAVE] Sample allocated: L=%p, R=%p, length=%d\n", 
-                       (void*)s->dataPtrL, (void*)s->dataPtrR, s->length);
-            }
-            // For stereo samples, create temporary interleaved buffer - same as WAV loader
-            printf("[DXM-SAVE] Processing sample instr=%d smp=%d (stereo=%d)\n", instrIdx, smpIdx, stereo);
-            if (stereo && s->dataPtrL && s->dataPtrR && frames > 0) {
-                int32_t bytesPerSample = sample16Bit ? 2 : 1;
-                int32_t totalBytes = frames * bytesPerSample;
-                
-                // Create temporary interleaved buffer
-                printf("[DXM-SAVE] Allocating temp buffer for stereo sample (size=%d)...\n", totalBytes * 2);
-                void *tempBuffer = malloc(totalBytes * 2); // L+R interleaved
-                if (tempBuffer && totalBytes > 0) {
-                    // Interleave L and R channels - same as WAV loader
+            if (fwrite(&instrument, sizeof(instrument), 1, f) != 1 ||
+                fwrite(&sample, sizeof(sample), 1, f) != 1 ||
+                fwrite(&flags, sizeof(flags), 1, f) != 1 ||
+                fwrite(&frames, sizeof(frames), 1, f) != 1)
+                return false;
+            bytesWritten += 3 + sizeof(frames);
+
+            const size_t bytesPerSample = sample16Bit ? 2u : 1u;
+            if (!stereo) {
+                const size_t payloadSize = (size_t)frames * bytesPerSample;
+                if (fwrite(s->dataPtrL, 1, payloadSize, f) != payloadSize)
+                    return false;
+                bytesWritten += payloadSize;
+            } else {
+                const size_t framesPerBlock = sizeof(smpChunkBuf) / (2u * bytesPerSample);
+                uint32_t frame = 0;
+                while (frame < frames) {
+                    size_t blockFrames = frames - frame;
+                    if (blockFrames > framesPerBlock) blockFrames = framesPerBlock;
+
                     if (sample16Bit) {
-                        int16_t *temp16 = (int16_t *)tempBuffer;
-                        int16_t *srcL = (int16_t *)s->dataPtrL;
-                        int16_t *srcR = (int16_t *)s->dataPtrR;
-                        
-                        for (int32_t i = 0; i < frames; i++) {
-                            temp16[i*2] = srcL[i];     // L channel
-                            temp16[i*2+1] = srcR[i];   // R channel
+                        int16_t *dst = (int16_t *)smpChunkBuf;
+                        const int16_t *left = (const int16_t *)s->dataPtrL;
+                        const int16_t *right = (const int16_t *)s->dataPtrR;
+                        for (size_t i = 0; i < blockFrames; ++i) {
+                            dst[i * 2] = left[frame + i];
+                            dst[i * 2 + 1] = right[frame + i];
                         }
                     } else {
-                        int8_t *temp8 = (int8_t *)tempBuffer;
-                        int8_t *srcL = (int8_t *)s->dataPtrL;
-                        int8_t *srcR = (int8_t *)s->dataPtrR;
-                        
-                        for (int32_t i = 0; i < frames; i++) {
-                            temp8[i*2] = srcL[i];     // L channel
-                            temp8[i*2+1] = srcR[i];   // R channel
+                        for (size_t i = 0; i < blockFrames; ++i) {
+                            smpChunkBuf[i * 2] = s->dataPtrL[frame + i];
+                            smpChunkBuf[i * 2 + 1] = s->dataPtrR[frame + i];
                         }
                     }
-                    
-                    // Note: No sign conversion needed - data is already in correct format
-                    // The WAV loader doesn't do sign conversion, so we don't either
-                    
-                    fwrite(tempBuffer, 1, totalBytes * 2, f);
-                    bytesWritten += totalBytes * 2;
-                    
-                    printf("[DXM-SAVE] Freeing temp buffer...\n");
-                    free(tempBuffer);
+
+                    const size_t blockBytes = blockFrames * 2u * bytesPerSample;
+                    if (fwrite(smpChunkBuf, 1, blockBytes, f) != blockBytes)
+                        return false;
+                    bytesWritten += blockBytes;
+                    frame += (uint32_t)blockFrames;
                 }
-                printf("[DXM-SAVE] Stereo sample %d completed\n", smpIdx);
-            } else {
-                // Mono sample - write raw data
-                if (s->dataPtrL != NULL && s->length > 0) {
-                    // Note: No sign conversion needed - data is already in correct format
-                    // The WAV loader doesn't do sign conversion, so we don't either
-                if (sample16Bit) {
-                        fwrite(s->dataPtrL, sizeof(int16_t), frames, f);
-                        bytesWritten += frames * sizeof(int16_t);
-                } else {
-                        fwrite(s->dataPtrL, sizeof(int8_t), frames, f);
-                        bytesWritten += frames * sizeof(int8_t);
-                    }
-                }
-                printf("[DXM-SAVE] Mono sample %d completed\n", smpIdx);
             }
         }
     }
-    printf("[DXM-SAVE] WAV chunk write completed, %zu bytes written\n", bytesWritten);
-    return bytesWritten;
+    if (bytesWrittenOut != NULL) *bytesWrittenOut = bytesWritten;
+    return true;
 }
 // Helper: Write all Tunefish4 instrument states to FILE*, return bytes written
 static size_t writeAllTF4StatesDXM(FILE *f)
@@ -316,16 +368,15 @@ static size_t writeAllTF4StatesDXM(FILE *f)
     uint8_t numTF4 = 0;
     // Tunefish4 parameter count (adjust if needed)
     #define DXM_TF4_PARAM_COUNT 128
-    static float zeroParams[DXM_TF4_PARAM_COUNT] = {0};
     // First, count all TF4 instruments
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
         instr_t *ins = instr[instrIdx];
         if (ins && ins->useTF4) {
             numTF4++;
-            printf("[DXM-SAVE] Found TF4 instrument %d\n", instrIdx);
+            DXM_SAVE_TRACE("[DXM-SAVE] Found TF4 instrument %d\n", instrIdx);
         }
     }
-    printf("[DXM-SAVE] Total TF4 instruments to save: %d\n", numTF4);
+    DXM_SAVE_TRACE("[DXM-SAVE] Total TF4 instruments to save: %d\n", numTF4);
     fwrite(&numTF4, sizeof(uint8_t), 1, f); bytesWritten += sizeof(uint8_t);
     // Now write each TF4 instrument
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
@@ -341,12 +392,8 @@ static size_t writeAllTF4StatesDXM(FILE *f)
         fwrite(ins->smp[0].name, sizeof(char), nameLen, f); bytesWritten += nameLen;
         // Write TF4 params (float array)
         float *params = ins->tf4Params;
-        if (!params) {
-            printf("[DXM-SAVE] WARNING: No TF4 params for instr %d, using zeros\n", instrIdx);
-            params = zeroParams;
-        }
-        printf("[DXM-SAVE] TF4 instr=%d name='%.*s'\n", instrIdx, nameLen, ins->smp[0].name);
-        printf("[DXM-SAVE] TF4 params[0..3]: %.3f %.3f %.3f %.3f\n", params[0], params[1], params[2], params[3]);
+        DXM_SAVE_TRACE("[DXM-SAVE] TF4 instr=%d name='%.*s'\n", instrIdx, nameLen, ins->smp[0].name);
+        DXM_SAVE_TRACE("[DXM-SAVE] TF4 params[0..3]: %.3f %.3f %.3f %.3f\n", params[0], params[1], params[2], params[3]);
         fwrite(params, sizeof(float), DXM_TF4_PARAM_COUNT, f); bytesWritten += DXM_TF4_PARAM_COUNT * sizeof(float);
     }
     return bytesWritten;
@@ -549,7 +596,7 @@ static void writeAllDexedStatesDXM(FILE *f)
 }
 
 // Helper: Write all V2 instrument states to FILE*, return bytes written
-static size_t writeAllV2StatesDXM(FILE *f)
+static bool writeAllV2StatesDXM(FILE *f, size_t *bytesWrittenOut)
 {
     size_t bytesWritten = 0;
     uint8_t numV2 = 0;
@@ -561,7 +608,8 @@ static size_t writeAllV2StatesDXM(FILE *f)
         }
     }
 
-    fwrite(&numV2, sizeof(uint8_t), 1, f); bytesWritten += sizeof(uint8_t);
+    if (fwrite(&numV2, sizeof(numV2), 1, f) != 1) return false;
+    bytesWritten += sizeof(numV2);
 
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
         instr_t *ins = instr[instrIdx];
@@ -570,34 +618,27 @@ static size_t writeAllV2StatesDXM(FILE *f)
 
         size_t blobSize = ft2_v2_serialize_state(instrIdx, NULL, 0);
         uint8_t idx = (uint8_t)instrIdx;
-        uint32_t len = 0;
+        if (blobSize == 0 || blobSize > 16u * 1024u * 1024u || blobSize > UINT32_MAX)
+            return false;
         uint8_t *blob = (uint8_t *)malloc(blobSize);
-        if (blobSize > 0 && blob != NULL) {
-            if (ft2_v2_serialize_state(instrIdx, blob, blobSize) == blobSize) {
-                len = (uint32_t)blobSize;
-            } else {
-                printf("[DXM-SAVE] WARNING: Failed to write V2 state blob for instr %d\n", instrIdx);
-            }
-        } else if (blobSize > 0) {
-            printf("[DXM-SAVE] WARNING: Out of memory serializing V2 state for instr %d\n", instrIdx);
-        }
-
-        fwrite(&idx, sizeof(uint8_t), 1, f); bytesWritten += sizeof(uint8_t);
-        fwrite(&len, sizeof(uint32_t), 1, f); bytesWritten += sizeof(uint32_t);
-        if (len > 0 && blob != NULL) {
-            fwrite(blob, 1, len, f); bytesWritten += len;
-        }
-        if (blob != NULL)
+        if (blob == NULL) return false;
+        if (ft2_v2_serialize_state(instrIdx, blob, blobSize) != blobSize) {
             free(blob);
-
-        if (len == 0 && blobSize == 0)
-            printf("[DXM-SAVE] WARNING: Failed to serialize V2 state for instr %d\n", instrIdx);
+            return false;
+        }
+        const uint32_t len = (uint32_t)blobSize;
+        const bool wrote = fwrite(&idx, sizeof(idx), 1, f) == 1 &&
+            fwrite(&len, sizeof(len), 1, f) == 1 && fwrite(blob, 1, len, f) == len;
+        free(blob);
+        if (!wrote) return false;
+        bytesWritten += sizeof(idx) + sizeof(len) + len;
     }
 
-    return bytesWritten;
+    if (bytesWrittenOut != NULL) *bytesWrittenOut = bytesWritten;
+    return true;
 }
 
-static size_t writeAllOsTirusStatesDXM(FILE *f)
+static bool writeAllOsTirusStatesDXM(FILE *f, size_t *bytesWrittenOut)
 {
     size_t bytesWritten = 0;
     uint8_t numOsTirus = 0;
@@ -609,8 +650,8 @@ static size_t writeAllOsTirusStatesDXM(FILE *f)
             ++numOsTirus;
     }
 
-    fwrite(&numOsTirus, sizeof(uint8_t), 1, f);
-    bytesWritten += sizeof(uint8_t);
+    if (fwrite(&numOsTirus, sizeof(numOsTirus), 1, f) != 1) return false;
+    bytesWritten += sizeof(numOsTirus);
 
     for (int instrIdx = 1; instrIdx <= MAX_INST; ++instrIdx)
     {
@@ -620,76 +661,72 @@ static size_t writeAllOsTirusStatesDXM(FILE *f)
 
         const size_t blobSize = ft2_ostirus_serialize_state(instrIdx, NULL, 0);
         uint8_t idx = (uint8_t)instrIdx;
-        uint32_t len = 0;
-        uint8_t *blob = NULL;
-
-        if (blobSize > 0)
-        {
-            blob = (uint8_t *)malloc(blobSize);
-            if (blob != NULL && ft2_ostirus_serialize_state(instrIdx, blob, blobSize) == blobSize)
-                len = (uint32_t)blobSize;
-            else
-                printf("[DXM-SAVE] WARNING: Failed to serialize OsTIrus state for instr %d\n", instrIdx);
+        if (blobSize == 0 || blobSize > 16u * 1024u * 1024u || blobSize > UINT32_MAX)
+            return false;
+        uint8_t *blob = (uint8_t *)malloc(blobSize);
+        if (blob == NULL) return false;
+        if (ft2_ostirus_serialize_state(instrIdx, blob, blobSize) != blobSize) {
+            free(blob);
+            return false;
         }
-
-        fwrite(&idx, sizeof(uint8_t), 1, f);
-        bytesWritten += sizeof(uint8_t);
-        fwrite(&len, sizeof(uint32_t), 1, f);
-        bytesWritten += sizeof(uint32_t);
-
-        if (len > 0 && blob != NULL)
-        {
-            fwrite(blob, 1, len, f);
-            bytesWritten += len;
-        }
-
+        const uint32_t len = (uint32_t)blobSize;
+        const bool wrote = fwrite(&idx, sizeof(idx), 1, f) == 1 &&
+            fwrite(&len, sizeof(len), 1, f) == 1 && fwrite(blob, 1, len, f) == len;
         free(blob);
+        if (!wrote) return false;
+        bytesWritten += sizeof(idx) + sizeof(len) + len;
     }
 
-    return bytesWritten;
+    if (bytesWrittenOut != NULL) *bytesWrittenOut = bytesWritten;
+    return true;
 }
 
 // --- DXM (Extended XM) Saver ---
 bool saveDXM(UNICHAR *filenameU)
 {
-	printf("[DXM-SAVE] Starting DXM save...\n");
+	if (filenameU == NULL)
+		return false;
+
+	DXM_SAVE_TRACE("[DXM-SAVE] Starting DXM save...\n");
 	
 	// Note: isDXMFormat is only used during loading, not saving
 	// Stereo samples are handled directly in the save function
 	
-	printf("[DXM-SAVE] Refreshing TF4 params...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE] Refreshing TF4 params...\n");
 	refreshAllTF4ParamsFromSynth();
-	printf("[DXM-SAVE] Refreshing Dexed params...\n");
+	DXM_SAVE_TRACE("[DXM-SAVE] Refreshing Dexed params...\n");
 	refreshAllDexedParamsFromSynth();
         // Open file for writing
-    printf("[DXM-SAVE] Opening file for writing...\n");
-    FILE *f = UNICHAR_FOPEN(filenameU, "wb");
+    DXM_SAVE_TRACE("[DXM-SAVE] Opening file for writing...\n");
+    UNICHAR *temporaryPath = makeDxmTemporaryPath(filenameU);
+    if (temporaryPath == NULL) {
+        okBoxThreadSafe(0, "System message", "Out of memory preparing module save!", NULL);
+        return false;
+    }
+    FILE *f = UNICHAR_FOPEN(temporaryPath, "wb");
     if (f == NULL)
     {
+        free(temporaryPath);
         okBoxThreadSafe(0, "System message", "Error opening file for saving, is it in use?", NULL);
         return false;
     }
     // 1. Write DXM magic header
-    printf("[DXM-SAVE] Writing DXM magic header...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing DXM magic header...\n");
     const char dxmMagic[4] = {'D','X','M','0'};
     if (fwrite(dxmMagic, 1, 4, f) != 4)
     {
-        fclose(f);
-        okBoxThreadSafe(0, "System message", "Error writing DXM header!", NULL);
-        return false;
+        return abortDxmSave(f, temporaryPath, "Error writing DXM header!");
     }
     // 2. Reserve space for XM data size (4 bytes)
-    printf("[DXM-SAVE] Reserving XM size space...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Reserving XM size space...\n");
     uint32_t xmSize = 0;
     long xmSizePos = ftell(f);
     if (fwrite(&xmSize, 1, 4, f) != 4)
     {
-        fclose(f);
-        okBoxThreadSafe(0, "System message", "Error reserving XM size!", NULL);
-        return false;
+        return abortDxmSave(f, temporaryPath, "Error reserving XM size!");
     }
     // 3. Write XM data directly (without stereo samples - those go in WAV chunk)
-    printf("[DXM-SAVE] Writing XM header...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing XM header...\n");
     // Write XM header
     xmHdr_t h;
     memcpy(h.ID, "Extended Module: ", 17);
@@ -732,15 +769,13 @@ bool saveDXM(UNICHAR *filenameU)
     h.flags = audio.linearPeriodsFlag;
     memcpy(h.orders, song.orders, 256);
     
-    printf("[DXM-SAVE] Writing XM header data...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing XM header data...\n");
     if (fwrite(&h, sizeof(h), 1, f) != 1) {
-        fclose(f);
-        okBoxThreadSafe(0, "System message", "Error writing XM header!", NULL);
-        return false;
+        return abortDxmSave(f, temporaryPath, "Error writing XM header!");
     }
     
     // Write patterns
-    printf("[DXM-SAVE] Writing %d patterns...\n", h.numPatterns);
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing %d patterns...\n", h.numPatterns);
     xmPatHdr_t ph;
     for (i = 0; i < h.numPatterns; i++) {
         if (patternEmpty(i)) {
@@ -758,23 +793,19 @@ bool saveDXM(UNICHAR *filenameU)
         if (pattern[i] == NULL) {
             ph.dataSize = 0;
             if (fwrite(&ph, ph.headerSize, 1, f) != 1) {
-                fclose(f);
-                okBoxThreadSafe(0, "System message", "Error writing pattern!", NULL);
-                return false;
+                return abortDxmSave(f, temporaryPath, "Error writing pattern!");
             }
         } else {
             ph.dataSize = packPatt(packedPattData, (uint8_t *)pattern[i], patternNumRows[i]);
             if (fwrite(&ph, ph.headerSize, 1, f) != 1 ||
                 fwrite(packedPattData, ph.dataSize, 1, f) != 1) {
-        fclose(f);
-                okBoxThreadSafe(0, "System message", "Error writing pattern data!", NULL);
-        return false;
+                return abortDxmSave(f, temporaryPath, "Error writing pattern data!");
             }
         }
     }
     
     // Write instruments (without sample data - that goes in WAV chunk)
-    printf("[DXM-SAVE] Writing %d instruments...\n", h.numInstr);
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing %d instruments...\n", h.numInstr);
     xmInsHdr_t ih;
     for (i = 1; i <= h.numInstr; i++) {
         memset(&ih, 0, sizeof(ih));
@@ -857,48 +888,35 @@ bool saveDXM(UNICHAR *filenameU)
         }
         
         if (fwrite(&ih, ih.instrSize + (a * sizeof(xmSmpHdr_t)), 1, f) != 1) {
-        fclose(f);
-            okBoxThreadSafe(0, "System message", "Error writing instrument!", NULL);
-        return false;
+            return abortDxmSave(f, temporaryPath, "Error writing instrument!");
         }
     }
     
     // Get XM data size
-    xmSize = (uint32_t)ftell(f) - 8; // Subtract DXM header size
-    // 4. Go back and write the XM data size
-    long curPos = ftell(f);
-    fseek(f, xmSizePos, SEEK_SET);
-    fwrite(&xmSize, 1, 4, f);
-    fseek(f, curPos, SEEK_SET);
+    const long xmEnd = ftell(f);
+    if (xmEnd < 8 || (uint64_t)(xmEnd - 8) > UINT32_MAX ||
+        !writeDxmU32At(f, xmSizePos, xmEnd, (uint32_t)(xmEnd - 8))) {
+        return abortDxmSave(f, temporaryPath, "Error finalizing XM module data!");
+    }
     // 5. Before writing any chunks that contain raw sample data, temporarily unfix all
     //    samples so that we write the *original* data without the interpolation tap
     //    padding added by fixSample(). Otherwise a subsequently loaded module would
     //    have its samples fixed *again*, leading to duplicated edge taps and sample
     //    corruption.
-    printf("[DXM-SAVE] Unfixing all samples before WAV chunk write...\n");
-    for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
-        instr_t *ins = instr[instrIdx];
-        if (!ins) continue;
-        for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
-            sample_t *s = &ins->smp[smpIdx];
-            if (s->dataPtrL != NULL) {
-                unfixSample(s);
-            }
-        }
-    }
+    DXM_SAVE_TRACE("[DXM-SAVE] Unfixing all samples before WAV chunk write...\n");
+    setDxmSamplesFixed(false);
     // 5. Write DSP state chunk (real data)
     // Cache persistent mixer state before writing to DXM
     if (ui.mixerScreenShown)
         cacheMixerStateFromGUI();
     else
         cacheMixerStateFromData();
-    printf("[DXM-SAVE] Writing DSP state chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing DSP state chunk...\n");
     const char dspChunkId[8] = {'D','X','M','D','S','P',0,0};
-    long chunkStart = ftell(f);
     fwrite(dspChunkId, 1, 8, f);
     uint32_t dspChunkLen = 0;
     long lenPos = ftell(f);
-    fwrite(&dspChunkLen, 1, 4, f); // placeholder
+    fwrite(&dspChunkLen, 1, 4, f); // reserved length, backpatched below
     long dataStart = ftell(f);
     size_t dspBytes = writeDSPStateChunk(f);
     // write mixer strip fader and pan for backwards-compatible state saving
@@ -909,74 +927,63 @@ bool saveDXM(UNICHAR *filenameU)
     // write master gain
     fwrite(&mixerMasterGain, sizeof(float), 1, f);
     long dataEnd = ftell(f);
-    dspChunkLen = (uint32_t)(dataEnd - dataStart);
-    // Go back and write the real chunk length
-    fseek(f, lenPos, SEEK_SET);
-    fwrite(&dspChunkLen, 1, 4, f);
-    fseek(f, curPos = dataEnd, SEEK_SET);
+    if (!finishDxmChunk(f, lenPos, dataStart, dataEnd, &dspChunkLen)) {
+        setDxmSamplesFixed(true);
+        return abortDxmSave(f, temporaryPath, "Error finalizing DXM DSP state!");
+    }
     // 6. Write WAV data chunk (real sample data)
-    printf("[DXM-SAVE] Writing WAV data chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing WAV data chunk...\n");
     const char wavChunkId[8] = {'D','X','M','W','A','V',0,0};
     fwrite(wavChunkId, 1, 8, f);
     uint32_t wavChunkLen = 0;
     long wavLenPos = ftell(f);
-    fwrite(&wavChunkLen, 1, 4, f); // placeholder
+    fwrite(&wavChunkLen, 1, 4, f); // reserved length, backpatched below
     long wavDataStart = ftell(f);
-    size_t wavBytes = writeAllSamplesDXMWAV(f);
+    size_t wavBytes = 0;
+    const bool wavOK = writeAllSamplesDXMWAV(f, &wavBytes);
     long wavDataEnd = ftell(f);
-    wavChunkLen = (uint32_t)(wavDataEnd - wavDataStart);
-    // Go back and write the real chunk length
-    fseek(f, wavLenPos, SEEK_SET);
-    fwrite(&wavChunkLen, 1, 4, f);
-    fseek(f, wavDataEnd, SEEK_SET);
+    const bool wavChunkOK = finishDxmChunk(f, wavLenPos, wavDataStart, wavDataEnd, &wavChunkLen);
     // 7. After we are done writing the WAV chunk, re-apply fixSample() on all
     //    samples so that playback continues with the expected "fixed" sample data.
-    printf("[DXM-SAVE] Re-fixing all samples after WAV chunk write...\n");
-    for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
-        instr_t *ins = instr[instrIdx];
-        if (!ins) continue;
-        for (int smpIdx = 0; smpIdx < 16; smpIdx++) {
-            sample_t *s = &ins->smp[smpIdx];
-            if (s->dataPtrL != NULL) {
-                fixSample(s);
-            }
-        }
+    DXM_SAVE_TRACE("[DXM-SAVE] Re-fixing all samples after WAV chunk write...\n");
+    setDxmSamplesFixed(true);
+    if (!wavOK || !wavChunkOK) {
+        return abortDxmSave(f, temporaryPath, "Error writing DXM sample data!");
     }
     // 7. Write TF4 state chunk (real TF4 data)
-    printf("[DXM-SAVE] Writing TF4 state chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing TF4 state chunk...\n");
     const char tf4ChunkId[8] = {'D','X','M','T','F','4',0,0};
     fwrite(tf4ChunkId, 1, 8, f);
     uint32_t tf4ChunkLen = 0;
     long tf4LenPos = ftell(f);
-    fwrite(&tf4ChunkLen, 1, 4, f); // placeholder
+    fwrite(&tf4ChunkLen, 1, 4, f); // reserved length, backpatched below
     long tf4DataStart = ftell(f);
     size_t tf4Bytes = writeAllTF4StatesDXM(f);
     long tf4DataEnd = ftell(f);
-    tf4ChunkLen = (uint32_t)(tf4DataEnd - tf4DataStart);
-    // Go back and write the real chunk length
-    fseek(f, tf4LenPos, SEEK_SET);
-    fwrite(&tf4ChunkLen, 1, 4, f);
-    fseek(f, tf4DataEnd, SEEK_SET);
+    if (!finishDxmChunk(f, tf4LenPos, tf4DataStart, tf4DataEnd, &tf4ChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing Tunefish state!");
     // Enhanced debug: print all TF4 instrument indices, slots, and names
-    printf("[DXM-SAVE] TF4 chunk: %zu bytes written\n", tf4Bytes);
-    printf("[DXM-SAVE] TF4 instruments saved:\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] TF4 chunk: %zu bytes written\n", tf4Bytes);
+    DXM_SAVE_TRACE("[DXM-SAVE] TF4 instruments saved:\n");
     for (int instrIdx = 1; instrIdx <= 128; instrIdx++) {
         instr_t *ins = instr[instrIdx];
         if (ins && ins->useTF4) {
-            printf("  [DXM-SAVE] instrIdx=%d, synthSlot=%d, name=\"%s\"\n", instrIdx, instrIdx, ins->smp[0].name);
+            DXM_SAVE_TRACE("  [DXM-SAVE] instrIdx=%d, synthSlot=%d, name=\"%s\"\n", instrIdx, instrIdx, ins->smp[0].name);
         }
     }
 
     // Write Dexed state chunk
-    printf("[DXM-SAVE] Writing Dexed state chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing Dexed state chunk...\n");
     const char dexChunkId[8] = {'D','X','M','D','E','X',0,0};
     fwrite(dexChunkId, 1, 8, f);
     uint32_t dexChunkLen = 0;
     long dexLenPos = ftell(f);
-    fwrite(&dexChunkLen, 1, 4, f); // placeholder
+    fwrite(&dexChunkLen, 1, 4, f); // reserved length, backpatched below
     long dexDataStart = ftell(f);
     writeAllDexedStatesDXM(f);
     long dexDataEnd = ftell(f);
+    if (dexDataEnd < dexDataStart || (uint64_t)(dexDataEnd - dexDataStart) > UINT32_MAX)
+        return abortDxmSave(f, temporaryPath, "Dexed state is too large to save!");
     dexChunkLen = (uint32_t)(dexDataEnd - dexDataStart);
 
     // Add padding to make the chunk size a multiple of 4
@@ -987,46 +994,46 @@ bool saveDXM(UNICHAR *filenameU)
     dexDataEnd += padding;
     dexChunkLen += padding;
 
-    // Go back and write the real chunk length
-    fseek(f, dexLenPos, SEEK_SET);
-    fwrite(&dexChunkLen, 1, 4, f);
-    fseek(f, dexDataEnd, SEEK_SET);
-    printf("[DXM-SAVE] Dexed chunk: %u bytes written\n", dexChunkLen);
+    if (!writeDxmU32At(f, dexLenPos, dexDataEnd, dexChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing Dexed state!");
+    DXM_SAVE_TRACE("[DXM-SAVE] Dexed chunk: %u bytes written\n", dexChunkLen);
 
     // 8. Write V2 state chunk
-    printf("[DXM-SAVE] Writing V2 state chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing V2 state chunk...\n");
     const char v2ChunkId[8] = {'D','X','M','V','2','S',0,0};
     fwrite(v2ChunkId, 1, 8, f);
     uint32_t v2ChunkLen = 0;
     long v2LenPos = ftell(f);
     fwrite(&v2ChunkLen, 1, 4, f);
     long v2DataStart = ftell(f);
-    size_t v2Bytes = writeAllV2StatesDXM(f);
+    size_t v2Bytes = 0;
+    const bool v2OK = writeAllV2StatesDXM(f, &v2Bytes);
     long v2DataEnd = ftell(f);
-    v2ChunkLen = (uint32_t)(v2DataEnd - v2DataStart);
-    fseek(f, v2LenPos, SEEK_SET);
-    fwrite(&v2ChunkLen, 1, 4, f);
-    fseek(f, v2DataEnd, SEEK_SET);
-    printf("[DXM-SAVE] V2 chunk: %zu bytes written\n", v2Bytes);
+    if (!v2OK)
+        return abortDxmSave(f, temporaryPath, "Could not serialize V2 instrument state!");
+    if (!finishDxmChunk(f, v2LenPos, v2DataStart, v2DataEnd, &v2ChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing V2 instrument state!");
+    DXM_SAVE_TRACE("[DXM-SAVE] V2 chunk: %zu bytes written\n", v2Bytes);
 
     // 9. Write OsTIrus full state chunk
-    printf("[DXM-SAVE] Writing OsTIrus state chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing OsTIrus state chunk...\n");
     const char ostChunkId[8] = {'D','X','M','O','T','S',0,0};
     fwrite(ostChunkId, 1, 8, f);
     uint32_t ostChunkLen = 0;
     long ostLenPos = ftell(f);
     fwrite(&ostChunkLen, 1, 4, f);
     long ostDataStart = ftell(f);
-    size_t ostBytes = writeAllOsTirusStatesDXM(f);
+    size_t ostBytes = 0;
+    const bool ostOK = writeAllOsTirusStatesDXM(f, &ostBytes);
     long ostDataEnd = ftell(f);
-    ostChunkLen = (uint32_t)(ostDataEnd - ostDataStart);
-    fseek(f, ostLenPos, SEEK_SET);
-    fwrite(&ostChunkLen, 1, 4, f);
-    fseek(f, ostDataEnd, SEEK_SET);
-    printf("[DXM-SAVE] OsTIrus state chunk: %zu bytes written\n", ostBytes);
+    if (!ostOK)
+        return abortDxmSave(f, temporaryPath, "Could not serialize OsTIrus instrument state!");
+    if (!finishDxmChunk(f, ostLenPos, ostDataStart, ostDataEnd, &ostChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing OsTIrus instrument state!");
+    DXM_SAVE_TRACE("[DXM-SAVE] OsTIrus state chunk: %zu bytes written\n", ostBytes);
 
     // 10. Write OsTIrus arp editor state chunk
-    printf("[DXM-SAVE] Writing OsTIrus arp state chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing OsTIrus arp state chunk...\n");
     const char arpChunkId[8] = {'D','X','M','A','R','P',0,0};
     fwrite(arpChunkId, 1, 8, f);
     uint32_t arpChunkLen = 0;
@@ -1035,15 +1042,13 @@ bool saveDXM(UNICHAR *filenameU)
     long arpDataStart = ftell(f);
     size_t arpBytes = writeOsTirusArpStateChunk(f);
     long arpDataEnd = ftell(f);
-    arpChunkLen = (uint32_t)(arpDataEnd - arpDataStart);
-    fseek(f, arpLenPos, SEEK_SET);
-    fwrite(&arpChunkLen, 1, 4, f);
-    fseek(f, arpDataEnd, SEEK_SET);
-    printf("[DXM-SAVE] OsTIrus arp chunk: %zu bytes written\n", arpBytes);
+    if (!finishDxmChunk(f, arpLenPos, arpDataStart, arpDataEnd, &arpChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing OsTIrus arpeggiator state!");
+    DXM_SAVE_TRACE("[DXM-SAVE] OsTIrus arp chunk: %zu bytes written\n", arpBytes);
 
     // 11. Write DXM instrument metadata chunk (distinguishes XM vs DXM instruments)
         // 12. Write Macro Map chunk
-    printf("[DXM-SAVE] Writing Macro Map chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing Macro Map chunk...\n");
     const char mapChunkId[8] = {'D','X','M','M','A','P',0,0};
     fwrite(mapChunkId, 1, 8, f);
     uint32_t mapChunkLen = 0;
@@ -1068,12 +1073,10 @@ bool saveDXM(UNICHAR *filenameU)
         }
     }
     long mapDataEnd = ftell(f);
-    mapChunkLen = (uint32_t)(mapDataEnd - mapDataStart);
-    fseek(f, mapLenPos, SEEK_SET);
-    fwrite(&mapChunkLen, 1, 4, f);
-    fseek(f, mapDataEnd, SEEK_SET);
+    if (!finishDxmChunk(f, mapLenPos, mapDataStart, mapDataEnd, &mapChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing macro map state!");
     // 9. Write Macro Pattern chunk (per-track macro mode + per-pattern macro data)
-    printf("[DXM-SAVE] Writing Macro Pattern chunk...\n");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing Macro Pattern chunk...\n");
     const char macChunkId[8] = {'D','X','M','M','A','C',0,0};
     fwrite(macChunkId, 1, 8, f);
     uint32_t macChunkLen = 0;
@@ -1110,28 +1113,30 @@ bool saveDXM(UNICHAR *filenameU)
     }
 
     long macDataEnd = ftell(f);
-    macChunkLen = (uint32_t)(macDataEnd - macDataStart);
-    fseek(f, macLenPos, SEEK_SET);
-    fwrite(&macChunkLen, 1, 4, f);
-    fseek(f, macDataEnd, SEEK_SET);
-    printf("[DXM-SAVE] Writing DXM metadata chunk...\n");
+    if (!finishDxmChunk(f, macLenPos, macDataStart, macDataEnd, &macChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing macro pattern state!");
+    DXM_SAVE_TRACE("[DXM-SAVE] Writing DXM metadata chunk...\n");
     const char metaChunkId[8] = {'D','X','M','M','E','T',0,0};
     fwrite(metaChunkId, 1, 8, f);
     uint32_t metaChunkLen = 0;
     long metaLenPos = ftell(f);
-    fwrite(&metaChunkLen, 1, 4, f); // placeholder
+    fwrite(&metaChunkLen, 1, 4, f); // reserved length, backpatched below
     long metaDataStart = ftell(f);
     size_t metaBytes = writeDXMInstrumentMetadata(f);
     long metaDataEnd = ftell(f);
-    metaChunkLen = (uint32_t)(metaDataEnd - metaDataStart);
-    // Go back and write the real chunk length
-    fseek(f, metaLenPos, SEEK_SET);
-    fwrite(&metaChunkLen, 1, 4, f);
-    fseek(f, metaDataEnd, SEEK_SET);
-    printf("[DXM-SAVE] Metadata chunk: %zu bytes written\n", metaBytes);
-    printf("[DXM-SAVE] Closing file...\n");
-    	fclose(f);
-	
-	printf("[DXM-SAVE] DXM save completed successfully!\n");
+    if (!finishDxmChunk(f, metaLenPos, metaDataStart, metaDataEnd, &metaChunkLen))
+        return abortDxmSave(f, temporaryPath, "Error finalizing instrument metadata!");
+    DXM_SAVE_TRACE("[DXM-SAVE] Metadata chunk: %zu bytes written\n", metaBytes);
+    const bool writeOK = fflush(f) == 0 && !ferror(f);
+    const bool closeOK = fclose(f) == 0;
+    if (!writeOK || !closeOK)
+    {
+        return abortDxmSave(NULL, temporaryPath, "I/O error while finalizing DXM file!");
+    }
+
+    if (!commitDxmTemporaryFile(temporaryPath, filenameU))
+        return abortDxmSave(NULL, temporaryPath, "Could not replace the destination module file!");
+    free(temporaryPath);
+
 	return true;
 }

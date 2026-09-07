@@ -6,6 +6,10 @@
 bool handleEditKeys(SDL_Keycode keycode, SDL_Scancode scancode);
 void recordNote(uint8_t noteNum, int8_t vol);
 void testNoteKeysRelease(SDL_Scancode scancode);
+void releaseAllNoteKeys(void);
+void recordMidiInputNote(uint8_t midiChannel, uint8_t wireNote, uint8_t note, int8_t volume);
+void releaseMidiInputNote(uint8_t midiChannel, uint8_t wireNote, bool recordRelease);
+void releaseAllMidiInputNotes(void);
 void writeToMacroSlot(uint8_t slot);
 void writeFromMacroSlot(uint8_t slot);
 void insertPatternNote(void);

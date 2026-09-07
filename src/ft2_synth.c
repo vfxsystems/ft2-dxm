@@ -24,7 +24,9 @@
 #include <math.h>
 
 // Debug flag for Tunefish4 synth
-#define DEBUG_TF4_SYNTH 1
+#ifndef DEBUG_TF4_SYNTH
+#define DEBUG_TF4_SYNTH 0
+#endif
 
 #if DEBUG_TF4_SYNTH
 #define TF4_DEBUG(fmt, ...) printf("[TF4_SYNTH] " fmt "\n", ##__VA_ARGS__)
@@ -745,7 +747,8 @@ int ft2_synth_load_preset_for_instrument(int instrID, int presetIndex) {
         return 0;
     }
     
-    void* instrument = g_instruments[tf4Idx];
+    if (!g_synthInitialized || presetIndex < 0) return 0;
+    void* instrument = createInstrumentInstance(instrID);
     if (!instrument) {
         TF4_DEBUG("ERROR: No Tunefish4 instrument in slot %d", instrID);
         return 0;
@@ -788,34 +791,6 @@ const char* ft2_synth_get_current_preset_name_for_instrument(int instrID) {
     }
     
     return ft2_synth_get_preset_name(presetIndex);
-} 
-
-void ft2_synth_set_unisono(int instrID, int value) {
-    // This function is not implemented in the provided file.
-    // It seems to be a placeholder or intended for a different context.
-    // For now, we'll just log the call.
-    TF4_DEBUG("ft2_synth_set_unisono() called for instrID=%d, value=%d", instrID, value);
-    // You would typically forward this value to the Tunefish synth engine
-    // and/or send a MIDI CC message if you have a MIDI CC number for unisono.
-    // For example:
-    int tf4Idx = tf4_index_from_ft2(instrID);
-    if (tf4Idx >= 0 && g_instruments[tf4Idx])
-        tf_instrument_set_param(g_instruments[tf4Idx], 77, value);
-    // ft2_synth_send_midi_to_instrument(instrID, 0xB0, 77, value); // Unisono
-}
-
-void ft2_synth_set_octave(int instrID, int value) {
-    // This function is not implemented in the provided file.
-    // It seems to be a placeholder or intended for a different context.
-    // For now, we'll just log the call.
-    TF4_DEBUG("ft2_synth_set_octave() called for instrID=%d, value=%d", instrID, value);
-    // You would typically forward this value to the Tunefish synth engine
-    // and/or send a MIDI CC message if you have a MIDI CC number for octave.
-    // For example:
-    int tf4Idx = tf4_index_from_ft2(instrID);
-    if (tf4Idx >= 0 && g_instruments[tf4Idx])
-        tf_instrument_set_param(g_instruments[tf4Idx], 78, value);
-    // ft2_synth_send_midi_to_instrument(instrID, 0xB0, 78, value); // Octave
 } 
 
 // ------------------------------------------------------------

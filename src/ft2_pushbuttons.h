@@ -209,7 +209,6 @@ enum // PUSHBUTTONS
 	PB_SAMP_EXT_XCHG_SMP,
 	PB_SAMP_EXT_RESAMPLE,
 	PB_SAMP_EXT_MIX_SAMPLE,
-	PB_SAMP_EXT_SLICER,
 
 	// INSTRUMENT EDITOR
 	PB_INST_VDEF1,
@@ -572,6 +571,14 @@ enum // PUSHBUTTONS
 	PB_SYNTH_PAGE_TOGGLE,
 	PB_SYNTH_EXIT,
 
+	// Render Settings modal (configured dynamically)
+	PB_RENDER_SETTINGS_OK,
+	PB_RENDER_SETTINGS_CANCEL,
+	PB_RENDER_SETTINGS_SLOT_DOWN,
+	PB_RENDER_SETTINGS_SLOT_UP,
+	PB_RENDER_SETTINGS_RATE_DOWN,
+	PB_RENDER_SETTINGS_RATE_UP,
+
 	// Appended (not interspersed with existing IDs - see note above PB_TF_BASE).
 	// Fields are set dynamically in ft2_inst_ed.c rather than via the static
 	// pushButtons[] literal, since that literal's positional coverage ends at the
@@ -579,6 +586,9 @@ enum // PUSHBUTTONS
 
 	NUM_PUSHBUTTONS
 };
+
+#define PB_RENDER_SETTINGS_FIRST PB_RENDER_SETTINGS_OK
+#define PB_RENDER_SETTINGS_LAST  (PB_RENDER_SETTINGS_RATE_UP + 1)
 
 // Append-only ID ranges for designer-driven layouts (do not reorder existing IDs).
 #define PB_TF_BASE NUM_PUSHBUTTONS

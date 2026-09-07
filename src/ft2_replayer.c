@@ -66,6 +66,8 @@ static uint16_t synthMidiLastTick[MAX_CHANNELS];
 static uint8_t synthMidiLastStatus[MAX_CHANNELS];
 static uint8_t synthMidiLastData1[MAX_CHANNELS];
 static uint8_t synthMidiLastData2[MAX_CHANNELS];
+static int synthMidiLastInstrument[MAX_CHANNELS];
+static struct { int instrument; uint8_t note, midiChannel; SynthEngineType engine; } synthHeldNote[MAX_CHANNELS];
 
 static inline uint8_t synthMidiChan(int chIdx)
 {
@@ -83,10 +85,12 @@ void ft2_send_synth_midi_dedup(int chIdx, int instrID, uint8_t status, uint8_t d
 	}
 
 	uint16_t tick = song.tick;
-	if (synthMidiLastTick[chIdx] == tick &&
+	const bool noteOn = (status & 0xF0) == 0x90 && data2 != 0;
+	/* song.tick repeats each row; identical note-ons may be intentional retriggers. */
+	if (!noteOn && synthMidiLastTick[chIdx] == tick &&
 		synthMidiLastStatus[chIdx] == status &&
 		synthMidiLastData1[chIdx] == data1 &&
-		synthMidiLastData2[chIdx] == data2) {
+		synthMidiLastData2[chIdx] == data2 && synthMidiLastInstrument[chIdx] == instrID) {
 		return;
 	}
 
@@ -94,6 +98,27 @@ void ft2_send_synth_midi_dedup(int chIdx, int instrID, uint8_t status, uint8_t d
 	synthMidiLastStatus[chIdx] = status;
 	synthMidiLastData1[chIdx] = data1;
 	synthMidiLastData2[chIdx] = data2;
+	synthMidiLastInstrument[chIdx] = instrID;
+
+	const bool noteOff = (status & 0xF0) == 0x80 || ((status & 0xF0) == 0x90 && data2 == 0);
+	if (synthHeldNote[chIdx].instrument != 0 &&
+	    (noteOn || (noteOff && synthHeldNote[chIdx].note == data1)))
+	{
+		/* Channel state may already refer to a new instrument. Release the owner. */
+		const UnifiedSynthInterface *engine = ft2_unified_synth_get_engine(synthHeldNote[chIdx].engine);
+		MidiMessage release = {0x80 | synthHeldNote[chIdx].midiChannel, synthHeldNote[chIdx].note, 0};
+		if (engine && engine->send_midi)
+			engine->send_midi(synthHeldNote[chIdx].instrument, &release);
+		synthHeldNote[chIdx].instrument = 0;
+		if (noteOff) return;
+	}
+	if (noteOn)
+	{
+		synthHeldNote[chIdx].instrument = instrID;
+		synthHeldNote[chIdx].note = data1;
+		synthHeldNote[chIdx].midiChannel = status & 0x0F;
+		synthHeldNote[chIdx].engine = ft2_unified_synth_get_active_engine(instrID);
+	}
 
 	ft2_unified_synth_send_midi(instrID, &message);
 }
@@ -420,8 +445,6 @@ void keyOff(channel_t *ch)
 	if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus)
 	{
 		int chIdx = (int)(ch - channel);
-		printf("[KEYOFF] SYNTH NOTE-OFF (release): instr=%d, note=%d useDexed=%s useTF4=%s useOsTirus=%s\n",
-		       ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
 		/* Ensure we don't call synth twice – but safe either way. */
 		if (ch->noteNum > 0) {
 			ft2_send_synth_midi_dedup(chIdx, ch->instrNum, 0x80 | synthMidiChan(chIdx), ch->noteNum, 0);
@@ -548,8 +571,6 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
         
         if (ins != NULL && (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus))
         {
-            printf("[TRIGGER] SYNTH NOTE OFF DETECTED: instr=%d, noteNum=%d useDexed=%s useTF4=%s useOsTirus=%s\n",
-                ch->instrNum, ch->noteNum, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
             
             keyOff(ch);
             return;
@@ -581,8 +602,6 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 		// Prefer Dexed when both flags are set so keyboard/keyjazz and playback route correctly.
         if (ins->useTF4 || ins->useDexed || ins->useV2 || ins->useOsTirus)
 		{
-			printf("[TRIGGER] SYNTH NOTE ON DETECTED: instr=%d, note=%d useDexed=%s useTF4=%s useOsTirus=%s\n",
-				ch->instrNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
 			
 			// CRITICAL: Set instrPtr so keyOff() can detect synth instruments later
 			ch->instrPtr = ins;
@@ -606,6 +625,10 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 		}
     
     /* instr pointer already set above */
+	/* A sample can replace a synth on the same tracker channel too. */
+	if (synthHeldNote[chIdx].instrument != 0)
+		ft2_send_synth_midi_dedup(chIdx, synthHeldNote[chIdx].instrument,
+		    0x80 | synthMidiChan(chIdx), synthHeldNote[chIdx].note, 0);
 
 	ch->mute = ins->mute;
 
@@ -3375,7 +3398,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 			// If a previous note is active on this channel, send note-off first
 			if (ch->noteNum > 0 && ch->noteNum != NOTE_OFF)
             {
-			ft2_send_synth_midi_dedup(chNum, insNum, 0x80 | synthMidiChan(chNum), ch->noteNum, 0);
+			ft2_send_synth_midi_dedup(chNum, ch->instrNum, 0x80 | synthMidiChan(chNum), ch->noteNum, 0);
             }
 
 			ch->copyOfInstrAndNote = (insNum << 8) | (ch->copyOfInstrAndNote & 0xFF);
@@ -3400,8 +3423,6 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 				velocity = (vol > 64) ? 127 : (vol * 2);
 			}
 
-            printf("[PLAYTONE] SYNTH KEYBOARD INPUT: instr=%d, note=%d, useDexed=%s useTF4=%s useOsTirus=%s\n",
-                insNum, note, ins->useDexed ? "TRUE" : "FALSE", ins->useTF4 ? "TRUE" : "FALSE", ins->useOsTirus ? "TRUE" : "FALSE");
 			ft2_send_synth_midi_dedup(chNum, insNum, 0x90 | synthMidiChan(chNum), note, velocity);
 
 			ch->noteNum = note;
@@ -3584,6 +3605,15 @@ void stopVoices(void)
 	const bool audioWasntLocked = !audio.locked;
 	if (audioWasntLocked)
 		lockAudio();
+
+	/* Purge embedded voices as well as sample pointers on stop/load/reset. */
+	for (int type = 0; type < SYNTH_TYPE_COUNT; type++)
+	{
+		const UnifiedSynthInterface *engine = ft2_unified_synth_get_engine((SynthEngineType)type);
+		if (engine && engine->panic) engine->panic();
+	}
+	memset(synthHeldNote, 0, sizeof(synthHeldNote));
+	memset(synthMidiLastStatus, 0, sizeof(synthMidiLastStatus));
 
 	channel_t *ch = channel;
 	for (int32_t i = 0; i < MAX_CHANNELS; i++, ch++)

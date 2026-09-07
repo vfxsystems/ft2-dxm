@@ -42,7 +42,8 @@ char *getAudioOutputDeviceFromConfig(void)
 		}
 
 		devString[0] = '\0';
-		fgets(devString, MAX_DEV_STR_LEN, f);
+		if (fgets(devString, MAX_DEV_STR_LEN, f) == NULL)
+			devString[0] = '\0';
 		fclose(f);
 
 		const int32_t devStringLen = (int32_t)strlen(devString);
@@ -90,8 +91,9 @@ char *getAudioInputDeviceFromConfig(void)
 		}
 
 		devString[0] = '\0';
-		fgets(devString, MAX_DEV_STR_LEN, f); // skip first line (we want the input device)
-		fgets(devString, MAX_DEV_STR_LEN, f);
+		if (fgets(devString, MAX_DEV_STR_LEN, f) != NULL &&
+		    fgets(devString, MAX_DEV_STR_LEN, f) == NULL)
+			devString[0] = '\0';
 		fclose(f);
 
 		const int32_t devStringLen = (int32_t)strlen(devString);

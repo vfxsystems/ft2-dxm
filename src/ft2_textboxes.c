@@ -1162,15 +1162,10 @@ void handleTextEditInputChar(char textChar)
 		int32_t i = getTextLength(t, 0);
 		if (i < t->maxChars) // do we have room for a new character?
 		{
-			t->textPtr[i+1] = '\0';
-
-			// if string not empty, shift string to the right to make space for char insertion
-			if (i > 0)
-			{
-				for (; i > t->cursorPos; i--)
-					t->textPtr[i] = t->textPtr[i-1];
-			}
-
+			/* Move the suffix and its terminator in one bounds-checked operation.
+			 * Textbox storage is defined as maxChars plus the terminator. */
+			memmove(&t->textPtr[t->cursorPos + 1], &t->textPtr[t->cursorPos],
+			        (size_t)(i - t->cursorPos) + 1);
 			t->textPtr[t->cursorPos] = textChar;
 
 			moveTextCursorRight(mouse.lastEditBox, TEXTBOX_UPDATE); // also updates textbox
