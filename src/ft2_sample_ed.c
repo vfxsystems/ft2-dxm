@@ -52,16 +52,31 @@ static SDL_Thread *thread;
 // globals
 int32_t smpEd_Rx1 = 0, smpEd_Rx2 = 0;
 
+static bool getSampleAllocationSize(int32_t length, bool sample16Bit, size_t *allocationSize)
+{
+	if (length < 0 || length > MAX_SAMPLE_LEN)
+		return false;
+
+	const size_t dataBytes = (size_t)length << sample16Bit;
+	if (dataBytes > SIZE_MAX - SAMPLE_PAD_LENGTH)
+		return false;
+
+	*allocationSize = dataBytes + SAMPLE_PAD_LENGTH;
+	return true;
+}
+
 // allocs sample with proper alignment and padding for branchless resampling interpolation
 bool allocateSmpData(sample_t *s, int32_t length, bool sample16Bit, bool stereo)
 {
-	int32_t allocLen = sample16Bit ? (length << 1) : length;
+	size_t allocationSize;
+	if (s == NULL || !getSampleAllocationSize(length, sample16Bit, &allocationSize))
+		return false;
 
 	// Free any existing data first
 	freeSmpData(s);
 
 	// Allocate L channel
-	s->origDataPtrL = (int8_t *)malloc(allocLen + SAMPLE_PAD_LENGTH);
+	s->origDataPtrL = (int8_t *)malloc(allocationSize);
 	if (s->origDataPtrL == NULL) {
 		s->dataPtrL = NULL;
 		s->origDataPtrR = NULL;
@@ -74,7 +89,7 @@ bool allocateSmpData(sample_t *s, int32_t length, bool sample16Bit, bool stereo)
 
 	// Allocate R channel if stereo
 	if (stereo) {
-		s->origDataPtrR = (int8_t *)malloc(allocLen + SAMPLE_PAD_LENGTH);
+		s->origDataPtrR = (int8_t *)malloc(allocationSize);
 		if (s->origDataPtrR == NULL) {
 			free(s->origDataPtrL);
 			s->origDataPtrL = NULL;
@@ -99,10 +114,11 @@ bool allocateSmpData(sample_t *s, int32_t length, bool sample16Bit, bool stereo)
 
 bool allocateSmpDataPtr(smpPtr_t *sp, int32_t length, bool sample16Bit)
 {
-	if (sample16Bit)
-		length <<= 1;
+	size_t allocationSize;
+	if (sp == NULL || !getSampleAllocationSize(length, sample16Bit, &allocationSize))
+		return false;
 
-	int8_t *newPtr = (int8_t *)malloc(length + SAMPLE_PAD_LENGTH);
+	int8_t *newPtr = (int8_t *)malloc(allocationSize);
 	if (newPtr == NULL)
 		return false;
 
@@ -115,15 +131,18 @@ bool allocateSmpDataPtr(smpPtr_t *sp, int32_t length, bool sample16Bit)
 // reallocs sample with proper alignment and padding for branchless resampling interpolation
 bool reallocateSmpData(sample_t *s, int32_t length, bool sample16Bit)
 {
+	size_t allocationSize;
+	if (s == NULL || !getSampleAllocationSize(length, sample16Bit, &allocationSize))
+		return false;
+
 	bool stereo = !!(s->flags & SAMPLE_STEREO);
-	int32_t allocLen = sample16Bit ? (length << 1) : length;
 
 	// If not allocated, just allocate
 	if (s->origDataPtrL == NULL)
 		return allocateSmpData(s, length, sample16Bit, stereo);
 
 	// Realloc L
-	int8_t *newPtrL = (int8_t *)realloc(s->origDataPtrL, allocLen + SAMPLE_PAD_LENGTH);
+	int8_t *newPtrL = (int8_t *)realloc(s->origDataPtrL, allocationSize);
 	if (newPtrL == NULL)
 		return false;
 	s->origDataPtrL = newPtrL;
@@ -132,11 +151,11 @@ bool reallocateSmpData(sample_t *s, int32_t length, bool sample16Bit)
 	// Realloc R if stereo
 	if (stereo) {
 		if (s->origDataPtrR == NULL) {
-			s->origDataPtrR = (int8_t *)malloc(allocLen + SAMPLE_PAD_LENGTH);
+			s->origDataPtrR = (int8_t *)malloc(allocationSize);
 			if (s->origDataPtrR == NULL)
 				return false;
 		} else {
-			int8_t *newPtrR = (int8_t *)realloc(s->origDataPtrR, allocLen + SAMPLE_PAD_LENGTH);
+			int8_t *newPtrR = (int8_t *)realloc(s->origDataPtrR, allocationSize);
 			if (newPtrR == NULL)
 				return false;
 			s->origDataPtrR = newPtrR;
@@ -160,13 +179,14 @@ bool reallocateSmpData(sample_t *s, int32_t length, bool sample16Bit)
 // reallocs sample with proper alignment and padding for branchless resampling interpolation
 bool reallocateSmpDataPtr(smpPtr_t *sp, int32_t length, bool sample16Bit)
 {
+	size_t allocationSize;
+	if (sp == NULL || !getSampleAllocationSize(length, sample16Bit, &allocationSize))
+		return false;
+
 	if (sp->origPtr == NULL)
 		return allocateSmpDataPtr(sp, length, sample16Bit);
 
-	if (sample16Bit)
-		length <<= 1;
-
-	int8_t *newPtr = (int8_t *)realloc(sp->origPtr, length + SAMPLE_PAD_LENGTH);
+	int8_t *newPtr = (int8_t *)realloc(sp->origPtr, allocationSize);
 	if (newPtr == NULL)
 		return false;
 
@@ -4215,9 +4235,14 @@ static void drawSampleOffset(void)
 bool runSampleEditorRegressionTests(void)
 {
 	bool ok = true;
+	size_t allocationSize = 0;
+	ok = getSampleAllocationSize(MAX_SAMPLE_LEN, true, &allocationSize) &&
+		allocationSize == ((size_t)MAX_SAMPLE_LEN * 2) + SAMPLE_PAD_LENGTH &&
+		!getSampleAllocationSize(-1, false, &allocationSize) &&
+		!getSampleAllocationSize(MAX_SAMPLE_LEN + 1, false, &allocationSize);
 	smpPtr_t allocated = { 0 };
 	sample_t sample = { 0 };
-	ok = allocateSmpDataPtr(&allocated, 4, false);
+	ok = ok && allocateSmpDataPtr(&allocated, 4, false);
 	if (ok) {
 		setSmpDataPtr(&sample, &allocated);
 		ok = sample.dataPtrL == sample.dataPtr && sample.origDataPtrL == sample.origDataPtr &&
