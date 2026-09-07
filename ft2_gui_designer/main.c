@@ -125,7 +125,6 @@ typedef struct {
     LayoutKind active_layout;
     ft2_ui_widget_page_t active_page;
     int page_view_number;
-    bool page_dropdown_open;
     bool theme_dropdown_open;
 
     // 3D cube animation
@@ -208,21 +207,14 @@ static int clamp_page_view_number(int page)
 {
     if (page < (int)FT2_UI_WIDGET_PAGE_1)
         return (int)FT2_UI_WIDGET_PAGE_1;
-    if (page > (int)FT2_UI_WIDGET_PAGE_6)
-        return (int)FT2_UI_WIDGET_PAGE_6;
+    if (page > (int)FT2_UI_WIDGET_PAGE_7)
+        return (int)FT2_UI_WIDGET_PAGE_7;
     return page;
 }
 
 static bool is_view_all_mode(void)
 {
     return app.active_page == FT2_UI_WIDGET_PAGE_BOTH;
-}
-
-static ft2_ui_widget_page_t effective_page_view(void)
-{
-    if (is_view_all_mode())
-        return FT2_UI_WIDGET_PAGE_BOTH;
-    return (ft2_ui_widget_page_t)clamp_page_view_number(app.page_view_number);
 }
 
 static void set_page_view_number(int page)
@@ -240,13 +232,23 @@ static void set_view_all_mode(bool enabled)
     }
 }
 
-static const char *page_view_label(ft2_ui_widget_page_t page, char *buf, size_t buf_size)
+static int page_selector_value(void)
 {
-    if (page == FT2_UI_WIDGET_PAGE_BOTH)
-        return "All Pages";
+    return is_view_all_mode() ? 0 : clamp_page_view_number(app.page_view_number);
+}
 
-    snprintf(buf, buf_size, "Page %d", clamp_page_view_number((int)page));
-    return buf;
+static void step_page_selector(int delta)
+{
+    int page = page_selector_value() + delta;
+    if (page < (int)FT2_UI_WIDGET_PAGE_BOTH)
+        page = (int)FT2_UI_WIDGET_PAGE_BOTH;
+    if (page > (int)FT2_UI_WIDGET_PAGE_7)
+        page = (int)FT2_UI_WIDGET_PAGE_7;
+
+    if (page == (int)FT2_UI_WIDGET_PAGE_BOTH)
+        set_view_all_mode(true);
+    else
+        set_page_view_number(page);
 }
 
 static bool widget_has_caption(const widget_t *widget)
@@ -472,7 +474,7 @@ static int toolbar_info_y(void)
     return y + h + 8;
 }
 
-static void toolbar_page_dropdown_rect(int *x, int *y, int *w, int *h)
+static void toolbar_page_selector_rect(int *x, int *y, int *w, int *h)
 {
     *x = 6;
     *y = toolbar_info_y() + 86;
@@ -887,7 +889,7 @@ void finish_property_edit(bool apply_changes) {
                 case PROP_PAGE: {
                     int page = atoi(app.edit_buffer);
                     if (page < 0) page = 0;
-                    if (page > 6) page = 6;
+                    if (page > (int)FT2_UI_WIDGET_PAGE_7) page = (int)FT2_UI_WIDGET_PAGE_7;
                     widget->page = (ft2_ui_widget_page_t)page;
                     break;
                 }
@@ -1052,7 +1054,7 @@ void adjust_property_value(PropField field_type, int delta) {
         case PROP_PAGE: {
             int page = (int)widget->page + delta;
             if (page < 0) page = 0;
-            if (page > 6) page = 6;
+            if (page > (int)FT2_UI_WIDGET_PAGE_7) page = (int)FT2_UI_WIDGET_PAGE_7;
             widget->page = (ft2_ui_widget_page_t)page;
             break;
         }
@@ -1102,6 +1104,68 @@ static const char *default_export_base_for_layout(LayoutKind kind)
         default:
             return "exported_gui";
     }
+}
+
+static bool readable_file(const char *path)
+{
+    FILE *file = fopen(path, "rb");
+    if (!file)
+        return false;
+    fclose(file);
+    return true;
+}
+
+static bool copy_readable_path(char *resolved, size_t resolved_size, const char *path)
+{
+    if (!readable_file(path))
+        return false;
+
+    const int written = snprintf(resolved, resolved_size, "%s", path);
+    return written >= 0 && (size_t)written < resolved_size;
+}
+
+static bool resolve_design_path(const char *requested, char *resolved, size_t resolved_size)
+{
+    if (!requested || requested[0] == '\0' || !resolved || resolved_size == 0)
+        return false;
+
+    if (copy_readable_path(resolved, resolved_size, requested))
+        return true;
+
+    char *base_path = SDL_GetBasePath();
+    if (!base_path)
+        return false;
+
+    char candidate[1024];
+    int written = snprintf(candidate, sizeof(candidate), "%s%s", base_path, requested);
+    if (written >= 0 && (size_t)written < sizeof(candidate) &&
+        copy_readable_path(resolved, resolved_size, candidate)) {
+        SDL_free(base_path);
+        return true;
+    }
+
+    written = snprintf(candidate, sizeof(candidate), "%s../ft2_gui_designer/%s", base_path, requested);
+    const bool found = written >= 0 && (size_t)written < sizeof(candidate) &&
+                       copy_readable_path(resolved, resolved_size, candidate);
+    SDL_free(base_path);
+    return found;
+}
+
+static bool load_designer_file(const char *requested)
+{
+    char resolved[512];
+    if (!resolve_design_path(requested, resolved, sizeof(resolved)))
+        return false;
+    if (!load_design(&g_designer.widget_manager, resolved))
+        return false;
+
+    snprintf(app.last_load_path, sizeof(app.last_load_path), "%s", resolved);
+    snprintf(app.last_save_path, sizeof(app.last_save_path), "%s", resolved);
+    app.active_layout = detect_layout_kind_from_path(resolved);
+    if (app.active_layout != LAYOUT_UNKNOWN)
+        snprintf(app.last_export_base, sizeof(app.last_export_base), "%s",
+                 default_export_base_for_layout(app.active_layout));
+    return true;
 }
 
 static void start_file_prompt(FilePromptMode mode)
@@ -1163,15 +1227,8 @@ static void finish_file_prompt(bool apply_changes)
 
         switch (app.file_prompt_mode) {
             case FILE_PROMPT_LOAD:
-                ok = load_design(&g_designer.widget_manager, app.file_prompt_buffer);
-                if (ok) {
-                    snprintf(app.last_load_path, sizeof(app.last_load_path), "%s", app.file_prompt_buffer);
-                    snprintf(app.last_save_path, sizeof(app.last_save_path), "%s", app.file_prompt_buffer);
-                    app.active_layout = detect_layout_kind_from_path(app.file_prompt_buffer);
-                    if (app.active_layout != LAYOUT_UNKNOWN)
-                        snprintf(app.last_export_base, sizeof(app.last_export_base), "%s",
-                                 default_export_base_for_layout(app.active_layout));
-                } else {
+                ok = load_designer_file(app.file_prompt_buffer);
+                if (!ok) {
                     printf("Failed to load design: %s\n", app.file_prompt_buffer);
                 }
                 snprintf(app.file_status_message, sizeof(app.file_status_message),
@@ -1405,7 +1462,6 @@ bool init_designer(void) {
 
     app.active_page = FT2_UI_WIDGET_PAGE_BOTH;
     app.page_view_number = FT2_UI_WIDGET_PAGE_1;
-    app.page_dropdown_open = false;
     app.theme_dropdown_open = false;
 
     printf("FT2 GUI Designer\n");
@@ -1640,23 +1696,11 @@ void handle_mouse_down(int x, int y, int button) {
         if (x < TOOLBAR_WIDTH) {
             int drop_x, drop_y, drop_w, drop_h;
 
-            toolbar_page_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
-            if (app.page_dropdown_open) {
-                int item_y = drop_y + drop_h + 1;
-                for (int i = 0; i <= 6; i++, item_y += 16) {
-                    if (x >= drop_x && x < drop_x + drop_w && y >= item_y && y < item_y + 16) {
-                        if (i == 0)
-                            set_view_all_mode(true);
-                        else
-                            set_page_view_number(i);
-                        app.page_dropdown_open = false;
-                        return;
-                    }
-                }
-            }
-
-            if (x >= drop_x && x < drop_x + drop_w && y >= drop_y && y < drop_y + drop_h) {
-                app.page_dropdown_open = !app.page_dropdown_open;
+            toolbar_page_selector_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+            const int arrow_w = 20;
+            if (x >= drop_x + drop_w - arrow_w && x < drop_x + drop_w &&
+                y >= drop_y && y < drop_y + drop_h) {
+                step_page_selector(y < drop_y + drop_h / 2 ? 1 : -1);
                 app.theme_dropdown_open = false;
                 return;
             }
@@ -1675,11 +1719,9 @@ void handle_mouse_down(int x, int y, int button) {
 
             if (x >= drop_x && x < drop_x + drop_w && y >= drop_y && y < drop_y + drop_h) {
                 app.theme_dropdown_open = !app.theme_dropdown_open;
-                app.page_dropdown_open = false;
                 return;
             }
 
-            app.page_dropdown_open = false;
             app.theme_dropdown_open = false;
 
             for (int tool = 0; tool < g_tool_count; tool++) {
@@ -1699,7 +1741,6 @@ void handle_mouse_down(int x, int y, int button) {
             }
         }
 
-        app.page_dropdown_open = false;
         app.theme_dropdown_open = false;
 
         // Check canvas clicks
@@ -2148,12 +2189,18 @@ void draw_toolbar(void) {
     // Page view selector
     int drop_x, drop_y, drop_w, drop_h;
     char page_buf[16];
-    toolbar_page_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
-    font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "View Page:", get_palette_color(PAL_FORGRND));
-    draw_designer_button(drop_x, drop_y, drop_w, drop_h, app.page_dropdown_open);
+    toolbar_page_selector_rect(&drop_x, &drop_y, &drop_w, &drop_h);
+    font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "View Page (0=All):", get_palette_color(PAL_FORGRND));
+    const int arrow_w = 20;
+    const int arrow_h = drop_h / 2;
+    draw_designer_button(drop_x, drop_y, drop_w - arrow_w - 1, drop_h, false);
+    snprintf(page_buf, sizeof(page_buf), "%d", page_selector_value());
     font_draw_text(&g_designer.font_system, drop_x + 5, drop_y + 5,
-                   page_view_label(effective_page_view(), page_buf, sizeof(page_buf)), get_palette_color(PAL_BTNTEXT));
-    font_draw_text(&g_designer.font_system, drop_x + drop_w - 13, drop_y + 5, "v", get_palette_color(PAL_FORGRND));
+                   page_buf, get_palette_color(PAL_BTNTEXT));
+    draw_designer_button(drop_x + drop_w - arrow_w, drop_y, arrow_w, arrow_h, false);
+    draw_designer_button(drop_x + drop_w - arrow_w, drop_y + arrow_h, arrow_w, drop_h - arrow_h, false);
+    font_draw_text(&g_designer.font_system, drop_x + drop_w - 14, drop_y + 1, "^", get_palette_color(PAL_FORGRND));
+    font_draw_text(&g_designer.font_system, drop_x + drop_w - 14, drop_y + arrow_h, "v", get_palette_color(PAL_FORGRND));
 
     toolbar_theme_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
     font_draw_text(&g_designer.font_system, drop_x, drop_y - 11, "Theme:", get_palette_color(PAL_FORGRND));
@@ -2167,19 +2214,6 @@ void draw_toolbar(void) {
         for (int i = 0; i < DESIGNER_THEME_COUNT; i++, item_y += 16)
             draw_dropdown_item(drop_x, item_y, drop_w, designer_palette_theme_name((designer_palette_theme_t)i),
                                designer_get_palette_theme() == (designer_palette_theme_t)i);
-    }
-
-    toolbar_page_dropdown_rect(&drop_x, &drop_y, &drop_w, &drop_h);
-    if (app.page_dropdown_open) {
-        int item_y = drop_y + drop_h + 1;
-        draw_dropdown_item(drop_x, item_y, drop_w, "All Pages", is_view_all_mode());
-        item_y += 16;
-        for (int i = 1; i <= 6; i++, item_y += 16) {
-            char item[16];
-            snprintf(item, sizeof(item), "Page %d", i);
-            draw_dropdown_item(drop_x, item_y, drop_w, item,
-                               !is_view_all_mode() && clamp_page_view_number(app.page_view_number) == i);
-        }
     }
 
     // Separator
@@ -2542,15 +2576,78 @@ void draw_adjust_button(int x, int y, int w, int h, const char *text) {
 
 // Note: draw_2d_cube_overlay function removed - cube now rendered with OpenGL in render_frame
 
+static void print_usage(const char *program)
+{
+    printf("Usage: %s [design.gui]\n", program);
+    printf("       %s --validate design.gui [design.gui ...]\n", program);
+}
+
+static int validate_design_files(int file_count, char **files)
+{
+    int failures = 0;
+
+    for (int i = 0; i < file_count; i++) {
+        char resolved[512];
+        widget_manager_t manager;
+        init_widget_manager(&manager);
+
+        if (!resolve_design_path(files[i], resolved, sizeof(resolved)) ||
+            !load_design(&manager, resolved)) {
+            fprintf(stderr, "INVALID %s\n", files[i]);
+            failures++;
+            continue;
+        }
+
+        int highest_page = 0;
+        for (int widget = 0; widget < manager.widget_count; widget++) {
+            if ((int)manager.widgets[widget].page > highest_page)
+                highest_page = (int)manager.widgets[widget].page;
+        }
+
+        printf("VALID %s: %d widgets, highest page %d\n",
+               resolved, manager.widget_count, highest_page);
+        cleanup_widget_manager(&manager);
+    }
+
+    return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
+    if (argc >= 2 && strcmp(argv[1], "--validate") == 0) {
+        if (argc < 3) {
+            print_usage(argv[0]);
+            return 2;
+        }
+        return validate_design_files(argc - 2, &argv[2]);
+    }
+
+    if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    if (argc > 2) {
+        print_usage(argv[0]);
+        return 2;
+    }
+
     init_sdl();
 
     if (!init_designer()) {
         printf("Failed to initialize designer\n");
         cleanup_sdl();
         return 1;
+    }
+
+    if (argc == 2) {
+        if (!load_designer_file(argv[1])) {
+            fprintf(stderr, "Failed to load design: %s\n", argv[1]);
+            cleanup_designer();
+            cleanup_sdl();
+            return 1;
+        }
+        printf("Loaded %s (%d widgets)\n", app.last_load_path,
+               g_designer.widget_manager.widget_count);
     }
 
     app.running = true;

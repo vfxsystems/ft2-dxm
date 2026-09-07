@@ -2056,6 +2056,9 @@ void draw_custom_button(widget_t *widget, uint32_t *framebuffer, int fb_width, i
 
 bool load_design(widget_manager_t *manager, const char *filename)
 {
+    if (!manager || !filename || filename[0] == '\0')
+        return false;
+
     FILE *file = fopen(filename, "rb");
     if (!file) return false;
 
@@ -2086,8 +2089,14 @@ bool load_design(widget_manager_t *manager, const char *filename)
         }
     }
 
-    // Clear existing widgets
-    init_widget_manager(manager);
+    if (count < 0 || count > MAX_WIDGETS) {
+        fclose(file);
+        return false;
+    }
+
+    // Parse transactionally so a malformed file cannot destroy the current design.
+    widget_manager_t loaded;
+    init_widget_manager(&loaded);
 
     // Load widgets
     for (int i = 0; i < count && i < MAX_WIDGETS; i++) {
@@ -2186,8 +2195,8 @@ bool load_design(widget_manager_t *manager, const char *filename)
             break;
         }
 
-        int widget_id = add_widget(manager, type, x, y);
-        widget_t *widget = get_widget(manager, widget_id);
+        int widget_id = add_widget(&loaded, type, x, y);
+        widget_t *widget = get_widget(&loaded, widget_id);
         if (!widget)
             break;
 
@@ -2198,7 +2207,7 @@ bool load_design(widget_manager_t *manager, const char *filename)
         widget->state = (WidgetState)state;
         widget->visible = visible != 0;
         if (page < 0) page = 0;
-        if (page > 6) page = 6;
+        if (page > (int)FT2_UI_WIDGET_PAGE_7) page = (int)FT2_UI_WIDGET_PAGE_7;
         widget->page = (ft2_ui_widget_page_t)page;
         widget->font_type = (font_type >= 0 && font_type < FT2_UI_FONT_COUNT)
             ? (ft2_ui_font_id_t)font_type
@@ -2237,6 +2246,10 @@ bool load_design(widget_manager_t *manager, const char *filename)
     }
 
     fclose(file);
+    if (loaded.widget_count != count)
+        return false;
+
+    *manager = loaded;
     return true;
 }
 

@@ -20,7 +20,21 @@ Build the GUI designer after schema/widget changes:
 ```sh
 cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
 cmake --build build-gui-designer --parallel 4
+ctest --test-dir build-gui-designer --output-on-failure
 ```
+
+The designer build copies its tracked `.gui` layouts into
+`build-gui-designer/layouts`. Its CTest target validates every production layout,
+including the V2 and OsTIrus `FT2GUI_V6` files. You can also validate or open a
+layout directly:
+
+```sh
+./build-gui-designer/ft2_gui_designer --validate layouts/v2_complete_layout.gui
+./build-gui-designer/ft2_gui_designer layouts/v2_complete_layout.gui
+```
+
+Relative layout paths are resolved against the executable directory as well as
+the current working directory.
 
 Run the full available matrix:
 

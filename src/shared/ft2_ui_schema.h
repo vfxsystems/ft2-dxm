@@ -78,7 +78,8 @@ typedef enum
     FT2_UI_WIDGET_PAGE_3 = 3,
     FT2_UI_WIDGET_PAGE_4 = 4,
     FT2_UI_WIDGET_PAGE_5 = 5,
-    FT2_UI_WIDGET_PAGE_6 = 6
+    FT2_UI_WIDGET_PAGE_6 = 6,
+    FT2_UI_WIDGET_PAGE_7 = 7
 } ft2_ui_widget_page_t;
 
 typedef struct

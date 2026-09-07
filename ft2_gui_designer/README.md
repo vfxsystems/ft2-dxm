@@ -10,7 +10,7 @@ FT2 GUI Designer is a layout editor that mirrors FastTracker 2 widget behavior a
 - Bitmap import using FT2 asset registry (BMP/PNG, indexed or 24/32-bit true-color).
 - Bitmap layer and skin metadata for foreground art, backgrounds, and widget skin surfaces.
 - Wider two-column toolbar with readable schema labels.
-- Page-view dropdown for all pages or Page 1 through Page 6.
+- Numeric page selector with up/down arrows for layout pages 0 through 7 (`0` shows all pages).
 - Designer palette themes: FT2 Arctic, OP-1 inspired, Renoise inspired, and VS Code inspired.
 - Vector modulation-ring preview for TF rotary controls using the shared schema v9 `mod_ring` contract.
 - Built-in file prompt for load/save/export without blocking the app.
@@ -31,6 +31,21 @@ cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
 cmake --build build-gui-designer --parallel 4
 ./build-gui-designer/ft2_gui_designer
 ```
+
+Pass a design file to load it at startup, or validate one or more design files
+without opening a window:
+
+```bash
+./build-gui-designer/ft2_gui_designer ft2_gui_designer/layouts/v2_complete_layout.gui
+./build-gui-designer/ft2_gui_designer --validate \
+  ft2_gui_designer/layouts/v2_complete_layout.gui \
+  ft2_gui_designer/layouts/ostirus_complete_layout.gui
+ctest --test-dir build-gui-designer --output-on-failure
+```
+
+CMake copies the tracked layouts beside the executable. Relative `layouts/...`
+paths are resolved from the executable directory, so loading works regardless of
+the directory used to launch the designer.
 
 If SDL2/OpenGL development packages are missing, install them using your platform package manager and rebuild.
 
@@ -65,7 +80,7 @@ File operations (open prompt in the canvas footer):
 
 - Canvas size is 632x400 with an 8px grid.
 - Drag tools from the toolbar or select a tool and click to place.
-- The toolbar page dropdown controls preview filtering without changing widget coordinates.
+- The toolbar page spinner controls preview filtering without changing widget coordinates. Page `0` shows all widgets; pages `1` through `7` show their assigned widgets.
 - The theme dropdown changes the designer palette preview while preserving FT2 palette indexes used by export.
 - TF rotary widgets export modulation-ring metadata. Matrix amount knobs are tagged as direct matrix-amount rings; other rotary widgets use automatic engine/name matching for live modulation feedback.
 - Selected widgets show handles for visual feedback.

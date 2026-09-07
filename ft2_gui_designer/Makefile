@@ -9,7 +9,7 @@ SOURCES = main.c palette.c canvas.c widgets.c font.c assets.c stb_image.c \
 	../src/shared/ft2_ui_widget_registry.c
 OBJECTS = $(SOURCES:.c=.o)
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
 
@@ -21,6 +21,9 @@ $(TARGET): $(OBJECTS)
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)
+
+test: $(TARGET)
+	./$(TARGET) --validate test_design.gui layouts/*.gui
 
 install:
 	sudo apt-get update

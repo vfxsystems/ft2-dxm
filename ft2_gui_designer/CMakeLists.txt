@@ -28,6 +28,12 @@ list(APPEND DESIGNER_SOURCES ${DESIGNER_GFX_SOURCES})
 
 add_executable(ft2_gui_designer ${DESIGNER_SOURCES})
 
+add_custom_command(TARGET ft2_gui_designer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${DESIGNER_ROOT}/layouts"
+            "$<TARGET_FILE_DIR:ft2_gui_designer>/layouts"
+    VERBATIM)
+
 target_include_directories(ft2_gui_designer PRIVATE
     "${DESIGNER_ROOT}"
     "${REPO_ROOT}/src"
@@ -92,4 +98,20 @@ else()
     find_package(SDL2 REQUIRED)
     target_include_directories(ft2_gui_designer SYSTEM PRIVATE ${SDL2_INCLUDE_DIRS})
     target_link_libraries(ft2_gui_designer PRIVATE ${SDL2_LIBRARIES} GL GLU m)
+endif()
+
+include(CTest)
+if (BUILD_TESTING)
+    add_test(NAME gui_designer_layout_validation
+        COMMAND ft2_gui_designer --validate
+            "${DESIGNER_ROOT}/test_design.gui"
+            "layouts/tf_complete_layout.gui"
+            "layouts/dx_complete_layout.gui"
+            "layouts/ft2_mixer_layout.gui"
+            "layouts/v2_complete_layout.gui"
+            "layouts/ostirus_complete_layout.gui")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/invalid_layout.gui" "FT2GUI_V6\n1\ninvalid widget record\n")
+    add_test(NAME gui_designer_rejects_malformed_layout
+        COMMAND ft2_gui_designer --validate "${CMAKE_CURRENT_BINARY_DIR}/invalid_layout.gui")
+    set_tests_properties(gui_designer_rejects_malformed_layout PROPERTIES WILL_FAIL TRUE)
 endif()
