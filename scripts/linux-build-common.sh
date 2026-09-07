@@ -62,3 +62,25 @@ ft2_validate_jobs() {
             ;;
     esac
 }
+
+ft2_report_ostirus_rom() {
+    local binary_dir=$1
+    local runtime_rom="${binary_dir}/OsTIrus/rom.bin"
+
+    if [ "${FT2_OSTIRUS_ROM+x}" = x ]; then
+        if [ -z "$FT2_OSTIRUS_ROM" ]; then
+            printf 'OsTIrus: ROM discovery explicitly disabled by an empty FT2_OSTIRUS_ROM.\n'
+        elif [ -r "$FT2_OSTIRUS_ROM" ] && [ -s "$FT2_OSTIRUS_ROM" ]; then
+            printf 'OsTIrus: external ROM configured through FT2_OSTIRUS_ROM.\n'
+        else
+            printf 'OsTIrus: FT2_OSTIRUS_ROM does not name a readable, non-empty file.\n' >&2
+        fi
+        return 0
+    fi
+
+    if [ -r "$runtime_rom" ] && [ -s "$runtime_rom" ]; then
+        printf 'OsTIrus: runtime ROM found at %s\n' "$runtime_rom"
+    else
+        printf 'OsTIrus: optional ROM not staged; place rom.bin at %s or set FT2_OSTIRUS_ROM when launching.\n' "$runtime_rom"
+    fi
+}

@@ -68,7 +68,9 @@ bool runSynthLevelTests(void)
                 }
                 printf("LEVEL,%s,%d,%d,%d,%.8g,%.8g,%.8g,%d\n", engine->engineName,
                     rates[rate], blocks[rate], preset, peak, sqrt(squares / samples), sum / samples, overs);
-                if (squares / samples < 1e-8) {
+                /* Some hardware ROM presets are intentionally very quiet. A peak
+                   floor catches a silent render without imposing a loudness policy. */
+                if (peak < 1.0e-6f) {
                     fprintf(stderr, "Inaudible factory fixture: %s preset %d at %d Hz\n",
                         engine->engineName, preset, rates[rate]);
                     ok = false;

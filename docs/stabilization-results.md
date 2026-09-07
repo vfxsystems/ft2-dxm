@@ -23,7 +23,7 @@ master gain/export discrepancies and the stateless-gainer bypass.
 - Synth note ownership survives tracker-channel instrument changes. Repeated identical note-ons retrigger; stop/reset purges embedded voices. Muted synth routes contribute silence.
 - Live, WAV, and slot rendering share master DSP/fader/configured volume processing. Stateless gain effects work and large offline blocks no longer bypass DSP.
 - Slot rendering saves the full mute array before restoring it. TF4 preset loading initializes a fresh instrument when necessary.
-- Normal builds do not embed local Virus archives. External ROM selection is available, and tests can explicitly disable ROM discovery.
+- Normal builds do not embed or copy local Virus firmware. External ROM selection and `OsTIrus/rom.bin` beside the executable are supported on every target; build wrappers report the expected runtime path, and public tests explicitly disable ROM discovery.
 - Source exporter omits firmware/runtime assets, transcripts, development metadata, and Git history. README/component inventory and Linux CI were added/updated.
 - Dexed patch revisions prevent pending updates from skipping a newly triggered voice's attack. Panic clears buffered audio, filter history, and sustain. MIDI channel identity survives the wrapper; note-off and sustain release affect the matching channel.
 - Dexed additive rendering preserves existing bus audio using bounded scratch blocks. Rendering all engines clears the bus once, then sums contributions. TF4's additive limiter processes only TF4 audio.
@@ -48,8 +48,9 @@ master gain/export discrepancies and the stateless-gainer bypass.
 
 The expanded six-test CTest suite passed in Release and Debug and under
 ASan/leak detection after the loader, saver, stereo editor, effect-stack, and
-legacy decoder changes. Three Python exporter tests cover exclusions, nested
-firmware archives, and credential-signature rejection. The suite includes
+legacy decoder changes. Python support tests cover source exclusions, nested
+firmware archives, credential-signature rejection, and custom build-directory
+propagation. The suite includes
 numerical live/export checks, original unity transfer, 16-bit conversion,
 large-block DSP, synth mute/stop, input sequences, and existing V2 persistence
 stress coverage. The exported snapshot also built from scratch under `/tmp`
@@ -68,9 +69,11 @@ TF4 reaches its existing engine limiter; V2 can exceed unity before the mixer
 included silence and very low levels. A decaying-sine regression reproduced a
 skipped-attack defect at all three rates. After the fix, sampled factory patches
 have RMS levels around 0.09–0.20 without changing engine gain. Level tests now
-reject inaudible factory fixtures as well as non-finite samples. All measured samples
-were finite. A separate local probe with externally selected firmware also
-completed all nine OsTIrus cases (maximum observed peak approximately 0.138).
+reject silent factory fixtures as well as non-finite samples while accepting
+intentionally quiet hardware presets. All measured samples were finite. Local
+probes through both `FT2_OSTIRUS_ROM` and `OsTIrus/rom.bin` beside the executable
+completed all nine OsTIrus cases (maximum observed peak approximately 0.138),
+including an ASan/UBSan/leak-detection run.
 The 36 measurement rows are in [synth-levels.csv](synth-levels.csv); they contain
 measurements only, not firmware or patch data. Public tests explicitly skip
 OsTIrus measurements without firmware.
