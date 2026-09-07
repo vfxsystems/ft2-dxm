@@ -89,5 +89,3 @@ OsTIrus measurements without firmware.
 - Perform listening comparisons with representative user projects. Configuration volume and previously bypassed gainer/export controls now work, so old projects relying on those omissions may sound different; see the compatibility notes.
 - Complete asset/preset provenance review and native target/device validation before publishing. No repository upload, history rewrite, or release tag has been performed.
 
-The pre-existing deletion of `src/gemini.md` was preserved. Local ROM files were
-left intact; exclusion is enforced in the separate publication snapshot.
