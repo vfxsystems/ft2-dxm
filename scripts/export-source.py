@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_NAMES = {"codex.md", "_old.codex.md", "gemini.md", "claude.md"}
 EXCLUDED_PREFIXES = (
     "src/gearmulator/assets/",  # local ROMs, extracted presets and databases
-    "src/release/", "src/vs2019_project/x64/", "gfxassets/working/",
+    "src/release/", "src/vs2019_project/x64/", "gfxassets/",
 )
 SECRET = re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
                     rb"\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bAKIA[A-Z0-9]{16}\b")

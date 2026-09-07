@@ -12,7 +12,8 @@ spec.loader.exec_module(exporter)
 class SourceExportTests(unittest.TestCase):
     def test_firmware_and_transcripts_excluded_but_sources_retained(self):
         for name in ("src/gearmulator/assets/otstirusdat.zip", "OsTIrus/roms/rom.bin",
-                     "src/dexed/_old.Codex.md", "src/gearmulator/CLAUDE.md"):
+                     "src/dexed/_old.Codex.md", "src/gearmulator/CLAUDE.md",
+                     "gfxassets/logo1.bmp", "gfxassets/working/concept.png"):
             self.assertTrue(exporter.excluded(name), name)
         for name in ("src/ft2_ostirus_wrapper.cpp", "src/v2/LICENSE.txt", "tests/stability_tests.c"):
             self.assertFalse(exporter.excluded(name), name)

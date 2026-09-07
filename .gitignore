@@ -1,4 +1,6 @@
-
+.agents/
+.claude/
+.codex/
 .vs/
 .vscode/
 archive/
@@ -48,6 +50,7 @@ src/release/other/
 release/macos/ft2-dxm-macos.app/Contents/MacOS/ft2-dxm-macos
 src/tunefish4/Builds/
 src/tunefish4/JuceLibraryCode/
+gfxassets/
 
 # Local Virus firmware and derived runtime data; source exports also exclude these.
 src/gearmulator/assets/

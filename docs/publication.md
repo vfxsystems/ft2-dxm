@@ -1,8 +1,8 @@
 # Source publication
 
-The development checkout and its Git history contain local firmware and
-assistant transcripts. Do not push that history as the public repository.
-Ignore rules do not remove already tracked files or historical blobs.
+The public branch and source exporter exclude local firmware, the `gfxassets/`
+workspace, and assistant transcripts. Keep those paths untracked: ignore rules
+prevent new additions but do not remove already tracked files or historical blobs.
 
 Create a source snapshot without changing or deleting local ROMs:
 
@@ -14,7 +14,7 @@ python3 scripts/export-source.py --output /tmp/ft2-dxm-source.tar.gz
 The exporter uses current tracked file contents plus new files under `docs/`,
 `tests/`, `scripts/`, and `.github/`. It excludes local Gearmulator runtime assets
 (including the ROM-containing ZIP), assistant transcripts, development metadata,
-build binaries, and working graphics exports. It checks selected credential
+build binaries, and the entire local `gfxassets/` workspace. It checks selected credential
 signatures and ZIP contents and refuses to overwrite an existing archive.
 It never includes `.git` history.
 
