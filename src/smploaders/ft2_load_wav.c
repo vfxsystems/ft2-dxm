@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <math.h>
 #include "../ft2_header.h"
 #include "../ft2_audio.h"
 #include "../ft2_sample_ed.h"
@@ -20,18 +21,68 @@ enum
 	WAV_FORMAT_IEEE_FLOAT = 3
 };
 
-static bool wavIsStereo(FILE *f);
+static bool readExact(FILE *f, void *dst, size_t bytes)
+{
+	return bytes == 0 || fread(dst, 1, bytes, f) == bytes;
+}
+
+static bool seekTo(FILE *f, uint64_t offset, uint32_t filesize)
+{
+	return offset <= filesize && fseek(f, (long)offset, SEEK_SET) == 0;
+}
+
+static uint16_t readLE16(const uint8_t *src)
+{
+	return (uint16_t)(src[0] | (src[1] << 8));
+}
+
+static uint32_t readLE32(const uint8_t *src)
+{
+	return (uint32_t)src[0] | ((uint32_t)src[1] << 8) |
+		((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
+}
+
+static double decodeHighResolutionSample(const uint8_t *src, uint16_t audioFormat, uint16_t bitsPerSample)
+{
+	if (audioFormat == WAV_FORMAT_IEEE_FLOAT)
+	{
+		if (bitsPerSample == 32)
+		{
+			const uint32_t bits = readLE32(src);
+			float sample;
+			memcpy(&sample, &bits, sizeof (sample));
+			return isfinite(sample) ? sample : 0.0;
+		}
+
+		uint64_t bits = (uint64_t)readLE32(src) | ((uint64_t)readLE32(src + 4) << 32);
+		double sample;
+		memcpy(&sample, &bits, sizeof (sample));
+		return isfinite(sample) ? sample : 0.0;
+	}
+
+	if (bitsPerSample == 24)
+	{
+		uint32_t value = (uint32_t)src[0] | ((uint32_t)src[1] << 8) | ((uint32_t)src[2] << 16);
+		if (value & 0x00800000u)
+			value |= 0xFF000000u;
+		return (double)(int32_t)value;
+	}
+
+	return (double)(int32_t)readLE32(src);
+}
+
+static int16_t scaleToSigned16(double sample, double gain)
+{
+	double scaled = sample * gain;
+	if (scaled > INT16_MAX) scaled = INT16_MAX;
+	if (scaled < INT16_MIN) scaled = INT16_MIN;
+	return (int16_t)scaled;
+}
 
 bool loadWAV(FILE *f, uint32_t filesize)
 {
-	uint8_t *audioDataU8;
-	int16_t *audioDataS16, *ptr16;
 	uint16_t audioFormat, numChannels, bitsPerSample;
-	int32_t *audioDataS32;
-	uint32_t i, sampleRate, sampleLength;
-	uint32_t len32;
-	float *fAudioDataFloat;
-	double *dAudioDataDouble;
+	uint32_t sampleRate, sampleLength;
 	sample_t *s = &tmpSmp;
 
 	if (filesize < 12)
@@ -39,6 +90,10 @@ bool loadWAV(FILE *f, uint32_t filesize)
 		loaderMsgBox("Error loading sample: The sample is not supported or is invalid!");
 		return false;
 	}
+	uint8_t riffHeader[12];
+	if (!seekTo(f, 0, filesize) || !readExact(f, riffHeader, sizeof (riffHeader)) ||
+		memcmp(riffHeader, "RIFF", 4) != 0 || memcmp(&riffHeader[8], "WAVE", 4) != 0)
+		return false;
 
 	uint32_t fmtPtr  = 0, fmtLen  = 0;
 	uint32_t dataPtr = 0, dataLen = 0;
@@ -47,28 +102,33 @@ bool loadWAV(FILE *f, uint32_t filesize)
 	uint32_t smplPtr = 0, smplLen = 0;
 
 	// look for wanted chunks and set up pointers + lengths
-	fseek(f, 12, SEEK_SET);
-
-	uint32_t bytesRead = 0;
-	while (!feof(f) && bytesRead < filesize-12)
+	if (!seekTo(f, 12, filesize)) return false;
+	while (true)
 	{
-		uint32_t chunkID, chunkSize;
-		fread(&chunkID, 4, 1, f); if (feof(f)) break;
-		fread(&chunkSize, 4, 1, f); if (feof(f)) break;
+		const long chunkHeaderPos = ftell(f);
+		if (chunkHeaderPos < 0) return false;
+		if ((uint64_t)chunkHeaderPos + 8 > filesize) break;
 
-		uint32_t endOfChunk = (ftell(f) + chunkSize) + (chunkSize & 1);
+		uint32_t chunkID, chunkSize;
+		if (!readExact(f, &chunkID, sizeof (chunkID)) || !readExact(f, &chunkSize, sizeof (chunkSize)))
+			return false;
+		const long payloadPos = ftell(f);
+		if (payloadPos < 0) return false;
+		const uint64_t chunkEnd = (uint64_t)payloadPos + chunkSize + (chunkSize & 1u);
+		if (chunkEnd > filesize) return false;
+
 		switch (chunkID)
 		{
 			case 0x20746D66: // "fmt "
 			{
-				fmtPtr = ftell(f);
+				fmtPtr = (uint32_t)payloadPos;
 				fmtLen = chunkSize;
 			}
 			break;
 
 			case 0x61746164: // "data"
 			{
-				dataPtr = ftell(f);
+				dataPtr = (uint32_t)payloadPos;
 				dataLen = chunkSize;
 			}
 			break;
@@ -77,28 +137,30 @@ bool loadWAV(FILE *f, uint32_t filesize)
 			{
 				if (chunkSize >= 4)
 				{
-					fread(&chunkID, 4, 1, f);
-					if (chunkID == 0x4F464E49) // "INFO"
+					uint32_t listType;
+					if (!readExact(f, &listType, sizeof (listType))) return false;
+					if (listType == 0x4F464E49) // "INFO"
 					{
-						bytesRead = 0;
-						while (!feof(f) && bytesRead < chunkSize)
+						const uint64_t listEnd = (uint64_t)payloadPos + chunkSize;
+						while (true)
 						{
-							fread(&chunkID, 4, 1, f);
-							fread(&chunkSize, 4, 1, f);
+							const long infoHeaderPos = ftell(f);
+							if (infoHeaderPos < 0) return false;
+							if ((uint64_t)infoHeaderPos + 8 > listEnd) break;
+							uint32_t infoID, infoSize;
+							if (!readExact(f, &infoID, sizeof (infoID)) ||
+								!readExact(f, &infoSize, sizeof (infoSize))) return false;
+							const long infoPayloadPos = ftell(f);
+							if (infoPayloadPos < 0) return false;
+							const uint64_t infoEnd = (uint64_t)infoPayloadPos + infoSize + (infoSize & 1u);
+							if (infoEnd > listEnd) return false;
 
-							switch (chunkID)
+							if (infoID == 0x4D414E49) // "INAM"
 							{
-								case 0x4D414E49: // "INAM"
-								{
-									inamPtr = ftell(f);
-									inamLen = chunkSize;
-								}
-								break;
-
-								default: break;
+								inamPtr = (uint32_t)infoPayloadPos;
+								inamLen = infoSize;
 							}
-
-							bytesRead += (chunkSize + (chunkSize & 1));
+							if (!seekTo(f, infoEnd, filesize)) return false;
 						}
 					}
 				}
@@ -107,14 +169,14 @@ bool loadWAV(FILE *f, uint32_t filesize)
 
 			case 0x61727478: // "xtra"
 			{
-				xtraPtr = ftell(f);
+				xtraPtr = (uint32_t)payloadPos;
 				xtraLen = chunkSize;
 			}
 			break;
 
 			case 0x6C706D73: // "smpl"
 			{
-				smplPtr = ftell(f);
+				smplPtr = (uint32_t)payloadPos;
 				smplLen = chunkSize;
 			}
 			break;
@@ -122,8 +184,7 @@ bool loadWAV(FILE *f, uint32_t filesize)
 			default: break;
 		}
 
-		bytesRead += (chunkSize + (chunkSize & 1));
-		fseek(f, endOfChunk, SEEK_SET);
+		if (!seekTo(f, chunkEnd, filesize)) return false;
 	}
 
 	// we need at least "fmt " and "data" - check if we found them sanely
@@ -134,29 +195,36 @@ bool loadWAV(FILE *f, uint32_t filesize)
 	}
 
 	// ---- READ "fmt " CHUNK ----
-	fseek(f, fmtPtr, SEEK_SET);
-	fread(&audioFormat, 2, 1, f);
-	fread(&numChannels, 2, 1, f);
-	fread(&sampleRate,  4, 1, f);
-	fseek(f, 6, SEEK_CUR); // unneeded
-	fread(&bitsPerSample, 2, 1, f);
-	// After parsing WAV header and before reading sample data:
-	int bytesPerSample = bitsPerSample / 8;
-	int numFrames = dataLen / (numChannels * bytesPerSample);
-	sampleLength = numFrames;
-	// ---------------------------
-
+	uint8_t fmtSkipped[6];
+	if (!seekTo(f, fmtPtr, filesize) || !readExact(f, &audioFormat, sizeof (audioFormat)) ||
+		!readExact(f, &numChannels, sizeof (numChannels)) ||
+		!readExact(f, &sampleRate, sizeof (sampleRate)) ||
+		!readExact(f, fmtSkipped, sizeof (fmtSkipped)) ||
+		!readExact(f, &bitsPerSample, sizeof (bitsPerSample)))
+		return false;
 	// test if the WAV is compatible with our loader
+	if (audioFormat != WAV_FORMAT_PCM && audioFormat != WAV_FORMAT_IEEE_FLOAT)
+	{
+		loaderMsgBox("Error loading sample: The sample is not supported!");
+		return false;
+	}
+	if (audioFormat == WAV_FORMAT_PCM && bitsPerSample == 64)
+	{
+		loaderMsgBox("Error loading sample: Unsupported bitdepth!");
+		return false;
+	}
 
-	if (sampleRate == 0 || sampleLength == 0 || sampleLength >= filesize)
+	const uint32_t bytesPerSample = bitsPerSample / 8;
+	const uint32_t bytesPerFrame = numChannels * bytesPerSample;
+	if (sampleRate == 0 || bytesPerFrame == 0 || dataLen < bytesPerFrame || dataLen % bytesPerFrame != 0)
 	{
 		loaderMsgBox("Error loading sample: The sample is not supported or is invalid!");
 		return false;
 	}
-
-	if (audioFormat != WAV_FORMAT_PCM && audioFormat != WAV_FORMAT_IEEE_FLOAT)
+	sampleLength = dataLen / bytesPerFrame;
+	if (sampleLength > MAX_SAMPLE_LEN)
 	{
-		loaderMsgBox("Error loading sample: The sample is not supported!");
+		loaderMsgBox("Error loading sample: The sample is too long!");
 		return false;
 	}
 
@@ -179,523 +247,123 @@ bool loadWAV(FILE *f, uint32_t filesize)
 	}
 
 	// ---- READ SAMPLE DATA ----
-	fseek(f, dataPtr, SEEK_SET);
+	if (!seekTo(f, dataPtr, filesize)) return false;
 
 	int16_t stereoSampleLoadMode = -1;
-	if (wavIsStereo(f))
-
+	if (numChannels == 2)
 	{
-		// Update: present options as 'Load Left Only', 'Load Right Only', 'Load Stereo'
-		// loaderSysReq expects the number of options, title, message, and a callback (NULL)
-		// The actual button labels are set in the UI code, but update the message for clarity
 		stereoSampleLoadMode = loaderSysReq(4, "System request", "This is a stereo sample.", NULL);
+		if (stereoSampleLoadMode != STEREO_SAMPLE_READ_LEFT &&
+			stereoSampleLoadMode != STEREO_SAMPLE_READ_RIGHT &&
+			stereoSampleLoadMode != STEREO_SAMPLE_CONVERT)
+			return false;
 	}
-	printf("stereoSampleLoadMode = %d\n", stereoSampleLoadMode);
-	// --- 8-BIT INTEGER SAMPLE ---
+
+	const bool stereoOutput = numChannels == 2 && stereoSampleLoadMode == STEREO_SAMPLE_CONVERT;
+	const uint32_t selectedChannel = stereoSampleLoadMode == STEREO_SAMPLE_READ_RIGHT ? 1 : 0;
+	uint8_t *sourceData = (uint8_t *)malloc(dataLen);
+	if (sourceData == NULL)
+	{
+		loaderMsgBox("Not enough memory!");
+		return false;
+	}
+	if (!readExact(f, sourceData, dataLen))
+	{
+		free(sourceData);
+		loaderMsgBox("General I/O error during loading! Is the file in use?");
+		return false;
+	}
+
+	const bool output16Bit = bitsPerSample != 8;
+	if (!allocateSmpData(s, sampleLength, output16Bit, stereoOutput))
+	{
+		free(sourceData);
+		loaderMsgBox("Not enough memory!");
+		return false;
+	}
+
 	if (bitsPerSample == 8)
 	{
-		if (numChannels == 1 || stereoSampleLoadMode == STEREO_SAMPLE_READ_LEFT || stereoSampleLoadMode == STEREO_SAMPLE_READ_RIGHT)
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			if (!allocateSmpData(s, sampleLength, false, false))
-			{
-				loaderMsgBox("Not enough memory!");
-				return false;
-			}
-
-			if (numChannels == 1)
-			{
-				/* Simple mono load */
-				if (fread(s->dataPtrL, sampleLength, 1, f) != 1)
-				{
-					loaderMsgBox("General I/O error during loading! Is the file in use?");
-					return false;
-				}
-			}
-			else /* stereo file – extract desired channel */
-			{
-				uint8_t *tmpBuf = (uint8_t *)malloc(sampleLength * 2);
-				if (!tmpBuf) return false;
-				if (fread(tmpBuf, sizeof(uint8_t), sampleLength * 2, f) != (size_t)(sampleLength * 2))
-				{
-					free(tmpBuf);
-					loaderMsgBox("General I/O error during loading! Is the file in use?");
-					return false;
-				}
-				/* Copy chosen channel into L */
-				for (i = 0; i < sampleLength; i++)
-					s->dataPtrL[i] = tmpBuf[(i * 2) + ((stereoSampleLoadMode == STEREO_SAMPLE_READ_RIGHT) ? 1 : 0)];
-				free(tmpBuf);
-			}
-
-			/* For convenience, duplicate to R so playback remains stereo */
-			if (!s->dataPtrR)
-			{
-				s->origDataPtrR = (int8_t *)malloc(sampleLength + SAMPLE_PAD_LENGTH);
-				if (s->origDataPtrR)
-					s->dataPtrR = s->origDataPtrR + SMP_DAT_OFFSET;
-			}
-			if (s->dataPtrR)
-				memcpy(s->dataPtrR, s->dataPtrL, sampleLength);
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			s->dataPtrL[i] = frame[selectedChannel] ^ 0x80;
+			if (stereoOutput)
+				s->dataPtrR[i] = frame[1] ^ 0x80;
 		}
-		else if (numChannels == 2 && stereoSampleLoadMode == STEREO_SAMPLE_CONVERT) // Load Stereo
-				{
-			// Allocate both L and R
-			if (!allocateSmpData(s, sampleLength, false, true))
-			{
-				loaderMsgBox("Not enough memory!");
-				return false;
-			}
-            // Safety check for stereo buffer allocation
-            if (!s->dataPtrL || !s->dataPtrR) {
-                loaderMsgBox("Stereo buffer allocation failed!");
-                return false;
-            }
-			uint8_t *tmpBuf = (uint8_t *)malloc(sampleLength * 2);
-			if (!tmpBuf) return false;
-			long pos_before = ftell(f);
-			fseek(f, 0, SEEK_END);
-			long file_size = ftell(f);
-			fseek(f, pos_before, SEEK_SET);
-			printf("[DEBUG 8bit stereo] sampleLength = %d, file_size = %ld, pos_before = %ld\n", sampleLength, file_size, pos_before);
-			size_t readCount = fread(tmpBuf, sizeof(uint8_t), sampleLength * 2, f);
-			long pos_after = ftell(f);
-			printf("[8bit stereo] fread: requested=%d, returned=%zu, filepos before=%ld, after=%ld\n",
-				   sampleLength * 2, readCount, pos_before, pos_after);
-			if (readCount != (size_t)(sampleLength * 2)) {
-				loaderMsgBox("General I/O error during loading! Is the file in use?");
-				free(tmpBuf);
-				return false;
-			}
-			/* copy unsigned bytes interleaved L,R -> planar L/R */
-			for (i = 0; i < sampleLength; i++) {
-				s->dataPtrL[i] = tmpBuf[(i * 2) + 0];
-				s->dataPtrR[i] = tmpBuf[(i * 2) + 1];
-			}
-			s->flags |= SAMPLE_STEREO;
-			/* keep 8-bit – don’t set SAMPLE_16BIT here */
-			s->length = sampleLength;
-			/* debug prints removed for 8-bit stereo path */
-			free(tmpBuf);
-		}
-		// convert from unsigned to signed
-		int32_t len = (numChannels == 2 && stereoSampleLoadMode == STEREO_SAMPLE_CONVERT) ? sampleLength : sampleLength;
-		for (i = 0; i < len; i++)
-		{
-			if (s->dataPtrL) s->dataPtrL[i] ^= 0x80;
-			if (s->dataPtrR) s->dataPtrR[i] ^= 0x80;
 	}
-	}
-	// --- 16-BIT INTEGER SAMPLE ---
 	else if (bitsPerSample == 16)
 	{
-		if (numChannels == 1 || stereoSampleLoadMode == STEREO_SAMPLE_READ_LEFT || stereoSampleLoadMode == STEREO_SAMPLE_READ_RIGHT)
+		int16_t *left = (int16_t *)s->dataPtrL;
+		int16_t *right = (int16_t *)s->dataPtrR;
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			if (!allocateSmpData(s, sampleLength, true, false))
-			{
-				loaderMsgBox("Not enough memory!");
-				return false;
-			}
-
-			if (numChannels == 1)
-			{
-				/* Mono data */
-				if (fread(s->dataPtrL, sizeof(int16_t), sampleLength, f) != (size_t)sampleLength)
-				{
-					loaderMsgBox("General I/O error during loading! Is the file in use?");
-					return false;
-				}
-			}
-			else /* stereo file – extract left or right */
-			{
-				int16_t *tmpBuf = (int16_t *)malloc(sampleLength * 2 * sizeof(int16_t));
-				if (!tmpBuf) return false;
-				if (fread(tmpBuf, sizeof(int16_t), sampleLength * 2, f) != (size_t)(sampleLength * 2))
-				{
-					free(tmpBuf);
-					loaderMsgBox("General I/O error during loading! Is the file in use?");
-					return false;
-				}
-				for (i = 0; i < sampleLength; i++)
-				{
-					((int16_t *)s->dataPtrL)[i] = tmpBuf[(i * 2) + ((stereoSampleLoadMode == STEREO_SAMPLE_READ_RIGHT) ? 1 : 0)];
-				}
-				free(tmpBuf);
-
-				/* Duplicate to Right channel buffer (optional) */
-				if (!s->dataPtrR)
-				{
-					s->origDataPtrR = (int8_t *)malloc((sampleLength << 1) + SAMPLE_PAD_LENGTH);
-					if (s->origDataPtrR)
-						s->dataPtrR = s->origDataPtrR + SMP_DAT_OFFSET;
-				}
-				if (s->dataPtrR)
-					memcpy(s->dataPtrR, s->dataPtrL, sampleLength << 1);
-			}
-
-			/* Ensure R pointer null for mono */
-			if (numChannels == 1)
-				s->dataPtrR = NULL;
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			left[i] = (int16_t)readLE16(frame + (selectedChannel * 2));
+			if (stereoOutput)
+				right[i] = (int16_t)readLE16(frame + 2);
 		}
-		else if (numChannels == 2 && stereoSampleLoadMode == STEREO_SAMPLE_CONVERT) // Load Stereo
-		{
-			if (!allocateSmpData(s, sampleLength, true, true))
-			{
-				loaderMsgBox("Not enough memory!");
-				return false;
-			}
-            // Safety check for stereo buffer allocation
-            if (!s->dataPtrL || !s->dataPtrR) {
-                loaderMsgBox("Stereo buffer allocation failed!");
-                return false;
-            }
-			int16_t *tmpBuf = (int16_t *)malloc(sampleLength * 2 * sizeof(int16_t));
-			if (!tmpBuf) return false;
-			long pos_before = ftell(f);
-			fseek(f, 0, SEEK_END);
-			long file_size = ftell(f);
-			fseek(f, pos_before, SEEK_SET);
-			printf("[DEBUG 16bit stereo] sampleLength = %d, file_size = %ld, pos_before = %ld\n", sampleLength, file_size, pos_before);
-			size_t readCount = fread(tmpBuf, sizeof(int16_t), sampleLength * 2, f);
-			long pos_after = ftell(f);
-			printf("[16bit stereo] fread: requested=%d, returned=%zu, filepos before=%ld, after=%ld\n",
-				   (int)(sampleLength * 2), readCount, pos_before, pos_after);
-			if (readCount != (size_t)(sampleLength * 2)) {
-				loaderMsgBox("General I/O error during loading! Is the file in use?");
-				free(tmpBuf);
-				return false;
-			}
-			for (i = 0; i < sampleLength; i++) {
-				((int16_t *)s->dataPtrL)[i] = tmpBuf[i * 2 + 0];
-				((int16_t *)s->dataPtrR)[i] = tmpBuf[i * 2 + 1];
-			}
-			s->flags |= SAMPLE_STEREO;
-			s->flags |= SAMPLE_16BIT;
-			s->length = sampleLength;
-			printf("[DEBUG] First 4 L: %d %d %d %d\n", ((int16_t *)s->dataPtrL)[0], ((int16_t *)s->dataPtrL)[1], ((int16_t *)s->dataPtrL)[2], ((int16_t *)s->dataPtrL)[3]);
-			printf("[DEBUG] First 4 R: %d %d %d %d\n", ((int16_t *)s->dataPtrR)[0], ((int16_t *)s->dataPtrR)[1], ((int16_t *)s->dataPtrR)[2], ((int16_t *)s->dataPtrR)[3]);
-			printf("[DEBUG] s->flags = 0x%X, s->length = %d\n", s->flags, s->length);
-			fflush(stdout);
-			free(tmpBuf);
-			}
-		s->flags |= SAMPLE_16BIT;
 	}
-	else if (bitsPerSample == 24) // 24-BIT INTEGER SAMPLE
+	else
 	{
-		sampleLength /= 3;
-		if (!allocateSmpData(s, sampleLength * sizeof (int32_t), false, false))
+		double peak = 0.0;
+		for (uint32_t i = 0; i < sampleLength; i++)
 		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(&s->dataPtrL[sampleLength], sampleLength, 3, f) != 3)
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		audioDataS32 = (int32_t *)s->dataPtrL;
-
-		// convert to 32-bit
-		audioDataU8 = (uint8_t *)s->dataPtrL + sampleLength;
-		for (i = 0; i < sampleLength; i++)
-		{
-			audioDataS32[i] = (audioDataU8[2] << 24) | (audioDataU8[1] << 16) | (audioDataU8[0] << 8);
-			audioDataU8 += 3;
-		}
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-			switch (stereoSampleLoadMode)
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			const double left = fabs(decodeHighResolutionSample(
+				frame + (selectedChannel * bytesPerSample), audioFormat, bitsPerSample));
+			if (left > peak) peak = left;
+			if (stereoOutput)
 			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					// remove right channel data
-					for (i = 1; i < sampleLength; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					// remove left channel data
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 1];
-
-					audioDataS32[i] = 0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					// mix stereo to mono
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-					{
-						int64_t smp64 = audioDataS32[(i * 2) + 0];
-						smp64 += audioDataS32[(i * 2) + 1];
-						smp64 >>= 1;
-
-						audioDataS32[i] = (int32_t)smp64;
-					}
-
-					audioDataS32[i] = 0;
-				}
-				break;
+				const double right = fabs(decodeHighResolutionSample(
+					frame + bytesPerSample, audioFormat, bitsPerSample));
+				if (right > peak) peak = right;
 			}
 		}
 
-		normalizeSigned32Bit(audioDataS32, sampleLength);
-
-		ptr16 = (int16_t *)s->dataPtrL;
-		for (i = 0; i < sampleLength; i++)
-			ptr16[i] = audioDataS32[i] >> 16;
-
-		s->flags |= SAMPLE_16BIT;
+		const double gain = peak > 0.0 ? (double)INT16_MAX / peak : 0.0;
+		int16_t *left = (int16_t *)s->dataPtrL;
+		int16_t *right = (int16_t *)s->dataPtrR;
+		for (uint32_t i = 0; i < sampleLength; i++)
+		{
+			const uint8_t *frame = sourceData + ((size_t)i * bytesPerFrame);
+			left[i] = scaleToSigned16(decodeHighResolutionSample(
+				frame + (selectedChannel * bytesPerSample), audioFormat, bitsPerSample), gain);
+			if (stereoOutput)
+				right[i] = scaleToSigned16(decodeHighResolutionSample(
+					frame + bytesPerSample, audioFormat, bitsPerSample), gain);
+		}
 	}
-	else if (audioFormat == WAV_FORMAT_PCM && bitsPerSample == 32) // 32-BIT INTEGER SAMPLE
-	{
-		sampleLength /= sizeof (int32_t);
-		if (!allocateSmpData(s, sampleLength * sizeof (int32_t), false, false))
-		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
+	free(sourceData);
 
-		if (fread(s->dataPtrL, sampleLength, sizeof (int32_t), f) != sizeof (int32_t))
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
+	s->flags = (output16Bit ? SAMPLE_16BIT : 0) | (stereoOutput ? SAMPLE_STEREO : 0);
+	s->length = sampleLength;
 
-		audioDataS32 = (int32_t *)s->dataPtrL;
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					// remove right channel data
-					for (i = 1; i < sampleLength; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					// remove left channel data
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						audioDataS32[i] = audioDataS32[(i * 2) + 1];
-
-					audioDataS32[i] = 0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					// mix stereo to mono
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-					{
-						int64_t smp64 = audioDataS32[(i * 2) + 0];
-						smp64 += audioDataS32[(i * 2) + 1];
-						smp64 >>= 1;
-
-						audioDataS32[i] = (int32_t)smp64;
-					}
-
-					audioDataS32[i] = 0;
-				}
-				break;
-			}
-		}
-
-		normalizeSigned32Bit(audioDataS32, sampleLength);
-
-		ptr16 = (int16_t *)s->dataPtrL;
-		for (i = 0; i < sampleLength; i++)
-			ptr16[i] = audioDataS32[i] >> 16;
-
-		s->flags |= SAMPLE_16BIT;
-	}
-	else if (audioFormat == WAV_FORMAT_IEEE_FLOAT && bitsPerSample == 32) // 32-BIT FLOATING POINT SAMPLE
-	{
-		sampleLength /= sizeof (float);
-		if (!allocateSmpData(s, sampleLength * sizeof (float), false, false))
-		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(s->dataPtrL, sampleLength, sizeof (float), f) != sizeof (float))
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		fAudioDataFloat = (float *)s->dataPtrL;
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					// remove right channel data
-					for (i = 1; i < sampleLength; i++)
-						fAudioDataFloat[i] = fAudioDataFloat[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					// remove left channel data
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						fAudioDataFloat[i] = fAudioDataFloat[(i * 2) + 1];
-
-					fAudioDataFloat[i] = 0.0f;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					// mix stereo to mono
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						fAudioDataFloat[i] = (fAudioDataFloat[(i * 2) + 0] + fAudioDataFloat[(i * 2) + 1]) * 0.5f;
-
-					fAudioDataFloat[i] = 0.0f;
-				}
-				break;
-			}
-		}
-
-		normalize32BitFloatToSigned16Bit(fAudioDataFloat, sampleLength);
-
-		ptr16 = (int16_t *)s->dataPtrL;
-		for (i = 0; i < sampleLength; i++)
-		{
-			const int32_t smp32 = (const int32_t)fAudioDataFloat[i];
-			ptr16[i] = (int16_t)smp32;
-		}
-
-		s->flags |= SAMPLE_16BIT;
-	}
-	else if (audioFormat == WAV_FORMAT_IEEE_FLOAT && bitsPerSample == 64) // 64-BIT FLOATING POINT SAMPLE
-	{
-		sampleLength /= sizeof (double);
-		if (!allocateSmpData(s, sampleLength * sizeof (double), false, false))
-		{
-			loaderMsgBox("Not enough memory!");
-			return false;
-		}
-
-		if (fread(s->dataPtrL, sampleLength, sizeof (double), f) != sizeof (double))
-		{
-			loaderMsgBox("General I/O error during loading! Is the file in use?");
-			return false;
-		}
-
-		dAudioDataDouble = (double *)s->dataPtrL;
-
-		// stereo conversion
-		if (numChannels == 2)
-		{
-			sampleLength /= 2;
-			switch (stereoSampleLoadMode)
-			{
-				case STEREO_SAMPLE_READ_LEFT:
-				{
-					// remove right channel data
-					for (i = 1; i < sampleLength; i++)
-						dAudioDataDouble[i] = dAudioDataDouble[(i * 2) + 0];
-				}
-				break;
-
-				case STEREO_SAMPLE_READ_RIGHT:
-				{
-					// remove left channel data
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						dAudioDataDouble[i] = dAudioDataDouble[(i * 2) + 1];
-
-					dAudioDataDouble[i] = 0.0;
-				}
-				break;
-
-				default:
-				case STEREO_SAMPLE_CONVERT:
-				{
-					// mix stereo to mono
-					len32 = sampleLength - 1;
-					for (i = 0; i < len32; i++)
-						dAudioDataDouble[i] = (dAudioDataDouble[(i * 2) + 0] + dAudioDataDouble[(i * 2) + 1]) * 0.5;
-
-					dAudioDataDouble[i] = 0.0;
-				}
-				break;
-			}
-		}
-
-		normalize64BitFloatToSigned16Bit(dAudioDataDouble, sampleLength);
-
-		ptr16 = (int16_t *)s->dataPtrL;
-		for (i = 0; i < sampleLength; i++)
-		{
-			const int32_t smp32 = (const int32_t)dAudioDataDouble[i];
-			ptr16[i] = (int16_t)smp32;
-		}
-
-		s->flags |= SAMPLE_16BIT;
-	}
-
-	if (sampleLength > MAX_SAMPLE_LEN)
-		sampleLength = MAX_SAMPLE_LEN;
-
-	bool sample16Bit = !!(s->flags & SAMPLE_16BIT);
-	reallocateSmpData(s, sampleLength, sample16Bit); // readjust memory needed
 
 	setSampleC4Hz(s, sampleRate);
 
 	s->volume = 64;
 	s->panning = 128;
-	// After all loading, set s->length to the number of samples per channel
-	if (numChannels == 2 && stereoSampleLoadMode == STEREO_SAMPLE_CONVERT)
-		s->length = sampleLength;
-	else
-	s->length = sampleLength;
 
 	// ---- READ "smpl" chunk ----
-	if (smplPtr != 0 && smplLen > 52)
+	if (smplPtr != 0 && smplLen >= 52)
 	{
 		uint32_t numLoops, loopType, loopStart, loopEnd;
 
-		fseek(f, smplPtr+28, SEEK_SET); // seek to first wanted byte
-
-		fread(&numLoops, 4, 1, f);
+		if (!seekTo(f, (uint64_t)smplPtr + 28, filesize) ||
+			!readExact(f, &numLoops, sizeof (numLoops)))
+			return false;
 		if (numLoops == 1)
 		{
-			fseek(f, 4+4, SEEK_CUR); // skip "samplerData" and "identifier"
+			if (!seekTo(f, (uint64_t)smplPtr + 40, filesize) ||
+				!readExact(f, &loopType, sizeof (loopType)) ||
+				!readExact(f, &loopStart, sizeof (loopStart)) ||
+				!readExact(f, &loopEnd, sizeof (loopEnd)))
+				return false;
 
-			fread(&loopType, 4, 1, f);
-			fread(&loopStart, 4, 1, f);
-			fread(&loopEnd, 4, 1, f);
-
-			loopEnd++;
-			if (loopEnd <= sampleLength)
+			if (loopEnd != UINT32_MAX)
+				loopEnd++;
+			if (loopStart < loopEnd && loopEnd <= sampleLength)
 			{
 				s->loopStart = loopStart;
 				s->loopLength = loopEnd - loopStart;
@@ -711,26 +379,22 @@ bool loadWAV(FILE *f, uint32_t filesize)
 		uint16_t tmpPan, tmpVol;
 		uint32_t xtraFlags;
 
-		fseek(f, xtraPtr, SEEK_SET);
-		fread(&xtraFlags, 4, 1, f); // flags
+		if (!seekTo(f, xtraPtr, filesize) ||
+			!readExact(f, &xtraFlags, sizeof (xtraFlags)) ||
+			!readExact(f, &tmpPan, sizeof (tmpPan)) ||
+			!readExact(f, &tmpVol, sizeof (tmpVol)))
+			return false;
 
 		// panning (0..256)
 		if (xtraFlags & 0x20) // set panning flag
 		{
-			fread(&tmpPan, 2, 1, f);
 			if (tmpPan > 255)
 				tmpPan = 255;
 
 			s->panning = (uint8_t)tmpPan;
 		}
-		else
-		{
-			// don't read panning, skip it
-			fseek(f, 2, SEEK_CUR);
-		}
 
 		// volume (0..256)
-		fread(&tmpVol, 2, 1, f);
 		if (tmpVol > 256)
 			tmpVol = 256;
 
@@ -741,12 +405,12 @@ bool loadWAV(FILE *f, uint32_t filesize)
 	// ---- READ "INAM" chunk ----
 	if (inamPtr != 0 && inamLen > 0)
 	{
-		fseek(f, inamPtr, SEEK_SET);
 		if (inamLen > 22)
 			inamLen = 22;
 
-		fread(s->name, 1, inamLen, f);
-		s->name[22] = '\0';
+		if (!seekTo(f, inamPtr, filesize) || !readExact(f, s->name, inamLen))
+			return false;
+		s->name[inamLen] = '\0';
 
 		smpFilenameSet = true;
 	}
@@ -754,59 +418,86 @@ bool loadWAV(FILE *f, uint32_t filesize)
 	return true;
 }
 
-static bool wavIsStereo(FILE *f)
+#ifdef FT2_STABILITY_TESTS
+static void ignoreWAVLoaderMessage(const char *message, ...)
 {
-	uint16_t numChannels;
-	uint32_t chunkID, chunkSize;
-
-	uint32_t oldPos = ftell(f);
-
-	fseek(f, 0, SEEK_END);
-	int32_t filesize = ftell(f);
-
-	if (filesize < 12)
-	{
-		fseek(f, oldPos, SEEK_SET);
-		return false;
-	}
-
-	fseek(f, 12, SEEK_SET);
-
-	uint32_t fmtPtr = 0;
-	uint32_t fmtLen = 0;
-
-	int32_t bytesRead = 0;
-	while (!feof(f) && bytesRead < filesize-12)
-	{
-		fread(&chunkID, 4, 1, f); if (feof(f)) break;
-		fread(&chunkSize, 4, 1, f); if (feof(f)) break;
-
-		int32_t endOfChunk = (ftell(f) + chunkSize) + (chunkSize & 1);
-		switch (chunkID)
-		{
-			case 0x20746D66: // "fmt "
-			{
-				fmtPtr = ftell(f);
-				fmtLen = chunkSize;
-			}
-			break;
-
-			default: break;
-		}
-
-		bytesRead += (chunkSize + (chunkSize & 1));
-		fseek(f, endOfChunk, SEEK_SET);
-	}
-
-	if (fmtPtr == 0 || fmtLen < 4)
-	{
-		fseek(f, oldPos, SEEK_SET);
-		return false;
-	}
-
-	fseek(f, fmtPtr + 2, SEEK_SET);
-	fread(&numChannels, 2, 1, f);
-
-	fseek(f, oldPos, SEEK_SET);
-	return (numChannels == 2);
+	(void)message;
 }
+
+static int16_t chooseWAVStereo(int16_t type, const char *headline, const char *text, void (*callback)(void))
+{
+	(void)type;
+	(void)headline;
+	(void)text;
+	(void)callback;
+	return STEREO_SAMPLE_CONVERT;
+}
+
+static bool loadWAVFixture(const uint8_t *data, size_t size, bool expectedResult)
+{
+	FILE *f = tmpfile();
+	if (f == NULL) return false;
+	void (*oldLoaderMsgBox)(const char *, ...) = loaderMsgBox;
+	int16_t (*oldLoaderSysReq)(int16_t, const char *, const char *, void (*)(void)) = loaderSysReq;
+	loaderMsgBox = ignoreWAVLoaderMessage;
+	loaderSysReq = chooseWAVStereo;
+	const bool result = fwrite(data, 1, size, f) == size &&
+		fseek(f, 0, SEEK_SET) == 0 && loadWAV(f, (uint32_t)size) == expectedResult;
+	loaderMsgBox = oldLoaderMsgBox;
+	loaderSysReq = oldLoaderSysReq;
+	fclose(f);
+	return result;
+}
+
+bool runWAVLoaderRegressionTests(void)
+{
+	const uint8_t validWAV[] =
+	{
+		'R','I','F','F', 38,0,0,0, 'W','A','V','E',
+		'f','m','t',' ', 16,0,0,0,
+		1,0, 1,0, 0x40,0x1F,0,0, 0x40,0x1F,0,0, 1,0, 8,0,
+		'd','a','t','a', 2,0,0,0, 0,255
+	};
+	bool ok = loadWAVFixture(validWAV, sizeof (validWAV), true) &&
+		tmpSmp.length == 2 && tmpSmp.dataPtrL != NULL &&
+		tmpSmp.dataPtrL[0] == INT8_MIN && tmpSmp.dataPtrL[1] == INT8_MAX &&
+		(tmpSmp.flags & (SAMPLE_16BIT | SAMPLE_STEREO)) == 0;
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	if (!ok) return false;
+
+	const uint8_t stereo24WAV[] =
+	{
+		'R','I','F','F', 48,0,0,0, 'W','A','V','E',
+		'f','m','t',' ', 16,0,0,0,
+		1,0, 2,0, 0x40,0x1F,0,0, 0x80,0xBB,0,0, 6,0, 24,0,
+		'd','a','t','a', 12,0,0,0,
+		0xFF,0xFF,0x7F, 0,0,0, 0,0,0, 0,0,0x80
+	};
+	ok = loadWAVFixture(stereo24WAV, sizeof (stereo24WAV), true) &&
+		tmpSmp.length == 2 &&
+		(tmpSmp.flags & (SAMPLE_16BIT | SAMPLE_STEREO)) == (SAMPLE_16BIT | SAMPLE_STEREO) &&
+		tmpSmp.dataPtrR != NULL &&
+		((int16_t *)tmpSmp.dataPtrL)[0] > 32000 && ((int16_t *)tmpSmp.dataPtrL)[1] == 0 &&
+		((int16_t *)tmpSmp.dataPtrR)[0] == 0 && ((int16_t *)tmpSmp.dataPtrR)[1] < -32000;
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	if (!ok) return false;
+
+	uint8_t truncatedWAV[sizeof (validWAV)];
+	memcpy(truncatedWAV, validWAV, sizeof (truncatedWAV));
+	truncatedWAV[40] = 4; // data chunk declares four bytes but only contains two
+	ok = loadWAVFixture(truncatedWAV, sizeof (truncatedWAV), false);
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	if (!ok) return false;
+
+	uint8_t invalidDepthWAV[sizeof (validWAV)];
+	memcpy(invalidDepthWAV, validWAV, sizeof (invalidDepthWAV));
+	invalidDepthWAV[34] = 0;
+	ok = loadWAVFixture(invalidDepthWAV, sizeof (invalidDepthWAV), false);
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	return ok;
+}
+#endif
