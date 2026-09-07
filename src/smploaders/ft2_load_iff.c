@@ -14,9 +14,19 @@
 #include "../ft2_sysreqs.h"
 #include "../ft2_sample_loader.h"
 
+static bool readExact(FILE *f, void *dst, size_t bytes)
+{
+	return bytes == 0 || fread(dst, 1, bytes, f) == bytes;
+}
+
+static bool seekTo(FILE *f, uint32_t offset, uint32_t filesize)
+{
+	return offset <= filesize && fseek(f, (long)offset, SEEK_SET) == 0;
+}
+
 bool loadIFF(FILE *f, uint32_t filesize)
 {
-	char hdr[4+1];
+	uint8_t fileHeader[12];
 	uint32_t length, volume, loopStart, loopLength, sampleRate;
 	sample_t *s = &tmpSmp;
 
@@ -26,52 +36,69 @@ bool loadIFF(FILE *f, uint32_t filesize)
 		return false;
 	}
 
-	fseek(f, 8, SEEK_SET);
-	fread(hdr, 1, 4, f);
-	hdr[4] = '\0';
-	bool sample16Bit = !strncmp(hdr, "16SV", 4);
+	if (!seekTo(f, 0, filesize) || !readExact(f, fileHeader, sizeof (fileHeader)) ||
+		memcmp(fileHeader, "FORM", 4) != 0 ||
+		(memcmp(&fileHeader[8], "8SVX", 4) != 0 && memcmp(&fileHeader[8], "16SV", 4) != 0))
+		return false;
+	bool sample16Bit = memcmp(&fileHeader[8], "16SV", 4) == 0;
 
 	uint32_t vhdrPtr = 0, vhdrLen = 0;
 	uint32_t bodyPtr = 0, bodyLen = 0;
 	uint32_t namePtr = 0, nameLen = 0;
+	bool bodyConsumesRemainder = false;
 
-	fseek(f, 12, SEEK_SET);
-	while (!feof(f) && (uint32_t)ftell(f) < filesize-12)
+	if (!seekTo(f, 12, filesize))
+		return false;
+	while (true)
 	{
+		const long chunkHeaderPos = ftell(f);
+		if (chunkHeaderPos < 0) return false;
+		if ((uint64_t)chunkHeaderPos + 8 > filesize) break;
+
 		uint32_t blockName, blockSize;
-		fread(&blockName, 4, 1, f); if (feof(f)) break;
-		fread(&blockSize, 4, 1, f); if (feof(f)) break;
+		if (!readExact(f, &blockName, sizeof (blockName)) ||
+			!readExact(f, &blockSize, sizeof (blockSize)))
+			return false;
 
 		blockName = SWAP32(blockName);
 		blockSize = SWAP32(blockSize);
+
+		const long payloadPos = ftell(f);
+		if (payloadPos < 0 || (uint64_t)payloadPos + blockSize + (blockSize & 1u) > filesize)
+			return false;
 
 		switch (blockName)
 		{
 			case 0x56484452: // VHDR
 			{
-				vhdrPtr = ftell(f);
+				vhdrPtr = (uint32_t)payloadPos;
 				vhdrLen = blockSize;
 			}
 			break;
 
 			case 0x4E414D45: // NAME
 			{
-				namePtr = ftell(f);
+				namePtr = (uint32_t)payloadPos;
 				nameLen = blockSize;
 			}
 			break;
 
 			case 0x424F4459: // BODY
 			{
-				bodyPtr = ftell(f);
+				bodyPtr = (uint32_t)payloadPos;
 				bodyLen = blockSize;
+				bodyConsumesRemainder = blockSize == 0;
 			}
 			break;
 
 			default: break;
 		}
 
-		fseek(f, blockSize + (blockSize & 1), SEEK_CUR);
+		if (bodyConsumesRemainder)
+			break;
+		const uint64_t paddedBlockSize = (uint64_t)blockSize + (blockSize & 1u);
+		if (fseek(f, (long)paddedBlockSize, SEEK_CUR) != 0)
+			return false;
 	}
 
 	if (vhdrPtr == 0 || vhdrLen < 20 || bodyPtr == 0)
@@ -84,23 +111,30 @@ bool loadIFF(FILE *f, uint32_t filesize)
 	if (bodyLen == 0)
 		bodyLen = filesize - bodyPtr;
 
-	if (bodyPtr+bodyLen > (uint32_t)filesize)
+	if (bodyLen > filesize-bodyPtr)
 		bodyLen = filesize - bodyPtr;
 
-	fseek(f, vhdrPtr, SEEK_SET);
-	fread(&loopStart,  4, 1, f); loopStart = SWAP32(loopStart);
-	fread(&loopLength, 4, 1, f); loopLength = SWAP32(loopLength);
-	fseek(f, 4, SEEK_CUR);
-	fread(&sampleRate, 2, 1, f); sampleRate = SWAP16(sampleRate);
-	fseek(f, 1, SEEK_CUR);
+	uint8_t skipped[5], sampleType;
+	uint16_t sampleRate16;
+	if (!seekTo(f, vhdrPtr, filesize) ||
+		!readExact(f, &loopStart, sizeof (loopStart)) ||
+		!readExact(f, &loopLength, sizeof (loopLength)) ||
+		!readExact(f, skipped, 4) ||
+		!readExact(f, &sampleRate16, sizeof (sampleRate16)) ||
+		!readExact(f, skipped, 1) || !readExact(f, &sampleType, sizeof (sampleType)))
+		return false;
+	loopStart = SWAP32(loopStart);
+	loopLength = SWAP32(loopLength);
+	sampleRate = SWAP16(sampleRate16);
 
-	if (fgetc(f) != 0) // sample type
+	if (sampleType != 0) // sample type
 	{
 		loaderMsgBox("Error loading sample: The sample is not supported!");
 		return false;
 	}
 
-	fread(&volume, 4, 1, f); volume = SWAP32(volume);
+	if (!readExact(f, &volume, sizeof (volume))) return false;
+	volume = SWAP32(volume);
 	if (volume > 65535)
 		volume = 65535;
 
@@ -114,25 +148,26 @@ bool loadIFF(FILE *f, uint32_t filesize)
 		loopLength >>= 1;
 	}
 
-	s->length = length;
-	if (s->length > MAX_SAMPLE_LEN)
-		s->length = MAX_SAMPLE_LEN;
+	s->length = (int32_t)MIN(length, MAX_SAMPLE_LEN);
 
-	if (!allocateSmpData(s, length, sample16Bit, false))
+	if (!allocateSmpData(s, s->length, sample16Bit, false))
 	{
 		loaderMsgBox("Not enough memory!");
 		return false;
 	}
 
-	fseek(f, bodyPtr, SEEK_SET);
-	if (fread(s->dataPtr, length << sample16Bit, 1, f) != 1)
+	const size_t bytesToRead = (size_t)s->length << sample16Bit;
+	if (!seekTo(f, bodyPtr, filesize) || !readExact(f, s->dataPtr, bytesToRead))
 	{
 		loaderMsgBox("General I/O error during loading! Is the file in use?");
 		return false;
 	}
 
-	s->loopStart = loopStart;
-	s->loopLength = loopLength;
+	if (loopStart <= (uint32_t)s->length && loopLength <= (uint32_t)s->length-loopStart)
+	{
+		s->loopStart = (int32_t)loopStart;
+		s->loopLength = (int32_t)loopLength;
+	}
 
 	if (s->loopLength > 0)
 		s->flags |= LOOP_FWD;
@@ -148,16 +183,49 @@ bool loadIFF(FILE *f, uint32_t filesize)
 	// set name
 	if (namePtr != 0 && nameLen > 0)
 	{
-		fseek(f, namePtr, SEEK_SET);
-
 		if (nameLen > 22)
 			nameLen = 22;
 
-		fread(s->name, 1, nameLen, f);
-		s->name[22] = '\0';
+		if (!seekTo(f, namePtr, filesize) || !readExact(f, s->name, nameLen))
+			return false;
+		s->name[nameLen] = '\0';
 
 		smpFilenameSet = true;
 	}
 
 	return true;
 }
+
+#ifdef FT2_STABILITY_TESTS
+bool runIFFLoaderRegressionTests(void)
+{
+	const uint8_t validIFF[] =
+	{
+		'F','O','R','M', 0,0,0,42, '8','S','V','X',
+		'V','H','D','R', 0,0,0,20,
+		0,0,0,0, 0,0,0,0, 0,0,0,0, 0x41,0x56, 1,0, 0,1,0,0,
+		'B','O','D','Y', 0,0,0,1, 0x7F,0
+	};
+	FILE *f = tmpfile();
+	if (f == NULL) return false;
+	bool ok = fwrite(validIFF, 1, sizeof (validIFF), f) == sizeof (validIFF) &&
+		fseek(f, 0, SEEK_SET) == 0 && loadIFF(f, sizeof (validIFF)) &&
+		tmpSmp.length == 1 && tmpSmp.dataPtr[0] == 0x7F;
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	fclose(f);
+	if (!ok) return false;
+
+	uint8_t truncatedIFF[sizeof (validIFF)];
+	memcpy(truncatedIFF, validIFF, sizeof (truncatedIFF));
+	truncatedIFF[47] = 2; // BODY declares two bytes, but only one data byte remains before padding
+	f = tmpfile();
+	if (f == NULL) return false;
+	ok = fwrite(truncatedIFF, 1, sizeof (truncatedIFF)-1, f) == sizeof (truncatedIFF)-1 &&
+		fseek(f, 0, SEEK_SET) == 0 && !loadIFF(f, sizeof (truncatedIFF)-1);
+	freeSmpData(&tmpSmp);
+	memset(&tmpSmp, 0, sizeof (tmpSmp));
+	fclose(f);
+	return ok;
+}
+#endif
