@@ -38,6 +38,7 @@ master gain/export discrepancies and the stateless-gainer bypass.
 - Render Settings treats Escape and every non-OK close as cancellation, bounds sample slots and supported rates, and restores the WAV screen's complete radio-button definitions. Option transitions are regression tested.
 - Removed dormant Dexed plugin-host, ZIP, and unimplemented tuning shims, the unused envelope UI, and generated OsTIrus placeholder aliases. Debug event logging is compile-time opt-in.
 - Legacy S3M import now validates signed header counts, file offsets, packed event boundaries, and decoded stereo/16-bit sample sizes before reading or allocating. DIGI and MOD imports require complete pattern events and sample payloads instead of decoding stale bytes or padding truncated files.
+- BEM import now validates every metadata, instrument, track-table, track, and sample read. Track storage is sized from validated pattern references, compressed opcodes decode from bounded buffers, repeat runs cannot overrun row storage, and temporary decoded tracks are released on success and failure.
 
 ## Validation
 
@@ -77,7 +78,7 @@ OsTIrus measurements without firmware.
 - Finish the realtime ownership audit: MIDI dispatch now follows the application input loop (roughly 60 Hz), adding frame-dependent latency compared with direct device-thread dispatch. Measure end-to-end latency and move audition scheduling to an audio-owned command path before making low-latency performance claims. Dexed automation writers still acquire a mutex, and other engines/control paths require review.
 - Verify physical MIDI unplug/reconnect on actual devices. Explicit device close releases owned notes, but silent hardware disappearance without a close notification is not automatically detected.
 - Validate MIDI sustain/disconnect, shared-instrument voice isolation, dense arrangements, time-dependent effects, and complete DXM/DXI project round trips. Include interrupted/failed saves and stereo sample round trips on real projects. The existing shared-instance/channel mapping is documented in the mixer contract.
-- Fuzz and finish short-read/error propagation in the legacy BEM, IT, XM, AIFF, BRR, IFF, and WAV importers before accepting untrusted files as a hardened production claim. DXM has bounded-reader coverage; S3M, DIGI, and MOD now reject truncated event/sample payloads, while the remaining older importers retain unchecked-read paths.
+- Fuzz and finish short-read/error propagation in the legacy IT, XM, AIFF, BRR, IFF, and WAV importers before accepting untrusted files as a hardened production claim. DXM has bounded-reader coverage; S3M, DIGI, MOD, and BEM now reject truncated or structurally invalid payloads, while the remaining older importers retain unchecked-read paths.
 - Perform listening comparisons with representative user projects. Configuration volume and previously bypassed gainer/export controls now work, so old projects relying on those omissions may sound different; see the compatibility notes.
 - Complete asset/preset provenance review and native target/device validation before publishing. No repository upload, history rewrite, or release tag has been performed.
 
