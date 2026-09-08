@@ -2,13 +2,14 @@
 set -Eeuo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
-source "${script_dir}/linux-build-common.sh"
+source "${script_dir}/build-common.sh"
 
 repo_root=$(ft2_repo_root)
 jobs="${FT2_JOBS:-$(ft2_default_jobs)}"
 fresh=0
 strict=0
 run_native=1
+run_designer=1
 run_windows=1
 run_macos=1
 run_raspi=1
@@ -18,13 +19,15 @@ usage() {
     cat <<'EOF'
 Usage: ./scripts/test-target-builds.sh [options]
 
-Runs the native Linux Release/Debug/ASan matrix plus configured target build smoke tests.
-Unavailable cross-toolchains are reported as skips unless --strict is used.
+Runs the native Linux Release/Debug/ASan matrix, the GUI designer build/tests,
+and configured target build smoke tests. Unavailable cross-toolchains return the
+standard skip status (77) unless --strict is used. Build failures always fail.
 
 Options:
   --fresh              Refresh selected build directories.
   --strict             Treat unavailable target toolchains as failures.
   --no-native          Skip native Linux matrix.
+  --no-designer        Skip the native GUI designer build/tests.
   --no-windows         Skip Windows MinGW target.
   --no-macos           Skip macOS target.
   --no-raspi           Skip Raspberry Pi ALSA target.
@@ -39,6 +42,7 @@ while [ "$#" -gt 0 ]; do
         --fresh) fresh=1 ;;
         --strict) strict=1 ;;
         --no-native) run_native=0 ;;
+        --no-designer) run_designer=0 ;;
         --no-windows) run_windows=0 ;;
         --no-macos) run_macos=0 ;;
         --no-raspi) run_raspi=0 ;;
@@ -77,12 +81,12 @@ run_or_skip() {
         local status=$?
     fi
 
-    if [ "$strict" -eq 1 ]; then
-        return "$status"
+    if [ "$status" -eq 77 ] && [ "$strict" -eq 0 ]; then
+        printf 'SKIP: %s is unavailable on this host.\n' "$name"
+        return 0
     fi
 
-    printf 'SKIP/FAIL tolerated for %s in non-strict mode (exit %d).\n' "$name" "$status"
-    return 0
+    return "$status"
 }
 
 fresh_arg=()
@@ -92,17 +96,22 @@ if [ "$run_native" -eq 1 ]; then
     "${repo_root}/scripts/test-linux.sh" "${fresh_arg[@]}" --build-root "$build_root/native" -j "$jobs"
 fi
 
+if [ "$run_designer" -eq 1 ]; then
+    "${repo_root}/scripts/build-gui-designer.sh" "${fresh_arg[@]}" \
+        --build-dir "$build_root/gui-designer" --test -j "$jobs"
+fi
+
 if [ "$run_windows" -eq 1 ]; then
     run_or_skip "Windows MinGW build smoke" \
-        "${repo_root}/scripts/build-windows.sh" "${fresh_arg[@]}" --build-dir "$build_root/windows-mingw64" -j "$jobs"
+        "${repo_root}/scripts/build-windows.sh" "${fresh_arg[@]}" --with-designer --build-dir "$build_root/windows-mingw64" -j "$jobs"
 fi
 
 if [ "$run_macos" -eq 1 ]; then
     run_or_skip "macOS build smoke" \
-        "${repo_root}/scripts/build-macos.sh" "${fresh_arg[@]}" --build-dir "$build_root/macos" -j "$jobs"
+        "${repo_root}/scripts/build-macos.sh" "${fresh_arg[@]}" --with-designer --build-dir "$build_root/macos" -j "$jobs"
 fi
 
 if [ "$run_raspi" -eq 1 ]; then
     run_or_skip "Raspberry Pi ALSA build smoke" \
-        "${repo_root}/scripts/build-raspi-alsa.sh" "${fresh_arg[@]}" --build-dir "$build_root/raspi-armhf" -j "$jobs"
+        "${repo_root}/scripts/build-raspi-alsa.sh" "${fresh_arg[@]}" --with-designer --build-dir "$build_root/raspi-armhf" -j "$jobs"
 fi

@@ -10,10 +10,20 @@ On Linux, install CMake, a C/C++17 toolchain, SDL2 development files, and ALSA d
 
 ```sh
 ./build-linux.sh --test -j 4
+./build-linux.sh --with-designer --test -j 4
 ./scripts/test-linux.sh -j 4
 ```
 
-The executable is `build-linux/bin/ft2-dxm`. See [build instructions](docs/build.md) for dependencies, Windows/macOS/Raspberry Pi wrappers, optional UI features, and tests. Cross-compilation alone does not verify native audio-device behavior.
+The executables are `build-linux/bin/ft2-dxm` and, when requested,
+`build-linux/bin/ft2_gui_designer`. The designer also has a standalone wrapper:
+
+```sh
+./scripts/build-gui-designer.sh --fresh --test -j 4
+```
+
+See [build instructions](docs/build.md) for dependencies,
+Windows/macOS/Raspberry Pi wrappers, optional UI features, and tests.
+Cross-compilation alone does not verify native audio-device behavior.
 
 ## External Virus firmware
 

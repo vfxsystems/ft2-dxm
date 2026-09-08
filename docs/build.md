@@ -20,9 +20,13 @@ On a Linux host with the native dependencies installed:
 Build the GUI designer after schema/widget changes:
 
 ```sh
-cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
-cmake --build build-gui-designer --parallel 4
-ctest --test-dir build-gui-designer --output-on-failure
+./scripts/build-gui-designer.sh --fresh --test -j 4
+```
+
+Build FT2-DXM and the designer through one platform configuration:
+
+```sh
+./build-linux.sh --fresh --with-designer --test -j 4
 ```
 
 The designer build copies its tracked `.gui` layouts into
@@ -205,8 +209,7 @@ self-test coverage.
 The designer mirrors the shared schema and asset registry, so rebuild it whenever `src/shared/ft2_ui_schema.h`, `src/shared/ft2_ui_assets.*`, or designer source files change:
 
 ```sh
-cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
-cmake --build build-gui-designer --parallel 4
+./scripts/build-gui-designer.sh --fresh --test -j 4
 ```
 
 Designer UI changes should also be checked with the same command after editing
@@ -214,11 +217,19 @@ Designer UI changes should also be checked with the same command after editing
 preview uses clipped/vector-aligned draw helpers in `palette.*` so it stays in
 step with the engine renderer contract in `src/ft2_ui_render.*`.
 
-Legacy Makefile builds are still available:
+The compatibility Makefile and compile-test entry point delegate to the same
+wrapper:
 
 ```sh
-make -C ft2_gui_designer
+make -C ft2_gui_designer test
+./ft2_gui_designer/test_compile.sh
 ```
+
+All build wrappers accept `--debug`, `--release`, `--build-dir`, `--fresh`,
+`--clean-first`, `--verbose`, `--test`, `--install`, `--deps`, and parallel job
+controls. Set `FT2_CMAKE_GENERATOR` before configuring a new build tree to select
+a generator. FT2-DXM platform wrappers additionally accept `--with-designer` so
+both programs use the same compiler, target SDK, SDL2 package, and OpenGL stack.
 
 Bitmap and skin workflow:
 
@@ -247,7 +258,7 @@ Build:
 
 ```sh
 SDL2_DIR=/path/to/mingw-sdl2/lib/cmake/SDL2 \
-  ./scripts/build-windows.sh --fresh -j 4
+  ./scripts/build-windows.sh --fresh --with-designer -j 4
 ```
 
 If the SDL2 package is discoverable through a prefix:
@@ -269,7 +280,15 @@ Run CTest for the Windows binary:
 ./scripts/build-windows.sh --test
 ```
 
-On non-Windows hosts, `--test` requires `wine`. The output binary is `build-windows-mingw64/bin/ft2-dxm.exe` unless `--build-dir` or `FT2_WINDOWS_BUILD_DIR` is used.
+On non-Windows hosts, `--test` requires `wine`; the wrapper registers it as the
+CMake cross-compiling emulator before configuration. Outputs are
+`build-windows-mingw64/bin/ft2-dxm.exe` and, with `--with-designer`,
+`build-windows-mingw64/bin/ft2_gui_designer.exe`, unless the build directory is
+overridden.
+
+The CMake build stages `SDL2.dll` beside each Windows executable when the SDL2
+package exposes its runtime location. Set `SDL2_DLL=/path/to/SDL2.dll` if the
+package only exposes an import library.
 
 ## macOS
 
@@ -290,7 +309,7 @@ Native macOS requirements:
 Native build:
 
 ```sh
-./scripts/build-macos.sh --fresh -j 4
+./scripts/build-macos.sh --fresh --with-designer -j 4
 ```
 
 Universal x86_64 + arm64 build on native macOS:
@@ -328,7 +347,7 @@ sudo apt install build-essential cmake libsdl2-dev libasound2-dev
 Native Raspberry Pi build and test:
 
 ```sh
-./scripts/build-raspi-alsa.sh --native --fresh --test -j 4
+./scripts/build-raspi-alsa.sh --native --fresh --with-designer --test -j 4
 ```
 
 Linux-hosted armhf cross-build dependencies:
@@ -342,7 +361,7 @@ Cross-build with a Raspberry Pi sysroot containing SDL2 and ALSA development fil
 ```sh
 RASPI_SYSROOT=/opt/raspi-sysroot \
 SDL2_DIR=/opt/raspi-sysroot/usr/lib/arm-linux-gnueabihf/cmake/SDL2 \
-  ./scripts/build-raspi-alsa.sh --fresh -j 4
+  ./scripts/build-raspi-alsa.sh --fresh --with-designer -j 4
 ```
 
 Use a custom cross compiler prefix:
@@ -367,6 +386,11 @@ Treat missing cross-toolchains as failures:
 ./scripts/test-target-builds.sh --strict --fresh -j 4
 ```
 
+The sweep builds and tests the native GUI designer and requests both FT2-DXM
+and the designer from each available cross-toolchain. Exit status 77 means a
+toolchain is unavailable and is skipped in normal mode. Once a toolchain starts,
+configuration or compilation failures fail the sweep even without `--strict`.
+
 Skip selected targets:
 
 ```sh
@@ -378,8 +402,10 @@ Skip selected targets:
 The scripts are preferred, but direct CMake still works:
 
 ```sh
-cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release
-cmake --build build-linux --target ft2-dxm --parallel 4
+cmake -S . -B build-linux \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DFT2_BUILD_GUI_DESIGNER=ON
+cmake --build build-linux --target ft2-dxm ft2_gui_designer --parallel 4
 ctest --test-dir build-linux --output-on-failure
 ```
 
@@ -413,12 +439,16 @@ Generated build directories and outputs should stay untracked. The repository ig
 - `release/other/ft2-dxm`
 
 Use `--fresh` when changing toolchains, moving the checkout, or switching between incompatible CMake configurations.
+The wrappers preserve a readable, non-empty `bin/OsTIrus/rom.bin` across build
+directory refreshes; the ROM remains ignored and is never copied into source or
+committed.
 
 ## Troubleshooting
 
 `CMakeCache.txt was created in a different directory`:
 
-Run with `--fresh`, or let `./build-linux.sh` refresh a stale in-repository build directory.
+Run with `--fresh`, or let any supported build wrapper refresh a stale
+in-repository build directory.
 
 `SDL2Config.cmake` or SDL2 headers are not found:
 

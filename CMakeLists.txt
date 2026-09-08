@@ -19,6 +19,7 @@ option(EXTERNAL_LIBFLAC "use external(system) flac library" OFF)
 option(FT2_ENABLE_VENDOR_TESTS "Enable tests registered by bundled third-party subprojects" OFF)
 option(FT2_ENABLE_VECTOR_UI "Enable selectable high-DPI/vector UI renderer backend contract" ON)
 option(FT2_ENABLE_TTF "Enable optional SDL_ttf-backed scalable UI font rendering" OFF)
+option(FT2_BUILD_GUI_DESIGNER "Build the FT2 GUI Designer alongside ft2-dxm" OFF)
 
 # ----- Dexed FM synth integration (optional) -----
 option(WITH_DEXED "Build with embedded Dexed FM synth" ON)
@@ -116,6 +117,9 @@ endif()
 
 target_link_libraries(ft2-dxm
     PRIVATE Threads::Threads ${SDL2_LIBRARIES})
+
+include(cmake/ft2_sdl2_runtime.cmake)
+ft2_stage_sdl2_runtime(ft2-dxm)
 
 if(FT2_ENABLE_TTF)
     find_package(PkgConfig REQUIRED)
@@ -329,4 +333,8 @@ if(BUILD_TESTING)
             ENVIRONMENT "FT2_UI_BACKEND=vector;FT2_UI_THEME=renoise")
     endif()
     add_test(NAME ft2_v2_stress COMMAND ft2-dxm --v2-stress-test)
+endif()
+
+if(FT2_BUILD_GUI_DESIGNER)
+    add_subdirectory(ft2_gui_designer)
 endif()

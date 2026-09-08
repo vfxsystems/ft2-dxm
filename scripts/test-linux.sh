@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
-source "${script_dir}/linux-build-common.sh"
+source "${script_dir}/build-common.sh"
 
 repo_root=$(ft2_repo_root)
 build_root="${FT2_TEST_BUILD_ROOT:-$repo_root}"
@@ -114,14 +114,20 @@ run_phase() {
     local name=$1
     local build_dir=$2
     local build_path="${build_root}/${build_dir}"
+    local generator=
+    local -a configure_cmd=()
     shift 2
 
     printf '\n== %s ==\n' "$name"
-    if [ "$fresh" -eq 1 ]; then
-        rm -rf -- "$build_path"
+    ft2_prepare_build_dir "$repo_root" "$build_path" "$fresh"
+
+    configure_cmd=(cmake -S "$repo_root" -B "$build_path" -DBUILD_TESTING=ON "$@")
+    generator=$(ft2_select_generator "$build_path")
+    if [ -n "$generator" ]; then
+        configure_cmd+=(-G "$generator")
     fi
 
-    cmake -S "$repo_root" -B "$build_path" "$@"
+    "${configure_cmd[@]}"
     cmake --build "$build_path" --target ft2-dxm --parallel "$jobs"
     ctest --test-dir "$build_path" --output-on-failure --parallel "$jobs" "${ctest_args[@]}"
     ft2_report_ostirus_rom "$build_path/bin"

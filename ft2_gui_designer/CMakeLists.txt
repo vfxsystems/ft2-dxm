@@ -40,66 +40,48 @@ target_include_directories(ft2_gui_designer PRIVATE
     "${REPO_ROOT}/src"
 )
 
-if (WIN32)
-    set(SDL2_ROOT "")
-    if (EXISTS "${REPO_ROOT}/src/vs2019_project/ft2-clone/sdl")
-        set(SDL2_ROOT "${REPO_ROOT}/src/vs2019_project/ft2-clone/sdl")
-    elseif (EXISTS "${REPO_ROOT}/vs2019_project/ft2-clone/sdl")
-        set(SDL2_ROOT "${REPO_ROOT}/vs2019_project/ft2-clone/sdl")
-    endif()
+find_package(SDL2 REQUIRED)
+find_package(OpenGL REQUIRED)
 
-    if (NOT SDL2_ROOT)
-        message(FATAL_ERROR "Could not locate bundled SDL2 for ft2_gui_designer Windows build.")
-    endif()
-
-    set(SDL2_INCLUDE_DIR "${SDL2_ROOT}/include")
-    set(SDL2_LIB_DIR "${SDL2_ROOT}/lib64")
-
-    find_library(SDL2_LIBRARY
-        NAMES SDL2
-        PATHS "${SDL2_LIB_DIR}" "${SDL2_ROOT}/lib"
-        NO_DEFAULT_PATH
-        REQUIRED)
-
-    find_library(SDL2MAIN_LIBRARY
-        NAMES SDL2main
-        PATHS "${SDL2_LIB_DIR}" "${SDL2_ROOT}/lib"
-        NO_DEFAULT_PATH
-        REQUIRED)
-
-    add_library(SDL2::SDL2 UNKNOWN IMPORTED)
-    set_target_properties(SDL2::SDL2 PROPERTIES
-        IMPORTED_LOCATION "${SDL2_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_INCLUDE_DIR}")
-
-    add_library(SDL2::SDL2main UNKNOWN IMPORTED)
-    set_target_properties(SDL2::SDL2main PROPERTIES
-        IMPORTED_LOCATION "${SDL2MAIN_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_INCLUDE_DIR}")
-
-    target_link_libraries(ft2_gui_designer PRIVATE SDL2::SDL2main SDL2::SDL2 opengl32 glu32)
-
-    set(SDL2_RUNTIME_DLL "")
-    if (EXISTS "${REPO_ROOT}/src/release/win64/SDL2.dll")
-        set(SDL2_RUNTIME_DLL "${REPO_ROOT}/src/release/win64/SDL2.dll")
-    elseif (EXISTS "${REPO_ROOT}/src/release/other/Release/SDL2.dll")
-        set(SDL2_RUNTIME_DLL "${REPO_ROOT}/src/release/other/Release/SDL2.dll")
-    elseif (EXISTS "${REPO_ROOT}/release/other/Release/SDL2.dll")
-        set(SDL2_RUNTIME_DLL "${REPO_ROOT}/release/other/Release/SDL2.dll")
-    endif()
-
-    if (SDL2_RUNTIME_DLL)
-        add_custom_command(TARGET ft2_gui_designer POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${SDL2_RUNTIME_DLL}"
-                    "$<TARGET_FILE_DIR:ft2_gui_designer>/SDL2.dll"
-            VERBATIM)
-    endif()
-else()
-    find_package(SDL2 REQUIRED)
-    target_include_directories(ft2_gui_designer SYSTEM PRIVATE ${SDL2_INCLUDE_DIRS})
-    target_link_libraries(ft2_gui_designer PRIVATE ${SDL2_LIBRARIES} GL GLU m)
+set(DESIGNER_SDL_MAIN_LIBRARY)
+if (WIN32 AND TARGET SDL2::SDL2main)
+    set(DESIGNER_SDL_MAIN_LIBRARY SDL2::SDL2main)
 endif()
+set(DESIGNER_SDL_LIBRARIES)
+if (TARGET SDL2::SDL2)
+    list(APPEND DESIGNER_SDL_LIBRARIES SDL2::SDL2)
+elseif (SDL2_LIBRARIES)
+    list(APPEND DESIGNER_SDL_LIBRARIES ${SDL2_LIBRARIES})
+else()
+    message(FATAL_ERROR "SDL2 was found but did not provide SDL2::SDL2 or SDL2_LIBRARIES")
+endif()
+
+if (SDL2_INCLUDE_DIRS)
+    target_include_directories(ft2_gui_designer SYSTEM PRIVATE ${SDL2_INCLUDE_DIRS})
+endif()
+
+set(DESIGNER_OPENGL_LIBRARIES OpenGL::GL)
+if (TARGET OpenGL::GLU)
+    list(APPEND DESIGNER_OPENGL_LIBRARIES OpenGL::GLU)
+elseif (OPENGL_glu_LIBRARY)
+    list(APPEND DESIGNER_OPENGL_LIBRARIES ${OPENGL_glu_LIBRARY})
+else()
+    message(FATAL_ERROR "FT2 GUI Designer requires GLU")
+endif()
+
+target_link_libraries(ft2_gui_designer PRIVATE
+    ${DESIGNER_SDL_MAIN_LIBRARY}
+    ${DESIGNER_SDL_LIBRARIES}
+    ${DESIGNER_OPENGL_LIBRARIES})
+if (UNIX AND NOT APPLE)
+    target_link_libraries(ft2_gui_designer PRIVATE m)
+endif()
+
+include("${REPO_ROOT}/cmake/ft2_sdl2_runtime.cmake")
+ft2_stage_sdl2_runtime(ft2_gui_designer)
+
+install(TARGETS ft2_gui_designer RUNTIME DESTINATION bin)
+install(DIRECTORY "${DESIGNER_ROOT}/layouts" DESTINATION bin)
 
 include(CTest)
 if (BUILD_TESTING)
@@ -114,11 +96,12 @@ if (BUILD_TESTING)
     target_include_directories(ft2_gui_bitmap_tests PRIVATE
         "${DESIGNER_ROOT}"
         "${REPO_ROOT}/src")
-    if (WIN32)
-        target_link_libraries(ft2_gui_bitmap_tests PRIVATE SDL2::SDL2)
-    else()
+    if (SDL2_INCLUDE_DIRS)
         target_include_directories(ft2_gui_bitmap_tests SYSTEM PRIVATE ${SDL2_INCLUDE_DIRS})
-        target_link_libraries(ft2_gui_bitmap_tests PRIVATE ${SDL2_LIBRARIES} m)
+    endif()
+    target_link_libraries(ft2_gui_bitmap_tests PRIVATE ${DESIGNER_SDL_LIBRARIES})
+    if (UNIX AND NOT APPLE)
+        target_link_libraries(ft2_gui_bitmap_tests PRIVATE m)
     endif()
 
     add_test(NAME gui_designer_layout_validation

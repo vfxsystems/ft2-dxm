@@ -20,12 +20,18 @@ FT2 GUI Designer is a layout editor that mirrors FastTracker 2 widget behavior a
 From the repository root:
 
 ```bash
-make -C ft2_gui_designer
+./scripts/build-gui-designer.sh --test -j 4
 ./build-gui-designer/ft2_gui_designer
 ```
 
-The Makefile is a convenience wrapper around the same out-of-source CMake build.
-The equivalent direct commands are:
+The compatibility Makefile delegates to that wrapper and keeps the same
+out-of-source layout:
+
+```bash
+make -C ft2_gui_designer test
+```
+
+The equivalent direct CMake commands are:
 
 ```bash
 cmake -S ft2_gui_designer -B build-gui-designer -DCMAKE_BUILD_TYPE=Release
